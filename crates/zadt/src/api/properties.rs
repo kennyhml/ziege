@@ -1,10 +1,12 @@
+use std::fmt;
+
 use http::{Method, StatusCode, header};
 
 use crate::{
     client::{Client, Ready},
     compatibility::MediaVersionNegotiation,
     error::{OperationError, ResponseError},
-    objects::{ObjectProperties, ObjectRef, ObjectVersion},
+    objects::{ObjectProperties, ObjectRef, ObjectVersion, RuntimeObjectProperties},
     operation::{IfNoneMatch, Operation, OperationResponse, Stateless},
     protocol::{AdtRequest, EntityTag},
     target::CollectionTarget,
@@ -115,25 +117,73 @@ where
         };
 
         let etag = response.entity_tag();
-        let properties = self
-            .resource
-            .parse(media_version, response.into_body(), etag)?;
+        let body = response.into_body();
+        let properties = T::parse(&self.resource, media_version, &body, etag)?;
         Ok(properties)
     }
 }
 
-impl<T: ObjectProperties> ObjectRef<T> {
-    fn parse(
-        &self,
-        version: T::MediaVersion,
-        body: Vec<u8>,
-        etag: Option<EntityTag>,
-    ) -> Result<T::Properties, ResponseError> {
-        T::parse(self, version, body, etag)
-    }
-
+impl<T> ObjectRef<T>
+where
+    T: ObjectProperties,
+{
     /// Creates a property query for this object
     pub fn query(&self) -> ObjectPropertiesQuery<T> {
         ObjectPropertiesQuery::new(self.clone())
+    }
+}
+
+/// Fetches one modeled repository object's properties as JSON.
+pub struct JsonObjectPropertiesQuery {
+    resource: ObjectRef,
+    version: Option<ObjectVersion>,
+    properties: &'static dyn RuntimeObjectProperties,
+}
+
+impl JsonObjectPropertiesQuery {
+    pub(crate) fn new(
+        resource: ObjectRef,
+        properties: &'static dyn RuntimeObjectProperties,
+    ) -> Self {
+        Self {
+            resource,
+            version: None,
+            properties,
+        }
+    }
+
+    /// Selects the repository-object version to request.
+    pub fn version(mut self, version: ObjectVersion) -> Self {
+        self.version = Some(version);
+        self
+    }
+
+    /// Makes this query conditional on the supplied properties ETag.
+    pub fn if_none_match(self, etag: EntityTag) -> IfNoneMatch<Self> {
+        IfNoneMatch::new(self, etag)
+    }
+}
+
+impl fmt::Debug for JsonObjectPropertiesQuery {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("JsonObjectPropertiesQuery")
+            .field("resource", &self.resource)
+            .field("version", &self.version)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Operation<Ready> for JsonObjectPropertiesQuery {
+    type Response = serde_json::Value;
+    type Kind = Stateless;
+
+    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
+        self.properties
+            .request(&self.resource, self.version, client)
+    }
+
+    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+        self.properties.decode(&self.resource, response)
     }
 }

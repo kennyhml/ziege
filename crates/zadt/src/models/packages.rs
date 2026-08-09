@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     AdtUri, EntityTag, GlobalWorkbenchType, MediaVersionNegotiation, ObjectError, ObjectRef,
@@ -32,7 +32,8 @@ impl MediaVersionNegotiation for PackagePropertiesVersion {
 }
 
 /// Package properties tagged with the media-type version returned by ADT.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "mediaVersion", content = "properties", rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum PackageProperties {
     /// A V1 package-properties response.
@@ -78,7 +79,8 @@ impl PackageProperties {
 pub type PackagePropertiesV1 = PackagePropertiesV2;
 
 /// Properties of an ABAP package.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PackagePropertiesV2 {
     /// The package resource that was fetched.
     pub reference: ObjectRef<Package>,
@@ -215,7 +217,8 @@ impl PackagePropertiesV2 {
 }
 
 /// Package behavior and editor capability flags.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PackageAttributes {
     /// The semantic package type, such as `development`.
     pub package_type: String,
@@ -246,7 +249,8 @@ pub struct PackageAttributes {
 }
 
 /// A named package assignment with editor visibility and mutability flags.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PackageAssignment {
     /// The assigned value.
     pub name: String,
@@ -259,7 +263,8 @@ pub struct PackageAssignment {
 }
 
 /// Software-component and transport-layer assignments.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PackageTransport {
     /// The package's software component.
     pub software_component: PackageAssignment,
@@ -268,7 +273,8 @@ pub struct PackageTransport {
 }
 
 /// A typed package reference and its optional short description.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PackageReference {
     /// The typed package resource.
     pub reference: ObjectRef<Package>,
@@ -277,7 +283,8 @@ pub struct PackageReference {
 }
 
 /// A package-interface reference advertised through a package representation.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PackageInterfaceReference {
     /// The package-interface name.
     pub name: String,
@@ -290,7 +297,8 @@ pub struct PackageInterfaceReference {
 }
 
 /// A package-interface use access and the package that owns it, when advertised.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PackageUseAccess {
     /// The backend-defined use-access severity.
     pub severity: String,

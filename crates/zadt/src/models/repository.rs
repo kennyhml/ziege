@@ -3,8 +3,8 @@ use std::{borrow::Cow, fmt};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
-    AdtUri, GlobalWorkbenchType, InvalidWorkbenchType, ObjectError, ObjectRef, ObjectType, Package,
-    RepositoryError,
+    AdtUri, GlobalWorkbenchType, ObjectError, ObjectRef, ObjectType, Package, RepositoryError,
+    RepositoryObject,
     resource::{AdvertisedLink, Relations},
 };
 
@@ -69,53 +69,6 @@ impl Serialize for RepositoryFacet {
 }
 
 impl<'de> Deserialize<'de> for RepositoryFacet {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        String::deserialize(deserializer).map(Self::from)
-    }
-}
-
-/// An object type emitted by the repository information system.
-///
-/// RIS may return either a global Workbench type such as `CLAS/OC` or a
-/// four-character alias such as `AUTH`. The wire value is therefore preserved
-/// instead of being forced into [`GlobalWorkbenchType`].
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct RepositoryObjectType(String);
-
-impl RepositoryObjectType {
-    /// Returns the exact object type emitted by RIS.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    /// Parses this value as a global Workbench type when it has that form.
-    pub fn global_workbench_type(&self) -> Result<GlobalWorkbenchType, InvalidWorkbenchType> {
-        self.0.parse()
-    }
-}
-
-impl From<&str> for RepositoryObjectType {
-    fn from(value: &str) -> Self {
-        Self(value.to_owned())
-    }
-}
-
-impl From<String> for RepositoryObjectType {
-    fn from(value: String) -> Self {
-        Self(value)
-    }
-}
-
-impl fmt::Display for RepositoryObjectType {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for RepositoryObjectType {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -252,7 +205,7 @@ pub struct RepositoryObjectEntry {
     /// The object version when the query requested version information.
     pub version: Option<String>,
     pub package: String,
-    pub object_type: RepositoryObjectType,
+    pub object_type: GlobalWorkbenchType,
     /// A validated, type-erased reference to the ADT object resource.
     pub reference: ObjectRef,
     /// The corresponding virtual Workbench URI, when supplied by SAP.
@@ -274,10 +227,10 @@ impl RepositoryObjectEntry {
     /// The conversion verifies the exact Workbench type and preserves the URI
     /// advertised by RIS rather than reconstructing it through discovery.
     pub fn typed_reference<T: ObjectType>(&self) -> Result<ObjectRef<T>, ObjectError> {
-        if self.object_type.as_str() != T::WORKBENCH_TYPE.to_string() {
+        if self.object_type != T::WORKBENCH_TYPE {
             return Err(ObjectError::UnexpectedRepositoryObjectType {
                 expected: T::WORKBENCH_TYPE,
-                actual: self.object_type.to_string(),
+                actual: self.object_type.clone(),
             });
         }
 
@@ -290,6 +243,21 @@ impl<T: ObjectType> TryFrom<&RepositoryObjectEntry> for ObjectRef<T> {
 
     fn try_from(entry: &RepositoryObjectEntry) -> Result<Self, Self::Error> {
         entry.typed_reference()
+    }
+}
+
+impl TryFrom<&RepositoryObjectEntry> for RepositoryObject {
+    type Error = ObjectError;
+
+    fn try_from(entry: &RepositoryObjectEntry) -> Result<Self, Self::Error> {
+        RepositoryObject::from_reference(entry.reference.clone(), entry.object_type.clone())
+    }
+}
+
+impl RepositoryObjectEntry {
+    /// Converts this RIS entry into a runtime repository object.
+    pub fn repository_object(&self) -> Result<RepositoryObject, ObjectError> {
+        self.try_into()
     }
 }
 
@@ -428,7 +396,7 @@ pub struct RepositoryObjectSummary {
     pub name: String,
     pub description: String,
     pub package: String,
-    pub object_type: RepositoryObjectType,
+    pub object_type: GlobalWorkbenchType,
     pub expandable: bool,
     pub reference: ObjectRef,
     relations: Relations,
@@ -526,7 +494,7 @@ impl TryFrom<RawRepositoryObjectEntry> for RepositoryObjectEntry {
             uri: raw.uri,
             source,
         })?;
-        let reference = ObjectRef::new(uri);
+        let reference = ObjectRef::named(raw.name.clone(), uri);
         Ok(Self {
             name: raw.name,
             version: raw.version,
@@ -631,7 +599,7 @@ struct RawRepositoryObjectEntry {
     #[serde(rename = "@package")]
     package: String,
     #[serde(rename = "@type")]
-    object_type: RepositoryObjectType,
+    object_type: GlobalWorkbenchType,
     #[serde(rename = "@uri")]
     uri: String,
     #[serde(rename = "@vituri")]
@@ -699,7 +667,7 @@ struct RawRepositoryObjectSummary {
     #[serde(rename = "@package")]
     package: String,
     #[serde(rename = "@type")]
-    object_type: RepositoryObjectType,
+    object_type: GlobalWorkbenchType,
     #[serde(rename = "@expandable")]
     expandable: bool,
     #[serde(rename = "atom:link", default)]
@@ -725,7 +693,7 @@ struct RawRepositoryProperty {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Class, Program};
+    use crate::{AccessMode, Class, Include, Program};
 
     const CONTENT_XML: &[u8] = include_bytes!("../../tests/fixtures/repository-content.xml");
     const FACETS_XML: &[u8] = include_bytes!("../../tests/fixtures/repository-facets.xml");
@@ -821,8 +789,60 @@ mod tests {
         assert!(matches!(
             error,
             ObjectError::UnexpectedRepositoryObjectType { expected, actual }
-                if expected == Program::WORKBENCH_TYPE && actual == "CLAS/OC"
+                if expected == Program::WORKBENCH_TYPE && actual.as_str() == "CLAS/OC"
         ));
+    }
+
+    #[test]
+    fn converts_ris_entries_to_runtime_repository_objects() {
+        let base =
+            AdtUri::parse("/sap/bc/adt/repository/informationsystem/virtualfolders/contents")
+                .unwrap();
+
+        for object_type in ["PROG/P", "PROG/I", "CLAS/OC", "DEVC/K"] {
+            let xml = String::from_utf8(CONTENT_XML.to_vec())
+                .unwrap()
+                .replace("type=\"CLAS/OC\"", &format!("type=\"{object_type}\""));
+            let content = RepositoryContent::parse(xml.as_bytes(), &base).unwrap();
+            let object = content.objects[0].repository_object().unwrap();
+
+            assert_eq!(object.object_type().as_str(), object_type);
+            assert!(match object_type {
+                "PROG/P" => object.typed::<Program>().is_some(),
+                "PROG/I" => object.typed::<Include>().is_some(),
+                "CLAS/OC" => object.typed::<Class>().is_some(),
+                "DEVC/K" => object.typed::<Package>().is_some(),
+                _ => unreachable!(),
+            });
+        }
+
+        let unknown_xml = String::from_utf8(CONTENT_XML.to_vec())
+            .unwrap()
+            .replace("type=\"CLAS/OC\"", "type=\"DDLS/DF\"");
+        let content = RepositoryContent::parse(unknown_xml.as_bytes(), &base).unwrap();
+        let object = content.objects[0].repository_object().unwrap();
+
+        assert_eq!(object.object_type().as_str(), "DDLS/DF");
+        assert!(object.naming_policy().is_none());
+        assert!(object.typed::<Class>().is_none());
+    }
+
+    #[test]
+    fn runtime_repository_objects_preserve_the_ris_identity() {
+        let base =
+            AdtUri::parse("/sap/bc/adt/repository/informationsystem/virtualfolders/contents")
+                .unwrap();
+        let content = RepositoryContent::parse(CONTENT_XML, &base).unwrap();
+        let entry = &content.objects[0];
+        let object = entry.repository_object().unwrap();
+
+        assert_eq!(object.reference(), entry.reference);
+        assert_eq!(object.typed::<Class>().unwrap().name(), entry.name);
+        assert_eq!(
+            object.source().unwrap().uri.as_str(),
+            "/sap/bc/adt/oo/classes/zcl_demo/source/main"
+        );
+        assert_eq!(object.lock(AccessMode::Modify).object, entry.reference);
     }
 
     #[test]
@@ -907,35 +927,27 @@ mod tests {
         let content = RepositoryContent::parse(xml.as_bytes(), &base).unwrap();
 
         assert_eq!(content.folders[0].facet.as_str(), "FUTURE");
-        assert_eq!(content.objects[0].object_type.to_string(), "ZZZZ/X");
-        assert_eq!(
-            content.objects[0]
-                .object_type
-                .global_workbench_type()
-                .unwrap()
-                .to_string(),
-            "ZZZZ/X"
-        );
+        assert_eq!(content.objects[0].object_type.as_str(), "ZZZZ/X");
     }
 
     #[test]
-    fn accepts_four_character_ris_type_aliases() {
-        let xml = String::from_utf8(CONTENT_XML.to_vec())
-            .unwrap()
-            .replace("type=\"CLAS/OC\"", "type=\"AUTH\"");
+    fn accepts_unmodeled_global_workbench_type_shapes() {
         let base =
             AdtUri::parse("/sap/bc/adt/repository/informationsystem/virtualfolders/contents")
                 .unwrap();
 
-        let content = RepositoryContent::parse(xml.as_bytes(), &base).unwrap();
+        for object_type in ["AUTH", "CLAS/OCN/definitions", "clas/oc"] {
+            let xml = String::from_utf8(CONTENT_XML.to_vec())
+                .unwrap()
+                .replace("type=\"CLAS/OC\"", &format!("type=\"{object_type}\""));
+            let content = RepositoryContent::parse(xml.as_bytes(), &base).unwrap();
 
-        assert_eq!(content.objects[0].object_type.as_str(), "AUTH");
-        assert!(
-            content.objects[0]
-                .object_type
-                .global_workbench_type()
-                .is_err()
-        );
+            assert_eq!(content.objects[0].object_type.as_str(), object_type);
+            assert!(content.objects[0].typed_reference::<Class>().is_err());
+            let object = content.objects[0].repository_object().unwrap();
+            assert_eq!(object.object_type().as_str(), object_type);
+            assert!(object.naming_policy().is_none());
+        }
     }
 
     #[test]

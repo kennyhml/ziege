@@ -16,7 +16,7 @@ pub enum Package {}
 impl private::Sealed for Package {}
 
 impl ObjectType for Package {
-    const WORKBENCH_TYPE: GlobalWorkbenchType = GlobalWorkbenchType::new("DEVC", "K");
+    const WORKBENCH_TYPE: GlobalWorkbenchType = GlobalWorkbenchType::new("DEVC/K");
     const NAMING_POLICY: ObjectNamePolicy = ObjectNamePolicy::new(30);
 }
 
@@ -34,10 +34,10 @@ impl ObjectProperties for Package {
     fn parse(
         resource: &ObjectRef<Self>,
         version: Self::MediaVersion,
-        body: Vec<u8>,
+        body: &[u8],
         etag: Option<EntityTag>,
     ) -> Result<Self::Properties, ResponseError> {
-        PackageProperties::parse(resource, version, &body, etag)
+        PackageProperties::parse(resource, version, body, etag)
     }
 }
 

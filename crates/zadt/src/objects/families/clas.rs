@@ -1,8 +1,14 @@
 use super::super::{
-    GlobalWorkbenchType, ObjectCollection, ObjectNamePolicy, ObjectRef, ObjectType, Source,
-    SourceComponent, private,
+    GlobalWorkbenchType, ObjectCollection, ObjectNamePolicy, ObjectProperties, ObjectRef,
+    ObjectType, Source, SourceComponent, private,
 };
-use crate::{resource::SourceRef, vocabulary::CategoryId};
+use crate::{
+    error::ResponseError,
+    models::{ClassProperties, ClassPropertiesVersion},
+    protocol::EntityTag,
+    resource::SourceRef,
+    vocabulary::CategoryId,
+};
 
 /// An ABAP class object.
 #[derive(Debug)]
@@ -11,7 +17,7 @@ pub enum Class {}
 impl private::Sealed for Class {}
 
 impl ObjectType for Class {
-    const WORKBENCH_TYPE: GlobalWorkbenchType = GlobalWorkbenchType::new("CLAS", "OC");
+    const WORKBENCH_TYPE: GlobalWorkbenchType = GlobalWorkbenchType::new("CLAS/OC");
     const NAMING_POLICY: ObjectNamePolicy = ObjectNamePolicy::new(30);
     const SOURCE_COMPONENTS: &'static [&'static dyn SourceComponent] = &[
         &ClassSourceComponent::Main,
@@ -19,6 +25,7 @@ impl ObjectType for Class {
         &ClassSourceComponent::Implementations,
         &ClassSourceComponent::Macros,
         &ClassSourceComponent::TestClasses,
+        &ClassSourceComponent::LocalTypes,
     ];
 }
 
@@ -31,6 +38,20 @@ impl ObjectCollection for Class {
 
 impl Source for Class {}
 
+impl ObjectProperties for Class {
+    type MediaVersion = ClassPropertiesVersion;
+    type Properties = ClassProperties;
+
+    fn parse(
+        resource: &ObjectRef<Self>,
+        version: Self::MediaVersion,
+        body: &[u8],
+        etag: Option<EntityTag>,
+    ) -> Result<Self::Properties, ResponseError> {
+        ClassProperties::parse(resource, version, body, etag)
+    }
+}
+
 /// A source component owned and locked by an ABAP class.
 ///
 /// Local class includes are ADT resources beneath the class object rather than
@@ -42,6 +63,7 @@ pub enum ClassSourceComponent {
     Implementations,
     Macros,
     TestClasses,
+    LocalTypes,
 }
 
 impl ClassSourceComponent {
@@ -53,7 +75,30 @@ impl ClassSourceComponent {
             Self::Implementations => "implementations",
             Self::Macros => "macros",
             Self::TestClasses => "testclasses",
+            Self::LocalTypes => "localtypes",
         }
+    }
+
+    /// Parses a component name used by ADT.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "main" => Some(Self::Main),
+            "definitions" => Some(Self::Definitions),
+            "implementations" => Some(Self::Implementations),
+            "macros" => Some(Self::Macros),
+            "testclasses" => Some(Self::TestClasses),
+            "localtypes" => Some(Self::LocalTypes),
+            _ => None,
+        }
+    }
+}
+
+impl serde::Serialize for ClassSourceComponent {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
     }
 }
 
@@ -69,6 +114,7 @@ impl SourceComponent for ClassSourceComponent {
             Self::Implementations => &["includes", "implementations"],
             Self::Macros => &["includes", "macros"],
             Self::TestClasses => &["includes", "testclasses"],
+            Self::LocalTypes => &["includes", "localtypes"],
         }
     }
 

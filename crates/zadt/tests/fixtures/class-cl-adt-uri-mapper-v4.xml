@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<class:abapClass class:final="true" class:abstract="false" class:visibility="private" class:category="generalObjectType" class:sharedMemoryEnabled="false" abapoo:modeled="false" abapsource:sourceObjectStatus="SAPStandardProduction" abapsource:fixPointArithmetic="true" abapsource:activeUnicodeCheck="true" adtcore:responsible="SAP" adtcore:masterLanguage="EN" adtcore:masterSystem="SAP" adtcore:abapLanguageVersion="X" adtcore:name="CL_ADT_URI_MAPPER" adtcore:type="CLAS/OC" adtcore:changedAt="2021-04-06T14:55:01Z" adtcore:version="active" adtcore:createdAt="2009-11-26T00:00:00Z" adtcore:changedBy="SAP" adtcore:createdBy="SAP" adtcore:description="URI Mapper" adtcore:descriptionTextLimit="60" adtcore:language="EN" xmlns:class="http://www.sap.com/adt/oo/classes" xmlns:abapoo="http://www.sap.com/adt/oo" xmlns:abapsource="http://www.sap.com/adt/abapsource" xmlns:adtcore="http://www.sap.com/adt/core">
+    <atom:link href="/sap/bc/adt/oo/classes/cl_adt_uri_mapper/enhancements/options" rel="http://www.sap.com/adt/relations/enhancementOptionsOfMainObject" type="application/vnd.sap.adt.enhancementoptions.v2+xml" title="Enhancement Options of Main Object" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    <atom:link href="/sap/bc/adt/oo/classes/cl_adt_uri_mapper/enhancements/implementations" rel="http://www.sap.com/adt/relations/enhancementImplementations" type="application/vnd.sap.adt.enhancementimplementations.v1+xml" title="Enhancement Implementations" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    <atom:link href="objectstructure" rel="http://www.sap.com/adt/relations/objectstructure" type="application/vnd.sap.adt.objectstructure.v2+xml" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    <atom:link href="/sap/bc/adt/textelements/classes/cl_adt_uri_mapper" rel="http://www.sap.com/adt/relations/sources/textelements" title="Text elements" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    <atom:link href="/sap/bc/adt/oo/classes/cl_adt_uri_mapper/source/main?withAbapDocFromShortTexts=true" rel="http://www.sap.com/adt/relations/sources/withabapdocfromshorttexts" type="text/plain" title="Source with ABAP Doc" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    <atom:link href="/sap/bc/adt/oo/classes/cl_adt_uri_mapper/transports" rel="http://www.sap.com/adt/relations/transport" type="application/vnd.sap.as+xml;charset=utf-8;dataname=com.sap.adt.lock.result2" title="Related Transport Requests" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    <atom:link href="/sap/bc/adt/repository/informationsystem/abaplanguageversions?uri=%2Fsap%2Fbc%2Fadt%2Foo%2Fclasses%2Fcl_adt_uri_mapper" rel="http://www.sap.com/adt/relations/informationsystem/abaplanguageversions" type="application/vnd.sap.adt.nameditems.v1+xml" title="Allowed ABAP language versions" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    <adtcore:packageRef adtcore:uri="/sap/bc/adt/packages/sadt_tools_core" adtcore:type="DEVC/K" adtcore:name="SADT_TOOLS_CORE"/>
+    <abapsource:syntaxConfiguration>
+        <abapsource:language>
+            <abapsource:version>X</abapsource:version>
+            <abapsource:description>Standard ABAP</abapsource:description>
+            <atom:link href="/sap/bc/adt/abapsource/parsers/rnd/grammar" rel="http://www.sap.com/adt/relations/abapsource/parser" type="text/plain" title="Standard ABAP" etag="757" xmlns:atom="http://www.w3.org/2005/Atom"/>
+        </abapsource:language>
+    </abapsource:syntaxConfiguration>
+    <class:include class:includeType="definitions" abapsource:sourceUri="includes/definitions" adtcore:name="" adtcore:type="CLAS/I" adtcore:changedAt="2017-01-16T18:41:30Z" adtcore:version="active" adtcore:createdAt="2011-09-09T00:00:00Z" adtcore:changedBy="SAP" adtcore:createdBy="SAP">
+        <atom:link href="includes/definitions/versions" rel="http://www.sap.com/adt/relations/versions" xmlns:atom="http://www.w3.org/2005/Atom"/>
+        <atom:link href="includes/definitions" rel="http://www.sap.com/adt/relations/source" type="text/plain" etag="201701161841300011" xmlns:atom="http://www.w3.org/2005/Atom"/>
+        <atom:link href="includes/definitions" rel="http://www.sap.com/adt/relations/source" type="text/html" etag="201701161841300011" xmlns:atom="http://www.w3.org/2005/Atom"/>
+        <atom:link href="/sap/bc/adt/oo/classes/cl_adt_uri_mapper/includes/definitions/enhancements/options" rel="http://www.sap.com/adt/relations/enhancementOptions" type="application/vnd.sap.adt.enhancementoptions.v2+xml" title="Enhancement Options" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </class:include>
+    <class:include class:includeType="implementations" abapsource:sourceUri="includes/implementations" adtcore:name="" adtcore:type="CLAS/I" adtcore:changedAt="2017-01-16T18:41:30Z" adtcore:version="active" adtcore:createdAt="2011-09-09T00:00:00Z" adtcore:changedBy="SAP" adtcore:createdBy="SAP">
+        <atom:link href="includes/implementations/versions" rel="http://www.sap.com/adt/relations/versions" xmlns:atom="http://www.w3.org/2005/Atom"/>
+        <atom:link href="includes/implementations" rel="http://www.sap.com/adt/relations/source" type="text/plain" etag="201701161841300011" xmlns:atom="http://www.w3.org/2005/Atom"/>
+        <atom:link href="includes/implementations" rel="http://www.sap.com/adt/relations/source" type="text/html" etag="201701161841300011" xmlns:atom="http://www.w3.org/2005/Atom"/>
+        <atom:link href="/sap/bc/adt/oo/classes/cl_adt_uri_mapper/includes/implementations/enhancements/options" rel="http://www.sap.com/adt/relations/enhancementOptions" type="application/vnd.sap.adt.enhancementoptions.v2+xml" title="Enhancement Options" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </class:include>
+    <class:include class:includeType="macros" abapsource:sourceUri="includes/macros" adtcore:name="" adtcore:type="CLAS/I" adtcore:changedAt="2016-02-23T18:29:38Z" adtcore:version="active" adtcore:createdAt="2011-09-09T00:00:00Z" adtcore:changedBy="SAP" adtcore:createdBy="SAP">
+        <atom:link href="includes/macros/versions" rel="http://www.sap.com/adt/relations/versions" xmlns:atom="http://www.w3.org/2005/Atom"/>
+        <atom:link href="includes/macros" rel="http://www.sap.com/adt/relations/source" type="text/plain" etag="201602231829380011" xmlns:atom="http://www.w3.org/2005/Atom"/>
+        <atom:link href="includes/macros" rel="http://www.sap.com/adt/relations/source" type="text/html" etag="201602231829380011" xmlns:atom="http://www.w3.org/2005/Atom"/>
+        <atom:link href="/sap/bc/adt/oo/classes/cl_adt_uri_mapper/includes/macros/enhancements/options" rel="http://www.sap.com/adt/relations/enhancementOptions" type="application/vnd.sap.adt.enhancementoptions.v2+xml" title="Enhancement Options" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </class:include>
+    <class:include class:includeType="testclasses" abapsource:sourceUri="includes/testclasses" adtcore:name="" adtcore:type="CLAS/I" adtcore:changedAt="2020-03-16T13:35:16Z" adtcore:version="active" adtcore:createdAt="2011-09-09T00:00:00Z" adtcore:changedBy="SAP" adtcore:createdBy="SAP">
+        <atom:link href="includes/testclasses/versions" rel="http://www.sap.com/adt/relations/versions" xmlns:atom="http://www.w3.org/2005/Atom"/>
+        <atom:link href="includes/testclasses" rel="http://www.sap.com/adt/relations/source" type="text/plain" etag="202003161335160011" xmlns:atom="http://www.w3.org/2005/Atom"/>
+        <atom:link href="includes/testclasses" rel="http://www.sap.com/adt/relations/source" type="text/html" etag="202003161335160011" xmlns:atom="http://www.w3.org/2005/Atom"/>
+        <atom:link href="/sap/bc/adt/oo/classes/cl_adt_uri_mapper/includes/testclasses/enhancements/options" rel="http://www.sap.com/adt/relations/enhancementOptions" type="application/vnd.sap.adt.enhancementoptions.v2+xml" title="Enhancement Options" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </class:include>
+    <class:include class:includeType="main" abapsource:sourceUri="source/main" adtcore:name="" adtcore:type="CLAS/I" adtcore:changedAt="2021-04-06T14:55:01Z" adtcore:version="active" adtcore:createdAt="2009-11-26T00:00:00Z" adtcore:changedBy="SAP" adtcore:createdBy="SAP">
+        <atom:link href="includes/main/versions" rel="http://www.sap.com/adt/relations/versions" xmlns:atom="http://www.w3.org/2005/Atom"/>
+        <atom:link href="source/main" rel="http://www.sap.com/adt/relations/source" type="text/plain" etag="20210406145501001000181" xmlns:atom="http://www.w3.org/2005/Atom"/>
+        <atom:link href="source/main" rel="http://www.sap.com/adt/relations/source" type="text/html" etag="20210406145501001000181" xmlns:atom="http://www.w3.org/2005/Atom"/>
+        <atom:link href="/sap/bc/adt/oo/classes/cl_adt_uri_mapper/source/main/enhancements/options" rel="http://www.sap.com/adt/relations/enhancementOptions" type="application/vnd.sap.adt.enhancementoptions.v2+xml" title="Enhancement Options" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </class:include>
+</class:abapClass>

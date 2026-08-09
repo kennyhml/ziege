@@ -116,6 +116,18 @@ pub enum ObjectError {
     #[error("object response did not advertise the required `{relation}` relation")]
     MissingRelation { relation: &'static str },
 
+    #[error("object response advertised source component `{component}` more than once")]
+    DuplicateSourceComponent { component: String },
+
+    #[error("object type `{object_type}` does not support {capability}")]
+    UnsupportedCapability {
+        object_type: GlobalWorkbenchType,
+        capability: &'static str,
+    },
+
+    #[error("object type `{object_type}` is not modeled by ZADT")]
+    UnsupportedObjectType { object_type: GlobalWorkbenchType },
+
     #[error("unsupported object version `{version}`")]
     UnsupportedObjectVersion { version: String },
 
@@ -137,7 +149,7 @@ pub enum ObjectError {
     #[error("expected repository object type `{expected}`, but RIS advertised `{actual}`")]
     UnexpectedRepositoryObjectType {
         expected: GlobalWorkbenchType,
-        actual: String,
+        actual: GlobalWorkbenchType,
     },
 
     #[error("expected compact object type `{expected}`, but the response advertised `{actual}`")]
@@ -270,6 +282,9 @@ pub enum ResponseError {
 
     #[error(transparent)]
     Cts(#[from] CtsError),
+
+    #[error("could not serialize object properties as JSON: {0}")]
+    JsonSerialization(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Error)]

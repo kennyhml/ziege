@@ -1,3 +1,4 @@
+pub(crate) mod classes;
 pub(crate) mod discovery;
 pub(crate) mod object;
 pub(crate) mod packages;

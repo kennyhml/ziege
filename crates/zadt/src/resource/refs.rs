@@ -20,7 +20,8 @@ pub(crate) trait FromAdtLink: Sized {
 ///
 /// The marker identifies the relation represented by the reference. Named
 /// aliases such as [`TextElementsRef`] provide the public relation-specific API.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OwnedResourceRef<T> {
     /// The repository object that owns this related resource.
     pub object: ObjectRef,
@@ -37,6 +38,7 @@ pub struct OwnedResourceRef<T> {
     /// The entity tag advertised for this resource, when present.
     pub etag: Option<String>,
 
+    #[serde(skip)]
     marker: PhantomData<fn() -> T>,
 }
 

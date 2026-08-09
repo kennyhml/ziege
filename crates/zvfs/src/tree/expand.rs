@@ -459,7 +459,7 @@ impl From<RepositoryObjectEntry> for PreparedNode {
         let object = ObjectNode {
             name: entry.name.clone(),
             package: entry.package.clone(),
-            object_type: entry.object_type.to_string(),
+            object_type: entry.object_type.clone(),
             uri: entry.reference.uri().clone(),
             virtual_workbench_uri: entry.virtual_workbench_uri.clone(),
             version: entry.version.clone(),

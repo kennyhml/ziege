@@ -42,15 +42,21 @@ invariants. For example, the current typing system makes it impossible to call a
 without a stateful session context. It also provides convenient methods to navigate between objects
 and their relations. You can find more on the technical details down below.
 
-However, the reality is that the nature of the ADT client rarely makes typing meaningful. More often
-than not, the kind of object youre working with comes from a command line or network request, at which
-point it becomes difficult to transiton back to a fully typed object in all contexts. You might be thinking
-that rust enums can come to the rescue here and I would agree, if ABAP did not have over one hundred
-repository objects to cover. For this reason, the library makes an effort to provide type erasure via a
-generic `RepositoryObject` trait that forward implements common operations such as locking or reading
-the object properties. Operations such as reading the source code then end up being runtime checks
-rather than failing at compile time. The downside is that operations that **return** object dependent
-types, such as `ProgramProperties` vs `ClassProperties` can not reflect their concrete type at all.
+ADT object types often arrive at runtime from a command line or network request. `ZADT` supports that
+case with a descriptor-backed `RepositoryObject` while retaining `ObjectRef<T>` for statically known
+object types. Each modeled type has one private `ObjectTypeDescriptor::of::<T>()` registry entry that
+connects its discovery collection, naming policy, source components, and property parser. Registration
+requires `T: ObjectProperties`, so a modeled type without that capability fails to compile. RIS entries with
+an unmodeled type retain their identity without pretending that family-specific operations exist.
+
+`GlobalWorkbenchType` preserves the exact ADT registry identifier. Although values commonly look like
+`CLAS/OC`, the vocabulary is opaque and also includes compact values such as `AUTH` and identifiers with
+more than one slash; callers should compare the complete value rather than decomposing it.
+
+Common operations dispatch through that descriptor. Operations whose response depends on the object type,
+such as reading `ProgramProperties` or `ClassProperties`, still use the concrete typed parser internally.
+The runtime properties operation serializes that validated result to JSON, giving command-line and network
+callers one response type without weakening the typed API or adding a variant for every SAP object type.
 
 ### Transport
 

@@ -1,4 +1,5 @@
-use crate::ObjectRef;
+use crate::{AdtUri, ObjectRef};
+use serde::Serialize;
 
 use super::{AdtLink, AdtLinkError, AdvertisedLink, OwnedResourceRef, refs::FromAdtLink};
 
@@ -13,6 +14,59 @@ use super::{AdtLink, AdtLinkError, AdvertisedLink, OwnedResourceRef, refs::FromA
 pub struct Relations {
     owner: ObjectRef,
     links: Box<[AdvertisedLink]>,
+}
+
+impl Serialize for Relations {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.links
+            .iter()
+            .map(|link| SerializedRelation::new(link, self.owner.uri()))
+            .collect::<Vec<_>>()
+            .serialize(serializer)
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SerializedRelation {
+    href: String,
+    target: Option<AdtUri>,
+    query: Vec<(String, String)>,
+    fragment: Option<String>,
+    relation: Option<String>,
+    media_type: Option<String>,
+    hreflang: Option<String>,
+    title: Option<String>,
+    length: Option<String>,
+    etag: Option<String>,
+    resolved: bool,
+    resolution_error: Option<String>,
+}
+
+impl SerializedRelation {
+    fn new(link: &AdvertisedLink, base: &AdtUri) -> Self {
+        let (target, query, fragment, resolution_error) = match link.resolve(base) {
+            Ok(link) => (Some(link.target), link.query, link.fragment, None),
+            Err(error) => (None, Vec::new(), None, Some(error.to_string())),
+        };
+        Self {
+            href: link.href.clone(),
+            target,
+            query,
+            fragment,
+            relation: link.relation.clone(),
+            media_type: link.media_type.clone(),
+            hreflang: link.hreflang.clone(),
+            title: link.title.clone(),
+            length: link.length.clone(),
+            etag: link.etag.clone(),
+            resolved: resolution_error.is_none(),
+            resolution_error,
+        }
+    }
 }
 
 impl Relations {

@@ -1,3 +1,4 @@
+mod classes;
 mod discovery;
 mod object;
 mod packages;
@@ -12,6 +13,10 @@ pub(crate) use repository::RepositoryContentRequest;
 pub(crate) use session::parse_session_information;
 pub(crate) use transports::{TransportCheckRequest, TransportCreateRequest};
 
+pub use classes::{
+    ClassObjectReference, ClassProperties, ClassPropertiesV2, ClassPropertiesV3, ClassPropertiesV4,
+    ClassPropertiesVersion, ClassSourceProperties,
+};
 pub use discovery::{Capabilities, Category, Collection, TemplateLink, Workspace};
 pub use object::{AccessMode, LockHandle, SourceCode};
 pub use packages::{
@@ -28,7 +33,7 @@ pub use programs::{
 pub use repository::{
     RepositoryContent, RepositoryFacet, RepositoryFacetDefinition, RepositoryFacetValuesLink,
     RepositoryFacets, RepositoryObjectEntry, RepositoryObjectProperties, RepositoryObjectSummary,
-    RepositoryObjectType, RepositoryPreselection, RepositoryPreselectionInfo, RepositoryProperty,
+    RepositoryPreselection, RepositoryPreselectionInfo, RepositoryProperty,
     RepositoryVirtualFolder,
 };
 pub use session::{SessionInformation, SessionUri, SystemInformationLink};

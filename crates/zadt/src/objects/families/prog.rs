@@ -18,7 +18,7 @@ pub enum Program {}
 impl private::Sealed for Program {}
 
 impl ObjectType for Program {
-    const WORKBENCH_TYPE: GlobalWorkbenchType = GlobalWorkbenchType::new("PROG", "P");
+    const WORKBENCH_TYPE: GlobalWorkbenchType = GlobalWorkbenchType::new("PROG/P");
     const NAMING_POLICY: ObjectNamePolicy = ObjectNamePolicy::new(30);
     const SOURCE_COMPONENTS: &'static [&'static dyn SourceComponent] = &[&MainSource];
 }
@@ -39,10 +39,10 @@ impl ObjectProperties for Program {
     fn parse(
         resource: &ObjectRef<Self>,
         version: Self::MediaVersion,
-        body: Vec<u8>,
+        body: &[u8],
         etag: Option<EntityTag>,
     ) -> Result<Self::Properties, ResponseError> {
-        ProgramProperties::parse(resource, version, &body, etag)
+        ProgramProperties::parse(resource, version, body, etag)
     }
 }
 
@@ -53,7 +53,7 @@ pub enum Include {}
 impl private::Sealed for Include {}
 
 impl ObjectType for Include {
-    const WORKBENCH_TYPE: GlobalWorkbenchType = GlobalWorkbenchType::new("PROG", "I");
+    const WORKBENCH_TYPE: GlobalWorkbenchType = GlobalWorkbenchType::new("PROG/I");
     const NAMING_POLICY: ObjectNamePolicy = ObjectNamePolicy::new(40);
     const SOURCE_COMPONENTS: &'static [&'static dyn SourceComponent] = &[&MainSource];
 }
@@ -74,10 +74,10 @@ impl ObjectProperties for Include {
     fn parse(
         resource: &ObjectRef<Self>,
         version: Self::MediaVersion,
-        body: Vec<u8>,
+        body: &[u8],
         etag: Option<EntityTag>,
     ) -> Result<Self::Properties, ResponseError> {
-        IncludeProperties::parse(resource, version, &body, etag)
+        IncludeProperties::parse(resource, version, body, etag)
     }
 }
 

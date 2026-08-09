@@ -7,8 +7,8 @@ use httpmock::prelude::*;
 use std::sync::{Arc, Mutex};
 use zadt::{
     AdtRequest, AdtResponse, CategoryId, Class, Client, CoreDiscoveryQuery, DiscoveryError,
-    DiscoveryQuery, Logon, Operation, OperationError, ReqwestTransport, ResponseError, Transport,
-    TransportError,
+    DiscoveryQuery, GlobalWorkbenchType, Logon, ObjectError, Operation, OperationError,
+    ReqwestTransport, ResponseError, Transport, TransportError,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -121,6 +121,44 @@ async fn class_references_use_the_discovered_oo_collection() {
 
     assert_eq!(class.name(), "ZCL_EXAMPLE");
     assert_eq!(class.uri().as_str(), "/sap/bc/adt/oo/classes/zcl_example");
+}
+
+#[tokio::test]
+async fn runtime_object_types_use_the_registered_descriptor() {
+    let client = Client::new(FixtureTransport::new(DISCOVERY_XML));
+    Logon.execute(&client).await.unwrap();
+    let client = client.discover().await.unwrap();
+
+    for (object_type, name, expected_uri) in [
+        ("PROG/P", "Z_TEST", "/sap/bc/adt/programs/programs/z_test"),
+        ("PROG/I", "ZTEST", "/sap/bc/adt/programs/includes/ztest"),
+        (
+            "CLAS/OC",
+            "ZCL_EXAMPLE",
+            "/sap/bc/adt/oo/classes/zcl_example",
+        ),
+        ("DEVC/K", "ZPACKAGE", "/sap/bc/adt/packages/zpackage"),
+    ] {
+        let parsed_type: GlobalWorkbenchType = object_type.parse().unwrap();
+        let object = client.repository_object(&parsed_type, name).unwrap();
+
+        assert_eq!(object.object_type().as_str(), object_type);
+        assert_eq!(object.reference().uri().as_str(), expected_uri);
+        assert!(match object_type {
+            "PROG/P" => object.typed::<zadt::Program>().is_some(),
+            "PROG/I" => object.typed::<zadt::Include>().is_some(),
+            "CLAS/OC" => object.typed::<Class>().is_some(),
+            "DEVC/K" => object.typed::<zadt::Package>().is_some(),
+            _ => unreachable!(),
+        });
+    }
+
+    let unsupported_type: GlobalWorkbenchType = "DDLS/DF".parse().unwrap();
+    assert!(matches!(
+        client.repository_object(&unsupported_type, "ZDDL_EXAMPLE"),
+        Err(ObjectError::UnsupportedObjectType { object_type })
+            if object_type.as_str() == "DDLS/DF"
+    ));
 }
 
 #[tokio::test]

@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     AdtUri, EnhancementImplementationsRef, EntityTag, GlobalWorkbenchType, HtmlSourceRef, Include,
@@ -47,7 +47,8 @@ enum ProgramPropertiesVersionKind {
 ///
 /// Multiple media type versions exist. They do, however, appear to be
 /// identical under regular circumstances - to be clarified.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "mediaVersion", content = "properties", rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum ProgramProperties {
     V2(Box<ProgramPropertiesV2>),
@@ -103,7 +104,8 @@ impl MediaVersionNegotiation for IncludePropertyVersion {
 }
 
 /// Include properties tagged with the media-type version returned by ADT.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "mediaVersion", content = "properties", rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum IncludeProperties {
     V2(Box<IncludePropertiesV2>),
@@ -159,7 +161,8 @@ impl ProgramRunResult {
 pub type ProgramPropertiesV2 = ProgramPropertiesV3;
 
 /// The ABAP program-properties payload shared by the V2 and V3 media types.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProgramPropertiesV3 {
     /// The program resource that was fetched.
     pub reference: ObjectRef<Program>,
@@ -285,6 +288,12 @@ impl ProgramPropertiesV3 {
         raw: RawProgramProperties,
         etag: Option<EntityTag>,
     ) -> Result<Self, ObjectError> {
+        if raw.object_type != Program::WORKBENCH_TYPE {
+            return Err(ObjectError::UnexpectedObjectType {
+                expected: Program::WORKBENCH_TYPE,
+                actual: raw.object_type,
+            });
+        }
         let package = package_reference(raw.package)?;
 
         let version = ObjectVersion::parse(&raw.version).ok_or_else(|| {
@@ -348,7 +357,8 @@ impl ProgramPropertiesV3 {
 }
 
 /// The V2 standalone ABAP include-properties payload.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IncludePropertiesV2 {
     /// The include resource that was fetched.
     pub reference: ObjectRef<Include>,
@@ -458,6 +468,12 @@ impl IncludePropertiesV2 {
         raw: RawIncludeProperties,
         etag: Option<EntityTag>,
     ) -> Result<Self, ObjectError> {
+        if raw.object_type != Include::WORKBENCH_TYPE {
+            return Err(ObjectError::UnexpectedObjectType {
+                expected: Include::WORKBENCH_TYPE,
+                actual: raw.object_type,
+            });
+        }
         let package = package_reference(raw.package)?;
 
         let version = ObjectVersion::parse(&raw.version).ok_or_else(|| {
@@ -521,14 +537,33 @@ impl IncludePropertiesV2 {
 }
 
 /// The source parser configuration advertised by a program.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SyntaxConfiguration {
     /// The configured ABAP language.
     pub language: SyntaxLanguage,
 }
 
+impl SyntaxConfiguration {
+    pub(crate) fn new(
+        owner: ObjectRef,
+        version: String,
+        description: String,
+        links: Vec<AdvertisedLink>,
+    ) -> Self {
+        Self {
+            language: SyntaxLanguage {
+                version,
+                description,
+                relations: Relations::new(owner, links),
+            },
+        }
+    }
+}
+
 /// An ABAP language version, description, and optional parser grammar.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SyntaxLanguage {
     /// The language version identifier, such as `X`.
     pub version: String,
@@ -793,6 +828,41 @@ mod tests {
     }
 
     #[test]
+    fn rejects_unexpected_program_object_type() {
+        let body = PROGRAM_XML.replace("adtcore:type=\"PROG/P\"", "adtcore:type=\"PROG/I\"");
+
+        assert!(matches!(
+            parse(&body),
+            Err(ResponseError::Object(ObjectError::UnexpectedObjectType {
+                expected,
+                actual,
+            })) if expected == Program::WORKBENCH_TYPE && actual == Include::WORKBENCH_TYPE
+        ));
+    }
+
+    #[test]
+    fn rejects_unexpected_include_object_type() {
+        let body = INCLUDE_XML.replace("adtcore:type=\"PROG/I\"", "adtcore:type=\"PROG/P\"");
+        let reference = ObjectRef::<Include>::for_test(
+            "ZTEST",
+            crate::AdtUri::parse("/sap/bc/adt/programs/includes/ZTEST").unwrap(),
+        );
+
+        assert!(matches!(
+            IncludeProperties::parse(
+                &reference,
+                IncludePropertyVersion::V2,
+                body.as_bytes(),
+                None,
+            ),
+            Err(ResponseError::Object(ObjectError::UnexpectedObjectType {
+                expected,
+                actual,
+            })) if expected == Include::WORKBENCH_TYPE && actual == Program::WORKBENCH_TYPE
+        ));
+    }
+
+    #[test]
     fn rejects_program_without_plain_text_source_link() {
         let body = PROGRAM_XML.replacen(
             "type=\"text/plain\"",
@@ -836,8 +906,18 @@ mod tests {
 
         let program = parse(&body).unwrap();
         let error = program.text_elements().unwrap_err();
+        let json = serde_json::to_value(&program).unwrap();
+        let relation = json["relations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|relation| relation["href"] == invalid_href)
+            .unwrap();
 
         assert_eq!(error.href(), invalid_href);
+        assert_eq!(relation["resolved"], false);
+        assert!(relation["target"].is_null());
+        assert!(relation["resolutionError"].is_string());
     }
 
     #[test]

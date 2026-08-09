@@ -299,6 +299,7 @@ mod tests {
             ),
             (ClassSourceComponent::Macros, "includes/macros"),
             (ClassSourceComponent::TestClasses, "includes/testclasses"),
+            (ClassSourceComponent::LocalTypes, "includes/localtypes"),
         ] {
             let source = class.component_source(component);
             assert_eq!(

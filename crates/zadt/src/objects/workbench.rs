@@ -1,85 +1,57 @@
 use core::fmt;
 use std::{borrow::Cow, str::FromStr};
 
-/// A global ABAP Workbench type consisting of an R3TR object-directory type and
-/// an internal Workbench subtype.
+/// An exact global ABAP Workbench type registered with ADT.
 ///
 /// # Background
 ///
-/// A repository object generally has an entry in the object directory (`TADIR`)
-/// with program ID `R3TR`. In contrast, `LIMU` identifies transportable
-/// subobjects recorded in transport requests - those subobjects generally do not
-/// have independent `TADIR` entries.
-///
-/// The R3TR object type identifies the owning repository object family, such as
-/// `PROG`, `CLAS`, or `DDLS`. It does not by itself identify the particular
-/// Workbench view or subobject.
-///
-/// Workbench subtypes are shorter internal identifiers defined by type pool
-/// `SWBM` and registered in `WBOBJTYPES` and `WBOBJTYPT`. The `WBOBJTYPE`
-/// structure combines the R3TR type in `OBJTYPE_TR` with the internal subtype in
-/// `SUBTYPE_WB`. Workbench objects can map to transportable entities through
-/// type-specific behavior that can be observed in `CL_WB_OBJECT`.
-///
-/// Much of this is an implementation detail. A global class has type `CLAS/OC`,
-/// while one of its method implementations has type `CLAS/OM`. The method source
-/// may be persisted in a generated include such as `ZCL_DEMO_A_SET_TO_PAID========CM001`
-/// in `REPOSRC`. That generated program is an include at the program-storage layer,
-/// but the method's Workbench subtype remains `OM` it is not exposed as subtype `I`,
-/// nor does it gain a `TADIR` entry.
-///
-/// ADT serializes this pair with a slash, for example `PROG/P`, `PROG/I`, or
-/// `CLAS/OC`. Values use their unpadded wire representation rather than the
-/// trailing spaces of SAPs fixed-width `TROBJTYPE` and `SEU_OBJTYP` fields.
+/// Common values combine an R3TR object-directory type and an internal subtype,
+/// such as `PROG/P` or `CLAS/OC`. The ADT registry also contains compact values
+/// such as `AUTH`, lowercase values such as `amdp`, and identifiers with more
+/// than one slash. The value is therefore treated as one opaque protocol token.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, serde::Deserialize)]
 #[serde(try_from = "String")]
-pub struct GlobalWorkbenchType {
-    directory_type: Cow<'static, str>,
-    workbench_type: Cow<'static, str>,
-}
+pub struct GlobalWorkbenchType(Cow<'static, str>);
 
 impl GlobalWorkbenchType {
-    /// Creates a global Workbench type from an R3TR object directory type and
-    /// internal Workbench subtype.
-    ///
-    /// Both values must be ASCII. The directory type is limited to the four
-    /// characters of `TROBJTYPE`, and the Workbench type to the three
-    /// characters of `SEU_OBJTYP`.
-    pub const fn new(directory_type: &'static str, workbench_type: &'static str) -> Self {
-        assert!(directory_type.is_ascii(), "R3TR object type must be ASCII");
-        assert!(
-            directory_type.len() <= 4,
-            "R3TR object type exceeds 4 characters"
-        );
-        assert!(workbench_type.is_ascii(), "Workbench type must be ASCII");
-        assert!(
-            workbench_type.len() <= 3,
-            "Workbench type exceeds 3 characters"
-        );
-        Self {
-            directory_type: Cow::Borrowed(directory_type),
-            workbench_type: Cow::Borrowed(workbench_type),
+    /// Creates a static global Workbench type.
+    pub const fn new(value: &'static str) -> Self {
+        assert!(!value.is_empty(), "global Workbench type must not be empty");
+        assert!(value.is_ascii(), "global Workbench type must be ASCII");
+        let bytes = value.as_bytes();
+        let mut index = 0;
+        while index < bytes.len() {
+            assert!(
+                bytes[index] > b' ' && bytes[index] != 0x7f,
+                "global Workbench type must not contain whitespace or control characters"
+            );
+            index += 1;
         }
+        Self(Cow::Borrowed(value))
     }
 
-    /// Returns the R3TR object type used in the object directory.
-    pub fn directory_type(&self) -> &str {
-        &self.directory_type
-    }
-
-    /// Returns the internal ABAP Workbench type.
-    pub fn workbench_type(&self) -> &str {
-        &self.workbench_type
+    /// Returns the exact identifier registered with ADT.
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
 impl fmt::Display for GlobalWorkbenchType {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{}/{}", self.directory_type, self.workbench_type)
+        formatter.write_str(self.as_str())
     }
 }
 
-/// An error parsing an ADT global Workbench type such as `PROG/I`.
+impl serde::Serialize for GlobalWorkbenchType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+/// An error parsing an ADT global Workbench type such as `PROG/I` or `AUTH`.
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 #[error("invalid global Workbench type `{value}`: {reason}")]
 pub struct InvalidWorkbenchType {
@@ -95,34 +67,16 @@ impl FromStr for GlobalWorkbenchType {
             value: value.to_owned(),
             reason,
         };
-        let (directory_type, workbench_type) = value
-            .split_once('/')
-            .ok_or_else(|| invalid("expected `<R3TR type>/<Workbench type>`"))?;
-        if directory_type.is_empty() {
-            return Err(invalid("R3TR object type is empty"));
+        if value.is_empty() {
+            return Err(invalid("value is empty"));
         }
-        if workbench_type.is_empty() {
-            return Err(invalid("Workbench type is empty"));
+        if !value.is_ascii() {
+            return Err(invalid("value must be ASCII"));
         }
-        if workbench_type.contains('/') {
-            return Err(invalid("contains more than one separator"));
+        if value.bytes().any(|byte| byte <= b' ' || byte == 0x7f) {
+            return Err(invalid("value contains whitespace or control characters"));
         }
-        if !directory_type.is_ascii() {
-            return Err(invalid("R3TR object type must be ASCII"));
-        }
-        if directory_type.len() > 4 {
-            return Err(invalid("R3TR object type exceeds 4 characters"));
-        }
-        if !workbench_type.is_ascii() {
-            return Err(invalid("Workbench type must be ASCII"));
-        }
-        if workbench_type.len() > 3 {
-            return Err(invalid("Workbench type exceeds 3 characters"));
-        }
-        Ok(Self {
-            directory_type: Cow::Owned(directory_type.to_owned()),
-            workbench_type: Cow::Owned(workbench_type.to_owned()),
-        })
+        Ok(Self(Cow::Owned(value.to_owned())))
     }
 }
 
@@ -140,11 +94,10 @@ mod tests {
     use crate::{Class, Include, ObjectType, Program};
 
     #[test]
-    fn global_workbench_types_use_unpadded_sap_field_limits() {
-        let object_type = GlobalWorkbenchType::new("ABCD", "XYZ");
+    fn preserves_exact_static_global_workbench_types() {
+        let object_type = GlobalWorkbenchType::new("ABCD/XYZ");
 
-        assert_eq!(object_type.directory_type(), "ABCD");
-        assert_eq!(object_type.workbench_type(), "XYZ");
+        assert_eq!(object_type.as_str(), "ABCD/XYZ");
         assert_eq!(object_type.to_string(), "ABCD/XYZ");
         assert_eq!(Program::WORKBENCH_TYPE.to_string(), "PROG/P");
         assert_eq!(Include::WORKBENCH_TYPE.to_string(), "PROG/I");
@@ -152,24 +105,37 @@ mod tests {
     }
 
     #[test]
-    fn parses_an_owned_global_workbench_type() {
-        let object_type: GlobalWorkbenchType = "CLAS/OM".parse().unwrap();
+    fn parses_the_opaque_adt_registry_vocabulary() {
+        for value in [
+            "CLAS/OM",
+            "AUTH",
+            "DEFAULT",
+            "/RQ",
+            "amdp",
+            "CLAS/OCN/definitions",
+        ] {
+            let object_type: GlobalWorkbenchType = value.parse().unwrap();
 
-        assert_eq!(object_type.directory_type(), "CLAS");
-        assert_eq!(object_type.workbench_type(), "OM");
-        assert_eq!(object_type.to_string(), "CLAS/OM");
+            assert_eq!(object_type.as_str(), value);
+            assert_eq!(object_type.to_string(), value);
+        }
+    }
+
+    #[test]
+    fn serializes_opaque_workbench_types_without_normalizing_them() {
+        for value in ["AUTH", "/RQ", "amdp", "CLAS/OCN/definitions"] {
+            let object_type: GlobalWorkbenchType = value.parse().unwrap();
+            let json = serde_json::to_string(&object_type).unwrap();
+            let decoded: GlobalWorkbenchType = serde_json::from_str(&json).unwrap();
+
+            assert_eq!(json, format!("\"{value}\""));
+            assert_eq!(decoded, object_type);
+        }
     }
 
     #[test]
     fn rejects_invalid_global_workbench_type_responses() {
-        for value in [
-            "CLAS",
-            "/OM",
-            "CLAS/",
-            "CLAS/OM/X",
-            "TOOLONG/X",
-            "CLAS/LONG",
-        ] {
+        for value in ["", "CLAS OC", "CLAS\nOC", "ÄUTH"] {
             assert!(
                 value.parse::<GlobalWorkbenchType>().is_err(),
                 "accepted {value}"
@@ -178,14 +144,8 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "R3TR object type exceeds 4 characters")]
-    fn global_workbench_type_rejects_an_oversized_directory_type() {
-        GlobalWorkbenchType::new("ABCDE", "X");
-    }
-
-    #[test]
-    #[should_panic(expected = "Workbench type exceeds 3 characters")]
-    fn global_workbench_type_rejects_an_oversized_internal_type() {
-        GlobalWorkbenchType::new("ABCD", "WXYZ");
+    #[should_panic(expected = "global Workbench type must not contain whitespace")]
+    fn static_global_workbench_type_rejects_whitespace() {
+        GlobalWorkbenchType::new("CLAS OC");
     }
 }

@@ -36,12 +36,12 @@ impl SourceComponent for MainSource {
 #[doc(hidden)]
 pub trait ObjectProperties: ObjectCollection {
     type MediaVersion: MediaVersionNegotiation;
-    type Properties: Send;
+    type Properties: serde::Serialize + Send;
 
     fn parse(
         resource: &ObjectRef<Self>,
         version: Self::MediaVersion,
-        body: Vec<u8>,
+        body: &[u8],
         etag: Option<EntityTag>,
     ) -> Result<Self::Properties, ResponseError>;
 }

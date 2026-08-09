@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use zadt::AdtUri;
+use zadt::{AdtUri, GlobalWorkbenchType};
 
 /// An opaque node identity scoped to one VFS instance.
 ///
@@ -91,13 +91,12 @@ pub enum MountKind {
 }
 
 /// Serializable metadata for one repository-object leaf.
-/// TODO: Use ADT types?
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjectNode {
     pub name: String,
     pub package: String,
-    pub object_type: String,
+    pub object_type: GlobalWorkbenchType,
     pub uri: AdtUri,
     pub virtual_workbench_uri: Option<String>,
     pub version: Option<String>,

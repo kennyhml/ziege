@@ -6,7 +6,7 @@ use serde::Deserialize;
 use thiserror::Error;
 use zadt::{
     Class, ClassSourceComponent, GlobalWorkbenchType, Include, Program, RepositoryObjectEntry,
-    RepositoryObjectType, SourceRef,
+    SourceRef,
 };
 
 const PROGRAM_FILES: &[FileSpec] = &[
@@ -71,6 +71,11 @@ const CLASS_FILES: &[FileSpec] = &[
         FileComponent::Source(SourceComponent::Class(ClassSourceComponent::TestClasses)),
     ),
     FileSpec::new(
+        "<name>.clas.locals.abap",
+        Cardinality::ZeroOrOne,
+        FileComponent::Source(SourceComponent::Class(ClassSourceComponent::LocalTypes)),
+    ),
+    FileSpec::new(
         "<name>.clas.texts.<lang>.properties",
         Cardinality::ZeroOrMore,
         FileComponent::Text(TextComponent::Texts),
@@ -124,16 +129,16 @@ impl ObjectFormat {
         }
 
         match self {
-            Self::Class => Ok(GlobalWorkbenchType::new("CLAS", "OC")),
+            Self::Class => Ok(GlobalWorkbenchType::new("CLAS/OC")),
             Self::Program => match metadata
                 .general_information
                 .and_then(|information| information.program_type)
                 .as_deref()
             {
                 None | Some("executableProgram" | "modulePool" | "subroutinePool") => {
-                    Ok(GlobalWorkbenchType::new("PROG", "P"))
+                    Ok(GlobalWorkbenchType::new("PROG/P"))
                 }
-                Some("include") => Ok(GlobalWorkbenchType::new("PROG", "I")),
+                Some("include") => Ok(GlobalWorkbenchType::new("PROG/I")),
                 Some(program_type) => Err(ProjectionError::UnsupportedProgramType {
                     program_type: program_type.to_owned(),
                 }),
@@ -141,25 +146,13 @@ impl ObjectFormat {
         }
     }
 
-    /// Resolves a RIS object type into its AFF object family.
-    pub fn for_repository_type(
-        object_type: &RepositoryObjectType,
-    ) -> Result<Self, ProjectionError> {
-        let workbench_type = object_type.global_workbench_type().map_err(|_| {
-            ProjectionError::UnsupportedRepositoryType {
-                object_type: object_type.to_string(),
-            }
-        })?;
-        Self::for_workbench_type(&workbench_type)
-    }
-
     /// Resolves a global Workbench type into its AFF object family.
     pub fn for_workbench_type(object_type: &GlobalWorkbenchType) -> Result<Self, ProjectionError> {
-        match (object_type.directory_type(), object_type.workbench_type()) {
-            ("PROG", "P" | "I") => Ok(Self::Program),
-            ("CLAS", "OC") => Ok(Self::Class),
+        match object_type.as_str() {
+            "PROG/P" | "PROG/I" => Ok(Self::Program),
+            "CLAS/OC" => Ok(Self::Class),
             _ => Err(ProjectionError::UnsupportedRepositoryType {
-                object_type: object_type.to_string(),
+                object_type: object_type.clone(),
             }),
         }
     }
@@ -169,7 +162,7 @@ impl TryFrom<&RepositoryObjectEntry> for ObjectFormat {
     type Error = ProjectionError;
 
     fn try_from(entry: &RepositoryObjectEntry) -> Result<Self, Self::Error> {
-        Self::for_repository_type(&entry.object_type)
+        Self::for_workbench_type(&entry.object_type)
     }
 }
 
@@ -280,7 +273,7 @@ impl ResolvedFile {
         if self.format != repository_format {
             return Err(ProjectionError::BindingTypeMismatch {
                 projected_type: self.format.object_type(),
-                repository_type: entry.object_type.to_string(),
+                repository_type: entry.object_type.clone(),
             });
         }
 
@@ -289,7 +282,7 @@ impl ResolvedFile {
                 "PROG/P" => Ok(entry.typed_reference::<Program>()?.source()),
                 "PROG/I" => Ok(entry.typed_reference::<Include>()?.source()),
                 _ => Err(ProjectionError::UnsupportedRepositoryType {
-                    object_type: entry.object_type.to_string(),
+                    object_type: entry.object_type.clone(),
                 }),
             },
             FileComponent::Source(SourceComponent::Class(component)) => Ok(entry
@@ -467,7 +460,7 @@ fn validate_language(language: &str) -> Result<(), ProjectionError> {
 #[non_exhaustive]
 pub enum ProjectionError {
     #[error("repository object type `{object_type}` has no supported AFF projection")]
-    UnsupportedRepositoryType { object_type: String },
+    UnsupportedRepositoryType { object_type: GlobalWorkbenchType },
 
     #[error("file name `{file_name}` does not match a supported AFF projection")]
     UnsupportedFileName { file_name: String },
@@ -485,7 +478,7 @@ pub enum ProjectionError {
     )]
     BindingTypeMismatch {
         projected_type: &'static str,
-        repository_type: String,
+        repository_type: GlobalWorkbenchType,
     },
 
     #[error("AFF component `{component:?}` is not an ADT source resource")]
@@ -558,16 +551,16 @@ mod tests {
             ("PROG/I", ObjectFormat::Program),
             ("CLAS/OC", ObjectFormat::Class),
         ] {
-            let repository_type = RepositoryObjectType::from(repository_type);
+            let repository_type: GlobalWorkbenchType = repository_type.parse().unwrap();
             assert_eq!(
-                ObjectFormat::for_repository_type(&repository_type).unwrap(),
+                ObjectFormat::for_workbench_type(&repository_type).unwrap(),
                 expected
             );
         }
 
-        for unsupported in ["CLAS/OM", "AUTH"] {
-            let repository_type = RepositoryObjectType::from(unsupported);
-            assert!(ObjectFormat::for_repository_type(&repository_type).is_err());
+        for unsupported in ["CLAS/OM", "AUTH", "CLAS/OCN/definitions", "clas/oc"] {
+            let repository_type: GlobalWorkbenchType = unsupported.parse().unwrap();
+            assert!(ObjectFormat::for_workbench_type(&repository_type).is_err());
         }
     }
 
@@ -635,6 +628,17 @@ mod tests {
                 language: None,
             }
         );
+        assert_eq!(
+            resolve_path("src/cx_root.clas.locals.abap").unwrap(),
+            ResolvedFile {
+                object_name: "CX_ROOT".to_owned(),
+                format: ObjectFormat::Class,
+                component: FileComponent::Source(SourceComponent::Class(
+                    ClassSourceComponent::LocalTypes,
+                )),
+                language: None,
+            }
+        );
     }
 
     #[test]
@@ -653,6 +657,13 @@ mod tests {
             "/sap/bc/adt/oo/classes/zcl_myclass/includes/testclasses"
         );
         assert_eq!(source.object.uri(), entry.reference.uri());
+
+        let resolved = resolve_file_name("zcl_myclass.clas.locals.abap").unwrap();
+        let source = resolved.source_ref(&entry).unwrap();
+        assert_eq!(
+            source.uri.as_str(),
+            "/sap/bc/adt/oo/classes/zcl_myclass/includes/localtypes"
+        );
     }
 
     #[test]
@@ -732,7 +743,12 @@ mod tests {
 
     #[test]
     fn language_is_required_only_for_language_dependent_files() {
-        let text = ObjectFormat::Class.files()[6];
+        let text = ObjectFormat::Class
+            .files()
+            .iter()
+            .copied()
+            .find(|file| matches!(file.component, FileComponent::Text(TextComponent::Texts)))
+            .unwrap();
         let source = ObjectFormat::Class.files()[1];
 
         assert!(matches!(

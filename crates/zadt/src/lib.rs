@@ -15,6 +15,7 @@ mod vocabulary;
 
 pub mod transport;
 
+pub use api::classes::ClassPropertiesQuery;
 pub use api::discovery::{CoreDiscoveryQuery, DiscoveryQuery};
 pub use api::object::{
     LockRequest, ObjectSourceQuery, ObjectSourceUpdate, ObjectSourceUpdateBuilder,
@@ -25,7 +26,7 @@ pub use api::programs::{
     IncludePropertiesQuery, ProgramPropertiesQuery, ProgramRun, ProgramRunBuilder,
     ProgramRunBuilderError,
 };
-pub use api::properties::ObjectPropertiesQuery;
+pub use api::properties::{JsonObjectPropertiesQuery, ObjectPropertiesQuery};
 pub use api::repository::{
     RepositoryContentOperation, RepositoryContentQuery, RepositoryContentQueryBuilder,
     RepositoryContentQueryBuilderError, RepositoryFacetsQuery, RepositoryObjectPropertiesQuery,
@@ -47,20 +48,22 @@ pub use error::{
     ResponseError, TransportError,
 };
 pub use models::{
-    AccessMode, Capabilities, Category, Collection, IncludeProperties, IncludePropertiesV2,
-    IncludePropertyVersion, LockHandle, PackageAssignment, PackageAttributes,
-    PackageInterfaceReference, PackageProperties, PackagePropertiesV1, PackagePropertiesV2,
-    PackagePropertiesVersion, PackageReference, PackageSettings, PackageTransport, PackageTree,
-    PackageTreeKind, PackageTreeNode, PackageUseAccess, ProgramProperties, ProgramPropertiesV2,
-    ProgramPropertiesV3, ProgramPropertiesVersion, ProgramRunResult, RepositoryContent,
-    RepositoryFacet, RepositoryFacetDefinition, RepositoryFacetValuesLink, RepositoryFacets,
-    RepositoryObjectEntry, RepositoryObjectProperties, RepositoryObjectSummary,
-    RepositoryObjectType, RepositoryPreselection, RepositoryPreselectionInfo, RepositoryProperty,
-    RepositoryVirtualFolder, SessionInformation, SessionUri, SourceCode, SyntaxConfiguration,
-    SyntaxLanguage, SystemInformationLink, TemplateLink, TransportCheckMessage,
-    TransportCheckResult, TransportCreation, TransportCreationMessage, TransportKind,
-    TransportObjectKey, TransportObjectLock, TransportProject, TransportRequest, TransportRequests,
-    TransportStatus, TransportTask, Workspace,
+    AccessMode, Capabilities, Category, ClassObjectReference, ClassProperties, ClassPropertiesV2,
+    ClassPropertiesV3, ClassPropertiesV4, ClassPropertiesVersion, ClassSourceProperties,
+    Collection, IncludeProperties, IncludePropertiesV2, IncludePropertyVersion, LockHandle,
+    PackageAssignment, PackageAttributes, PackageInterfaceReference, PackageProperties,
+    PackagePropertiesV1, PackagePropertiesV2, PackagePropertiesVersion, PackageReference,
+    PackageSettings, PackageTransport, PackageTree, PackageTreeKind, PackageTreeNode,
+    PackageUseAccess, ProgramProperties, ProgramPropertiesV2, ProgramPropertiesV3,
+    ProgramPropertiesVersion, ProgramRunResult, RepositoryContent, RepositoryFacet,
+    RepositoryFacetDefinition, RepositoryFacetValuesLink, RepositoryFacets, RepositoryObjectEntry,
+    RepositoryObjectProperties, RepositoryObjectSummary, RepositoryPreselection,
+    RepositoryPreselectionInfo, RepositoryProperty, RepositoryVirtualFolder, SessionInformation,
+    SessionUri, SourceCode, SyntaxConfiguration, SyntaxLanguage, SystemInformationLink,
+    TemplateLink, TransportCheckMessage, TransportCheckResult, TransportCreation,
+    TransportCreationMessage, TransportKind, TransportObjectKey, TransportObjectLock,
+    TransportProject, TransportRequest, TransportRequests, TransportStatus, TransportTask,
+    Workspace,
 };
 pub use objects::{
     Class, ClassSourceComponent, GlobalWorkbenchType, Include, InvalidWorkbenchType,
