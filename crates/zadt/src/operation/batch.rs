@@ -154,8 +154,15 @@ where
 
         let mut requests = Vec::with_capacity(self.operations.len());
         let mut targets = Vec::with_capacity(self.operations.len());
+        let mut required_user_session = None;
         for operation in &self.operations {
             let request = operation.request(client)?;
+            if let Some(required) = request.required_user_session() {
+                if required_user_session.is_some_and(|current| current != required) {
+                    return Err(OperationError::UserSessionMismatch);
+                }
+                required_user_session = Some(required);
+            }
             targets.push(request.target().clone());
             requests.push(request);
         }
@@ -177,10 +184,14 @@ where
                 .collect::<Vec<_>>(),
         );
         request.set_response_context_targets(targets);
+        if let Some(required) = required_user_session {
+            request.require_user_session(required);
+        }
         Ok(request)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+        let user_session = response.user_session();
         let (response, context) = response.into_context_parts();
         if response.status() != StatusCode::ACCEPTED {
             return Err(ResponseError::UnexpectedStatus {
@@ -213,7 +224,12 @@ where
             .zip(targets.iter().cloned())
             .zip(responses)
             .map(|((operation, target), response)| {
-                operation.decode(OperationResponse::new(response, target))
+                let response = OperationResponse::new(response, target);
+                let response = match user_session {
+                    Some(user_session) => response.in_user_session(user_session),
+                    None => response,
+                };
+                operation.decode(response)
             })
             .map(Some)
             .collect();
@@ -666,6 +682,26 @@ mod tests {
         }
     }
 
+    struct SessionBoundOperation(super::super::UserSessionId);
+
+    impl Operation<Ready> for SessionBoundOperation {
+        type Response = ();
+        type Kind = Stateful;
+
+        fn request(&self, _client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
+            let mut request = AdtRequest::new(
+                Method::PUT,
+                AdtUri::parse("/sap/bc/adt/test/session-bound").unwrap(),
+            );
+            request.require_user_session(self.0);
+            Ok(request)
+        }
+
+        fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+            expect_ok(response).map(|_| ())
+        }
+    }
+
     fn expect_ok(response: OperationResponse) -> Result<Vec<u8>, ResponseError> {
         if response.status() == StatusCode::OK {
             Ok(response.into_body())
@@ -838,6 +874,19 @@ content-type:application/xml\r\n\r\n\
 
         assert!(matches!(error, OperationError::Batch(BatchError::Empty)));
         assert!(requests.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn rejects_operations_bound_to_different_user_sessions() {
+        let (client, _) = fixture_client(Vec::new());
+        let mut batch = BatchOperation::<Stateful>::new(&client).unwrap();
+        batch.push(SessionBoundOperation(super::super::UserSessionId::new()));
+        batch.push(SessionBoundOperation(super::super::UserSessionId::new()));
+
+        let error =
+            <BatchOperation<Stateful> as Operation<Ready>>::request(&batch, &client).unwrap_err();
+
+        assert!(matches!(error, OperationError::UserSessionMismatch));
     }
 
     #[tokio::test]

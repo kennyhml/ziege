@@ -2,7 +2,7 @@ use std::fmt;
 
 use serde::Deserialize;
 
-use crate::{EntityTag, ObjectError, ObjectRef, SourceRef};
+use crate::{EntityTag, ObjectError, ObjectRef, SourceRef, operation::UserSessionId};
 
 /// A fetched source representation and its attached metadata.
 #[derive(Debug)]
@@ -19,6 +19,33 @@ pub struct SourceCode {
 
 impl SourceCode {
     pub(crate) fn new(reference: SourceRef, content: String, etag: Option<EntityTag>) -> Self {
+        Self {
+            reference,
+            content,
+            etag,
+        }
+    }
+}
+
+/// The canonical source information returned by a successful update.
+#[derive(Debug)]
+pub struct SourceUpdateResult {
+    /// The source resource that was updated.
+    pub reference: SourceRef,
+
+    /// Server-confirmed source content when SAP returned a representation body.
+    pub content: Option<String>,
+
+    /// The updated entity tag supplied by SAP, when present.
+    pub etag: Option<EntityTag>,
+}
+
+impl SourceUpdateResult {
+    pub(crate) fn new(
+        reference: SourceRef,
+        content: Option<String>,
+        etag: Option<EntityTag>,
+    ) -> Self {
         Self {
             reference,
             content,
@@ -48,11 +75,52 @@ pub struct LockHandle {
 
     /// The opaque handle supplied by SAP.
     handle: String,
+
+    access_mode: AccessMode,
+    user_session: Option<UserSessionId>,
+    transport_relevant: bool,
+    transport_request: Option<String>,
+    transport_request_description: Option<String>,
+    transport_request_owner: Option<String>,
+    link_up: bool,
+    link_up_mode: Option<String>,
+    modification_support: Option<String>,
 }
 
 impl LockHandle {
-    pub(crate) fn new(object: ObjectRef, handle: String) -> Self {
-        Self { object, handle }
+    pub(crate) fn parse(
+        object: ObjectRef,
+        access_mode: AccessMode,
+        user_session: Option<UserSessionId>,
+        body: &[u8],
+    ) -> Result<Self, ObjectError> {
+        let raw: RawLock =
+            serde_xml_rs::from_reader(body).map_err(ObjectError::InvalidLockResponse)?;
+        let RawLockData {
+            lock_handle,
+            transport_request,
+            transport_request_owner,
+            transport_request_description,
+            is_local,
+            is_link_up,
+            modification_support,
+            link_up_mode,
+        } = raw.values.data;
+        let handle = non_empty(lock_handle).ok_or(ObjectError::MissingLockHandle)?;
+
+        Ok(Self {
+            object,
+            handle,
+            access_mode,
+            user_session,
+            transport_relevant: !is_local.eq_ignore_ascii_case("X"),
+            transport_request: non_empty(transport_request),
+            transport_request_description: non_empty(transport_request_description),
+            transport_request_owner: non_empty(transport_request_owner),
+            link_up: is_link_up.eq_ignore_ascii_case("X"),
+            link_up_mode: non_empty(link_up_mode),
+            modification_support: non_empty(modification_support),
+        })
     }
 
     /// Returns the object this lock belongs to.
@@ -64,6 +132,67 @@ impl LockHandle {
     pub fn handle(&self) -> &str {
         &self.handle
     }
+
+    /// Returns the access mode with which this lock was acquired.
+    pub fn access_mode(&self) -> AccessMode {
+        self.access_mode
+    }
+
+    /// Returns whether changes to this object are transport relevant.
+    pub fn is_transport_relevant(&self) -> bool {
+        self.transport_relevant
+    }
+
+    /// Returns the transport request currently associated with this lock.
+    pub fn transport_request(&self) -> Option<&str> {
+        self.transport_request.as_deref()
+    }
+
+    /// Returns the associated transport request description, when supplied.
+    pub fn transport_request_description(&self) -> Option<&str> {
+        self.transport_request_description.as_deref()
+    }
+
+    /// Returns the owner of the associated transport request, when supplied.
+    pub fn transport_request_owner(&self) -> Option<&str> {
+        self.transport_request_owner.as_deref()
+    }
+
+    /// Returns whether SAP requested transport link-up handling.
+    pub fn is_link_up(&self) -> bool {
+        self.link_up
+    }
+
+    /// Returns the exact transport link-up mode supplied by SAP.
+    pub fn link_up_mode(&self) -> Option<&str> {
+        self.link_up_mode.as_deref()
+    }
+
+    /// Returns the exact manual modification-support value supplied by SAP.
+    pub fn modification_support(&self) -> Option<&str> {
+        self.modification_support.as_deref()
+    }
+
+    pub(crate) fn user_session(&self) -> Option<UserSessionId> {
+        self.user_session
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(object: ObjectRef, access_mode: AccessMode) -> Self {
+        Self {
+            object,
+            handle: "LOCK-HANDLE".to_owned(),
+            access_mode,
+            user_session: Some(UserSessionId::new()),
+            transport_relevant: false,
+            transport_request: None,
+            transport_request_description: None,
+            transport_request_owner: None,
+            link_up: false,
+            link_up_mode: None,
+            modification_support: None,
+        }
+    }
 }
 
 impl fmt::Debug for LockHandle {
@@ -72,17 +201,18 @@ impl fmt::Debug for LockHandle {
             .debug_struct("LockHandle")
             .field("object", &self.object)
             .field("handle", &"<opaque>")
+            .field("access_mode", &self.access_mode)
+            .field("transport_relevant", &self.transport_relevant)
+            .field("transport_request", &self.transport_request)
+            .field("link_up", &self.link_up)
+            .field("link_up_mode", &self.link_up_mode)
+            .field("modification_support", &self.modification_support)
             .finish()
     }
 }
 
-pub(crate) fn parse_lock_handle(body: &[u8]) -> Result<String, ObjectError> {
-    let raw: RawLock = serde_xml_rs::from_reader(body).map_err(ObjectError::InvalidLockResponse)?;
-    raw.values
-        .data
-        .lock_handle
-        .filter(|handle| !handle.is_empty())
-        .ok_or(ObjectError::MissingLockHandle)
+fn non_empty(value: String) -> Option<String> {
+    (!value.is_empty()).then_some(value)
 }
 
 #[derive(Deserialize)]
@@ -100,18 +230,78 @@ struct RawLockValues {
 
 #[derive(Deserialize)]
 struct RawLockData {
-    #[serde(rename = "LOCK_HANDLE")]
-    lock_handle: Option<String>,
+    #[serde(rename = "LOCK_HANDLE", default)]
+    lock_handle: String,
+    #[serde(rename = "CORRNR", default)]
+    transport_request: String,
+    #[serde(rename = "CORRUSER", default)]
+    transport_request_owner: String,
+    #[serde(rename = "CORRTEXT", default)]
+    transport_request_description: String,
+    #[serde(rename = "IS_LOCAL", default)]
+    is_local: String,
+    #[serde(rename = "IS_LINK_UP", default)]
+    is_link_up: String,
+    #[serde(rename = "MODIFICATION_SUPPORT", default)]
+    modification_support: String,
+    #[serde(rename = "LINK_UP_MODE", default)]
+    link_up_mode: String,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::AdtUri;
 
     const LOCK_XML: &[u8] = include_bytes!("../../tests/fixtures/object-lock.xml");
 
     #[test]
-    fn parses_an_opaque_object_lock_handle() {
-        assert_eq!(parse_lock_handle(LOCK_XML).unwrap(), "LOCK-HANDLE-1");
+    fn parses_object_lock_and_transport_metadata() {
+        let object = ObjectRef::new(AdtUri::parse("/sap/bc/adt/programs/programs/ztest").unwrap());
+        let lock = LockHandle::parse(
+            object,
+            AccessMode::Modify,
+            Some(UserSessionId::new()),
+            LOCK_XML,
+        )
+        .unwrap();
+
+        assert_eq!(lock.handle(), "LOCK-HANDLE-1");
+        assert_eq!(lock.access_mode(), AccessMode::Modify);
+        assert!(!lock.is_transport_relevant());
+        assert_eq!(lock.transport_request(), None);
+        assert!(!lock.is_link_up());
+        assert_eq!(lock.link_up_mode(), None);
+        assert_eq!(lock.modification_support(), Some("NoModification"));
+    }
+
+    #[test]
+    fn preserves_transport_and_link_up_metadata() {
+        let xml = String::from_utf8(LOCK_XML.to_vec())
+            .unwrap()
+            .replace("<CORRNR />", "<CORRNR>A4HK900001</CORRNR>")
+            .replace("<CORRUSER />", "<CORRUSER>DEVELOPER</CORRUSER>")
+            .replace("<CORRTEXT />", "<CORRTEXT>Source update</CORRTEXT>")
+            .replace("<IS_LOCAL>X</IS_LOCAL>", "<IS_LOCAL />")
+            .replace("<IS_LINK_UP />", "<IS_LINK_UP>X</IS_LINK_UP>")
+            .replace(
+                "<LINK_UP_MODE />",
+                "<LINK_UP_MODE>MultipleRequests</LINK_UP_MODE>",
+            );
+        let object = ObjectRef::new(AdtUri::parse("/sap/bc/adt/oo/classes/zcl_test").unwrap());
+        let lock = LockHandle::parse(
+            object,
+            AccessMode::Modify,
+            Some(UserSessionId::new()),
+            xml.as_bytes(),
+        )
+        .unwrap();
+
+        assert!(lock.is_transport_relevant());
+        assert_eq!(lock.transport_request(), Some("A4HK900001"));
+        assert_eq!(lock.transport_request_owner(), Some("DEVELOPER"));
+        assert_eq!(lock.transport_request_description(), Some("Source update"));
+        assert!(lock.is_link_up());
+        assert_eq!(lock.link_up_mode(), Some("MultipleRequests"));
     }
 }

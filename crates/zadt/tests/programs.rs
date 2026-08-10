@@ -534,7 +534,9 @@ async fn program_lock_and_update_share_one_user_session() {
                     "sap-usercontext=sap-client=001&sap-language=EN; sap-contextid=USER-SESSION-1",
                 )
                 .body(SOURCE);
-            then.status(200);
+            then.status(200)
+                .header("etag", "SOURCE-ETAG-2")
+                .body(SOURCE);
         })
         .await;
     let unlock_program = server
@@ -582,12 +584,9 @@ async fn program_lock_and_update_share_one_user_session() {
         .execute(&session)
         .await
         .unwrap();
-    program
-        .source()
-        .update()
-        .lock_handle(lock_handle.clone())
-        .content(source.content.as_str())
-        .build()
+    let updated = source
+        .reference
+        .update(&lock_handle, source.content.as_str())
         .unwrap()
         .execute(&session)
         .await
@@ -603,6 +602,8 @@ async fn program_lock_and_update_share_one_user_session() {
     session.close().await.unwrap();
 
     assert_eq!(source.etag.as_deref(), Some("SOURCE-ETAG-1"));
+    assert_eq!(updated.content.as_deref(), Some(SOURCE));
+    assert_eq!(updated.etag.as_deref(), Some("SOURCE-ETAG-2"));
     logon.assert_async().await;
     discovery.assert_async().await;
     csrf.assert_async().await;

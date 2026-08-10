@@ -3,6 +3,7 @@ use std::future::Future;
 use async_lock::Mutex;
 use http::{HeaderMap, HeaderValue, StatusCode, header};
 use secrecy::{ExposeSecret, SecretString};
+use uuid::Uuid;
 
 use crate::{
     AdtRequest, AdtResponse, AdtUri, Client, ClientState, CompatibilityError, EntityTag,
@@ -19,6 +20,15 @@ const ADT_SESSION_TYPE: &str = "x-sap-adt-sessiontype";
 const STATEFUL_SESSION_TYPE: &str = "stateful";
 const STATELESS_SESSION_TYPE: &str = "stateless";
 const USER_SESSION_COOKIE: &str = "sap-contextid";
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct UserSessionId(Uuid);
+
+impl UserSessionId {
+    pub(crate) fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
 
 mod private {
     pub trait Sealed {}
@@ -92,6 +102,7 @@ impl OperationContext {
 pub struct OperationResponse {
     response: AdtResponse,
     context: OperationContext,
+    user_session: Option<UserSessionId>,
 }
 
 impl OperationResponse {
@@ -105,7 +116,20 @@ impl OperationResponse {
 
     /// Pairs a raw response with context captured from its originating request.
     pub fn with_context(response: AdtResponse, context: OperationContext) -> Self {
-        Self { response, context }
+        Self {
+            response,
+            context,
+            user_session: None,
+        }
+    }
+
+    pub(crate) fn in_user_session(mut self, user_session: UserSessionId) -> Self {
+        self.user_session = Some(user_session);
+        self
+    }
+
+    pub(crate) fn user_session(&self) -> Option<UserSessionId> {
+        self.user_session
     }
 
     /// Returns the target of the request that produced this response.
@@ -244,6 +268,7 @@ where
 /// [`UserSession::close`] when the workflow finishes; dropping this value only
 /// releases local state and does not notify SAP.
 pub struct UserSession<S: ClientState> {
+    id: UserSessionId,
     client: Client<S>,
     state: Mutex<UserSessionState>,
 }
@@ -271,11 +296,18 @@ where
     async fn execute(&self, operation: &O) -> Result<O::Response, OperationError> {
         let mut session = self.state.lock().await;
         let mut request = operation.request(&self.client)?;
+        if request
+            .required_user_session()
+            .is_some_and(|required| required != self.id)
+        {
+            return Err(OperationError::UserSessionMismatch);
+        }
         session.decorate(&mut request)?;
         let context = request.operation_context();
         let response = self.client.transport().send(request).await?;
         session.update(response.headers());
-        Ok(operation.decode(OperationResponse::with_context(response, context))?)
+        Ok(operation
+            .decode(OperationResponse::with_context(response, context).in_user_session(self.id))?)
     }
 }
 
@@ -340,6 +372,7 @@ where
 {
     pub(crate) fn new(client: Client<S>) -> Self {
         Self {
+            id: UserSessionId::new(),
             client,
             state: Mutex::new(UserSessionState::default()),
         }

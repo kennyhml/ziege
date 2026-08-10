@@ -17,10 +17,7 @@ pub mod transport;
 
 pub use api::classes::ClassPropertiesQuery;
 pub use api::discovery::{CoreDiscoveryQuery, DiscoveryQuery};
-pub use api::object::{
-    LockRequest, ObjectSourceQuery, ObjectSourceUpdate, ObjectSourceUpdateBuilder,
-    ObjectSourceUpdateBuilderError, UnlockRequest,
-};
+pub use api::object::{LockRequest, ObjectSourceQuery, ObjectSourceUpdate, UnlockRequest};
 pub use api::packages::{PackagePropertiesQuery, PackageSettingsQuery, PackageTreeQuery};
 pub use api::programs::{
     IncludePropertiesQuery, ProgramPropertiesQuery, ProgramRun, ProgramRunBuilder,
@@ -59,11 +56,11 @@ pub use models::{
     RepositoryFacetDefinition, RepositoryFacetValuesLink, RepositoryFacets, RepositoryObjectEntry,
     RepositoryObjectProperties, RepositoryObjectSummary, RepositoryPreselection,
     RepositoryPreselectionInfo, RepositoryProperty, RepositoryVirtualFolder, SessionInformation,
-    SessionUri, SourceCode, SyntaxConfiguration, SyntaxLanguage, SystemInformationLink,
-    TemplateLink, TransportCheckMessage, TransportCheckResult, TransportCreation,
-    TransportCreationMessage, TransportKind, TransportObjectKey, TransportObjectLock,
-    TransportProject, TransportRequest, TransportRequests, TransportStatus, TransportTask,
-    Workspace,
+    SessionUri, SourceCode, SourceUpdateResult, SyntaxConfiguration, SyntaxLanguage,
+    SystemInformationLink, TemplateLink, TransportCheckMessage, TransportCheckResult,
+    TransportCreation, TransportCreationMessage, TransportKind, TransportObjectKey,
+    TransportObjectLock, TransportProject, TransportRequest, TransportRequests, TransportStatus,
+    TransportTask, Workspace,
 };
 pub use objects::{
     Class, ClassSourceComponent, GlobalWorkbenchType, Include, InvalidWorkbenchType,

@@ -184,6 +184,9 @@ pub enum ObjectError {
 
     #[error("lock for `{actual}` cannot be used with object `{expected}`")]
     LockHandleObjectMismatch { expected: String, actual: String },
+
+    #[error("updating source requires a modification lock")]
+    LockHandleNotModifiable,
 }
 
 /// An error encoding or decoding repository information system data.
@@ -290,6 +293,9 @@ pub enum ResponseError {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum OperationError {
+    #[error("operation uses a lock acquired by another user session")]
+    UserSessionMismatch,
+
     #[error(transparent)]
     Compatibility(#[from] CompatibilityError),
 

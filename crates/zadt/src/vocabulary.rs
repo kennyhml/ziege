@@ -84,6 +84,7 @@ pub(crate) mod query_parameter {
     pub const ACTION: &str = "_action";
     pub const LOCK_HANDLE: &str = "lockHandle";
     pub const PROFILER_ID: &str = "profilerId";
+    pub const TRANSPORT_REQUEST: &str = "corrNr";
     pub const VERSION: &str = "version";
 }
 

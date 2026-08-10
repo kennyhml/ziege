@@ -8,7 +8,6 @@ mod session;
 mod transports;
 
 pub(crate) use discovery::parse_capabilities;
-pub(crate) use object::parse_lock_handle;
 pub(crate) use repository::RepositoryContentRequest;
 pub(crate) use session::parse_session_information;
 pub(crate) use transports::{TransportCheckRequest, TransportCreateRequest};
@@ -18,7 +17,7 @@ pub use classes::{
     ClassPropertiesVersion, ClassSourceProperties,
 };
 pub use discovery::{Capabilities, Category, Collection, TemplateLink, Workspace};
-pub use object::{AccessMode, LockHandle, SourceCode};
+pub use object::{AccessMode, LockHandle, SourceCode, SourceUpdateResult};
 pub use packages::{
     PackageAssignment, PackageAttributes, PackageInterfaceReference, PackageProperties,
     PackagePropertiesV1, PackagePropertiesV2, PackagePropertiesVersion, PackageReference,

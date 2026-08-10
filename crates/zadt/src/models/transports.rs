@@ -119,6 +119,12 @@ pub struct TransportRequest {
     pub repository_id: Option<String>,
 }
 
+impl AsRef<str> for TransportRequest {
+    fn as_ref(&self) -> &str {
+        &self.number
+    }
+}
+
 /// The result of checking transport recording for one repository resource.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TransportCheckResult {
@@ -992,6 +998,7 @@ mod tests {
         assert_eq!(transport.kind, TransportKind::Workbench);
         assert_eq!(transport.client, None);
         assert_eq!(transport.description, "Workbench request");
+        assert_eq!(transport.as_ref(), "DEVK900001");
     }
 
     #[test]

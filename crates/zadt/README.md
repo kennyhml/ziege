@@ -58,6 +58,27 @@ such as reading `ProgramProperties` or `ClassProperties`, still use the concrete
 The runtime properties operation serializes that validated result to JSON, giving command-line and network
 callers one response type without weakening the typed API or adding a variant for every SAP object type.
 
+Source updates remain resource-driven rather than descriptor-dispatched. A `SourceRef` retains its owning
+object and accepts any modification lock for that object. The lock remains independent from an individual
+source component, allowing one class lock to update definitions, implementations, and other includes:
+
+```rust,ignore
+let session = client.create_user_session();
+let lock = class.lock(AccessMode::Modify).execute(&session).await?;
+
+let result = class
+    .component_source(ClassSourceComponent::Definitions)
+    .update(&lock, definitions)?
+    .execute(&session)
+    .await?;
+
+class.unlock(lock)?.execute(&session).await?;
+```
+
+When a transport check requires recording, attach the selected request to that
+specific update with `.transport(&request)`. The selection remains independent
+from the object lock and can be reused after relocking.
+
 ### Transport
 
 The transport layer can be conveniently abstracted away as, regardless of the protocol used, ADT wraps

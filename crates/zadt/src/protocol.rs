@@ -5,7 +5,7 @@ use http::{
     header::{self, InvalidHeaderValue},
 };
 
-use crate::{AdtUri, OperationContext};
+use crate::{AdtUri, OperationContext, operation::UserSessionId};
 
 /// A transport agnostic request to an ADT resource.
 ///
@@ -24,6 +24,7 @@ pub struct AdtRequest {
     headers: HeaderMap,
     body: Vec<u8>,
     response_context_targets: Vec<AdtUri>,
+    required_user_session: Option<UserSessionId>,
 }
 
 impl AdtRequest {
@@ -35,6 +36,7 @@ impl AdtRequest {
             headers: HeaderMap::new(),
             body: Vec::new(),
             response_context_targets: Vec::new(),
+            required_user_session: None,
         }
     }
 
@@ -93,6 +95,14 @@ impl AdtRequest {
 
     pub fn set_body(&mut self, body: impl Into<Vec<u8>>) {
         self.body = body.into();
+    }
+
+    pub(crate) fn require_user_session(&mut self, user_session: UserSessionId) {
+        self.required_user_session = Some(user_session);
+    }
+
+    pub(crate) fn required_user_session(&self) -> Option<UserSessionId> {
+        self.required_user_session
     }
 
     /// Formats this requests content as a batch part of a `multipart/mixed`
