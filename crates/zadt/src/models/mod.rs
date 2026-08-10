@@ -1,5 +1,6 @@
 mod classes;
 mod discovery;
+mod exception;
 mod object;
 mod packages;
 mod programs;
@@ -17,6 +18,7 @@ pub use classes::{
     ClassPropertiesVersion, ClassSourceProperties,
 };
 pub use discovery::{Capabilities, Category, Collection, TemplateLink, Workspace};
+pub use exception::{AdtException, AdtExceptionProperty};
 pub use object::{AccessMode, LockHandle, SourceCode, SourceUpdateResult};
 pub use packages::{
     PackageAssignment, PackageAttributes, PackageInterfaceReference, PackageProperties,

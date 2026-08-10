@@ -194,10 +194,7 @@ where
         let user_session = response.user_session();
         let (response, context) = response.into_context_parts();
         if response.status() != StatusCode::ACCEPTED {
-            return Err(ResponseError::UnexpectedStatus {
-                status: response.status(),
-                body: String::from_utf8_lossy(response.body()).into_owned(),
-            });
+            return Err(ResponseError::unexpected_status(&response));
         }
 
         let boundary = response_boundary(response.headers())?;
@@ -706,10 +703,7 @@ mod tests {
         if response.status() == StatusCode::OK {
             Ok(response.into_body())
         } else {
-            Err(ResponseError::UnexpectedStatus {
-                status: response.status(),
-                body: String::from_utf8_lossy(response.body()).into_owned(),
-            })
+            Err(ResponseError::unexpected_status(response.response()))
         }
     }
 

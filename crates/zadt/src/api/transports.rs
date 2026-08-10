@@ -227,10 +227,7 @@ impl Operation<Ready> for TransportCheck {
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         if response.status() != StatusCode::OK {
-            return Err(ResponseError::UnexpectedStatus {
-                status: response.status(),
-                body: String::from_utf8_lossy(response.body()).into_owned(),
-            });
+            return Err(ResponseError::unexpected_status(response.response()));
         }
         if response.body().is_empty() {
             return Err(CtsError::MissingTransportCheckResponse.into());
@@ -339,10 +336,7 @@ impl Operation<Ready> for TransportsQuery {
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         if response.status() != StatusCode::OK {
-            return Err(ResponseError::UnexpectedStatus {
-                status: response.status(),
-                body: String::from_utf8_lossy(response.body()).into_owned(),
-            });
+            return Err(ResponseError::unexpected_status(response.response()));
         }
         if response.body().is_empty() {
             return Ok(TransportRequests::default());
@@ -415,10 +409,7 @@ impl Operation<Ready> for TransportPropertiesQuery {
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         if response.status() != StatusCode::OK {
-            return Err(ResponseError::UnexpectedStatus {
-                status: response.status(),
-                body: String::from_utf8_lossy(response.body()).into_owned(),
-            });
+            return Err(ResponseError::unexpected_status(response.response()));
         }
         if response.body().is_empty() {
             return Ok(None);
@@ -516,10 +507,7 @@ impl Operation<Ready> for TransportCreate {
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         if !response.status().is_success() {
-            return Err(ResponseError::UnexpectedStatus {
-                status: response.status(),
-                body: String::from_utf8_lossy(response.body()).into_owned(),
-            });
+            return Err(ResponseError::unexpected_status(response.response()));
         }
         if response.body().is_empty() {
             return Err(CtsError::MissingTransportCreationResponse.into());

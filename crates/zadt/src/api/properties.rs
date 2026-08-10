@@ -90,10 +90,7 @@ where
             return Err(ResponseError::UnexpectedNotModified);
         }
         if response.status() != StatusCode::OK {
-            return Err(ResponseError::UnexpectedStatus {
-                status: response.status(),
-                body: String::from_utf8_lossy(response.body()).into_owned(),
-            });
+            return Err(ResponseError::unexpected_status(response.response()));
         }
 
         let Some(content_type) = response

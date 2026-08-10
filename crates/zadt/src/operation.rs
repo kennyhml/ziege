@@ -404,11 +404,7 @@ where
         if response.status() == http::StatusCode::OK {
             Ok(())
         } else {
-            Err(ResponseError::UnexpectedStatus {
-                status: response.status(),
-                body: String::from_utf8_lossy(response.body()).into_owned(),
-            }
-            .into())
+            Err(ResponseError::unexpected_status(&response).into())
         }
     }
 }
@@ -450,10 +446,7 @@ mod tests {
             if response.status() == StatusCode::OK {
                 Ok(response.request_target().clone())
             } else {
-                Err(ResponseError::UnexpectedStatus {
-                    status: response.status(),
-                    body: String::from_utf8_lossy(response.body()).into_owned(),
-                })
+                Err(ResponseError::unexpected_status(response.response()))
             }
         }
     }

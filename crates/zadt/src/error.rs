@@ -4,8 +4,8 @@ use http::StatusCode;
 use thiserror::Error;
 
 use crate::{
-    AdtUriError, BatchError, CategoryId, CompatibilityError, GlobalWorkbenchType,
-    resource::AdtLinkError,
+    AdtException, AdtResponse, AdtUriError, BatchError, CategoryId, CompatibilityError,
+    GlobalWorkbenchType, resource::AdtLinkError,
 };
 
 #[cfg(feature = "reqwest")]
@@ -244,6 +244,12 @@ impl From<AdtLinkError> for ObjectError {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum ResponseError {
+    #[error("ADT returned HTTP status {status}: {exception}")]
+    BackendException {
+        status: StatusCode,
+        exception: Box<AdtException>,
+    },
+
     #[error("ADT returned unexpected HTTP status {status}: {body}")]
     UnexpectedStatus { status: StatusCode, body: String },
 
@@ -282,6 +288,22 @@ pub enum ResponseError {
 
     #[error("could not serialize object properties as JSON: {0}")]
     JsonSerialization(#[from] serde_json::Error),
+}
+
+impl ResponseError {
+    pub(crate) fn unexpected_status(response: &AdtResponse) -> Self {
+        let status = response.status();
+        match AdtException::parse(response.body()) {
+            Ok(exception) => Self::BackendException {
+                status,
+                exception: Box::new(exception),
+            },
+            Err(_) => Self::UnexpectedStatus {
+                status,
+                body: String::from_utf8_lossy(response.body()).into_owned(),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Error)]

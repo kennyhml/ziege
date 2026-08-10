@@ -250,10 +250,7 @@ fn ensure_ok(response: &AdtResponse) -> Result<(), ResponseError> {
     if response.status() == StatusCode::OK {
         Ok(())
     } else {
-        Err(ResponseError::UnexpectedStatus {
-            status: response.status(),
-            body: String::from_utf8_lossy(response.body()).into_owned(),
-        })
+        Err(ResponseError::unexpected_status(response))
     }
 }
 

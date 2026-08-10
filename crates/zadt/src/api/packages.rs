@@ -157,10 +157,7 @@ fn ensure_xml_response(
     expected_content_type: &'static str,
 ) -> Result<(), ResponseError> {
     if response.status() != StatusCode::OK {
-        return Err(ResponseError::UnexpectedStatus {
-            status: response.status(),
-            body: String::from_utf8_lossy(response.body()).into_owned(),
-        });
+        return Err(ResponseError::unexpected_status(response));
     }
     let Some(content_type) = response
         .headers()

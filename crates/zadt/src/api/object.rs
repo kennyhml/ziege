@@ -243,10 +243,7 @@ impl<S: ClientState> Operation<S> for ObjectSourceUpdate {
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         if !response.status().is_success() {
-            return Err(ResponseError::UnexpectedStatus {
-                status: response.status(),
-                body: String::from_utf8_lossy(response.body()).into_owned(),
-            });
+            return Err(ResponseError::unexpected_status(response.response()));
         }
         let etag = response.entity_tag();
         let body = response.into_body();
@@ -287,10 +284,7 @@ fn expect_ok(response: &AdtResponse) -> Result<(), ResponseError> {
     if response.status() == StatusCode::OK {
         Ok(())
     } else {
-        Err(ResponseError::UnexpectedStatus {
-            status: response.status(),
-            body: String::from_utf8_lossy(response.body()).into_owned(),
-        })
+        Err(ResponseError::unexpected_status(response))
     }
 }
 
@@ -485,6 +479,40 @@ mod tests {
         assert_eq!(result.reference, source);
         assert_eq!(result.content.as_deref(), Some("REPORT zprogram.\n"));
         assert_eq!(result.etag.as_deref(), Some("source-etag-2"));
+    }
+
+    #[test]
+    fn source_update_decodes_structured_backend_exceptions() {
+        let program = program();
+        let source = program.source();
+        let lock_handle = LockHandle::for_test(program.erase(), AccessMode::Modify);
+        let update = source.update(&lock_handle, "REPORT zprogram.").unwrap();
+        let body =
+            br#"<exc:exception xmlns:exc="http://www.sap.com/abapxml/types/communicationframework">
+            <namespace id="com.sap.adt"/>
+            <type id="ExceptionResourceLockConflict"/>
+            <message lang="EN">Object is already locked</message>
+            <localizedMessage lang="EN">Object is locked in request A4HK900125</localizedMessage>
+            <properties>
+                <entry key="T100KEY-V3">A4HK900125</entry>
+            </properties>
+        </exc:exception>"#;
+
+        let error = <ObjectSourceUpdate as Operation<Initial>>::decode(
+            &update,
+            OperationResponse::new(
+                AdtResponse::new(StatusCode::CONFLICT, HeaderMap::new(), body.to_vec()),
+                source.uri,
+            ),
+        )
+        .unwrap_err();
+
+        let ResponseError::BackendException { status, exception } = error else {
+            panic!("expected a structured backend exception");
+        };
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(exception.exception_type, "ExceptionResourceLockConflict");
+        assert_eq!(exception.property("T100KEY-V3"), Some("A4HK900125"));
     }
 
     #[test]
