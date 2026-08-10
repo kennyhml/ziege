@@ -2,7 +2,9 @@ use std::fmt;
 
 use serde::Deserialize;
 
-use crate::{EntityTag, ObjectError, ObjectRef, SourceRef, operation::UserSessionId};
+use crate::{
+    EntityTag, ObjectError, ObjectRef, SourceRef, TransportNumber, operation::UserSessionId,
+};
 
 /// A fetched source representation and its attached metadata.
 #[derive(Debug)]
@@ -69,7 +71,7 @@ pub enum AccessMode {
 /// The handle is bound to both [`ObjectRef`] and [`crate::UserSession`]. A
 /// handle string alone is not sufficient to update another resource.
 #[derive(Clone, Eq, PartialEq)]
-pub struct LockHandle {
+pub struct ObjectLock {
     /// The locked object.
     object: ObjectRef,
 
@@ -79,7 +81,7 @@ pub struct LockHandle {
     access_mode: AccessMode,
     user_session: Option<UserSessionId>,
     transport_relevant: bool,
-    transport_request: Option<String>,
+    transport_request: Option<TransportNumber>,
     transport_request_description: Option<String>,
     transport_request_owner: Option<String>,
     link_up: bool,
@@ -87,7 +89,7 @@ pub struct LockHandle {
     modification_support: Option<String>,
 }
 
-impl LockHandle {
+impl ObjectLock {
     pub(crate) fn parse(
         object: ObjectRef,
         access_mode: AccessMode,
@@ -114,7 +116,7 @@ impl LockHandle {
             access_mode,
             user_session,
             transport_relevant: !is_local.eq_ignore_ascii_case("X"),
-            transport_request: non_empty(transport_request),
+            transport_request: non_empty(transport_request).map(TransportNumber::from),
             transport_request_description: non_empty(transport_request_description),
             transport_request_owner: non_empty(transport_request_owner),
             link_up: is_link_up.eq_ignore_ascii_case("X"),
@@ -144,8 +146,8 @@ impl LockHandle {
     }
 
     /// Returns the transport request currently associated with this lock.
-    pub fn transport_request(&self) -> Option<&str> {
-        self.transport_request.as_deref()
+    pub fn transport_request(&self) -> Option<&TransportNumber> {
+        self.transport_request.as_ref()
     }
 
     /// Returns the associated transport request description, when supplied.
@@ -193,12 +195,24 @@ impl LockHandle {
             modification_support: None,
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn for_test_with_transport(
+        object: ObjectRef,
+        access_mode: AccessMode,
+        transport_request: impl Into<TransportNumber>,
+    ) -> Self {
+        let mut object_lock = Self::for_test(object, access_mode);
+        object_lock.transport_relevant = true;
+        object_lock.transport_request = Some(transport_request.into());
+        object_lock
+    }
 }
 
-impl fmt::Debug for LockHandle {
+impl fmt::Debug for ObjectLock {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("LockHandle")
+            .debug_struct("ObjectLock")
             .field("object", &self.object)
             .field("handle", &"<opaque>")
             .field("access_mode", &self.access_mode)
@@ -258,7 +272,7 @@ mod tests {
     #[test]
     fn parses_object_lock_and_transport_metadata() {
         let object = ObjectRef::new(AdtUri::parse("/sap/bc/adt/programs/programs/ztest").unwrap());
-        let lock = LockHandle::parse(
+        let lock = ObjectLock::parse(
             object,
             AccessMode::Modify,
             Some(UserSessionId::new()),
@@ -289,7 +303,7 @@ mod tests {
                 "<LINK_UP_MODE>MultipleRequests</LINK_UP_MODE>",
             );
         let object = ObjectRef::new(AdtUri::parse("/sap/bc/adt/oo/classes/zcl_test").unwrap());
-        let lock = LockHandle::parse(
+        let lock = ObjectLock::parse(
             object,
             AccessMode::Modify,
             Some(UserSessionId::new()),
@@ -298,7 +312,10 @@ mod tests {
         .unwrap();
 
         assert!(lock.is_transport_relevant());
-        assert_eq!(lock.transport_request(), Some("A4HK900001"));
+        assert_eq!(
+            lock.transport_request().map(TransportNumber::as_str),
+            Some("A4HK900001")
+        );
         assert_eq!(lock.transport_request_owner(), Some("DEVELOPER"));
         assert_eq!(lock.transport_request_description(), Some("Source update"));
         assert!(lock.is_link_up());

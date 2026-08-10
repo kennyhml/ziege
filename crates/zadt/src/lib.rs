@@ -48,7 +48,7 @@ pub use models::{
     AccessMode, AdtException, AdtExceptionProperty, Capabilities, Category, ClassObjectReference,
     ClassProperties, ClassPropertiesV2, ClassPropertiesV3, ClassPropertiesV4,
     ClassPropertiesVersion, ClassSourceProperties, Collection, IncludeProperties,
-    IncludePropertiesV2, IncludePropertyVersion, LockHandle, PackageAssignment, PackageAttributes,
+    IncludePropertiesV2, IncludePropertyVersion, ObjectLock, PackageAssignment, PackageAttributes,
     PackageInterfaceReference, PackageProperties, PackagePropertiesV1, PackagePropertiesV2,
     PackagePropertiesVersion, PackageReference, PackageSettings, PackageTransport, PackageTree,
     PackageTreeKind, PackageTreeNode, PackageUseAccess, ProgramProperties, ProgramPropertiesV2,
@@ -59,8 +59,8 @@ pub use models::{
     RepositoryVirtualFolder, SessionInformation, SessionUri, SourceCode, SourceUpdateResult,
     SyntaxConfiguration, SyntaxLanguage, SystemInformationLink, TemplateLink,
     TransportCheckMessage, TransportCheckResult, TransportCreation, TransportCreationMessage,
-    TransportKind, TransportObjectKey, TransportObjectLock, TransportProject, TransportRequest,
-    TransportRequests, TransportStatus, TransportTask, Workspace,
+    TransportKind, TransportNumber, TransportObjectKey, TransportObjectLock, TransportProject,
+    TransportRequest, TransportRequests, TransportStatus, TransportTask, Workspace,
 };
 pub use objects::{
     Class, ClassSourceComponent, GlobalWorkbenchType, Include, InvalidWorkbenchType,

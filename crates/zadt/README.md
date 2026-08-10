@@ -81,9 +81,11 @@ let result = class
 class.unlock(lock)?.execute(&session).await?;
 ```
 
-When a transport check requires recording, attach the selected request to that
-specific update with `.transport(&request)`. The selection remains independent
-from the object lock and can be reused after relocking.
+When SAP attaches a transport request to the lock, `SourceRef::update` carries
+it into the update automatically. When the first lock does not have a request
+yet, set the selected request explicitly with `.transport(&request)`.
+Transport identifiers are exposed as lossless `TransportNumber` values rather
+than interchangeable strings.
 
 ### Transport
 

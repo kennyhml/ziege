@@ -7,6 +7,55 @@ use crate::{AdtUri, CtsError};
 const ABAP_XML_NAMESPACE: &str = "http://www.sap.com/abapxml";
 const LEGACY_TRANSPORT_REFERENCE_PREFIX: &str = "/com.sap.cts/object_record/";
 
+/// An opaque CTS transport request or task number (`TRKORR`).
+///
+/// Values are preserved exactly because their shape can vary between SAP
+/// systems and backend integrations.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct TransportNumber(String);
+
+impl TransportNumber {
+    /// Returns the exact CTS transport number.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Consumes this identifier and returns its exact wire value.
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl<T: AsRef<str> + ?Sized> From<&T> for TransportNumber {
+    fn from(value: &T) -> Self {
+        Self(value.as_ref().to_owned())
+    }
+}
+
+impl From<String> for TransportNumber {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<TransportNumber> for String {
+    fn from(value: TransportNumber) -> Self {
+        value.0
+    }
+}
+
+impl AsRef<str> for TransportNumber {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl fmt::Display for TransportNumber {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 /// The CTS function assigned to a transport request.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
@@ -89,7 +138,7 @@ impl fmt::Display for TransportStatus {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TransportRequest {
     /// The transport request number (`TRKORR`).
-    pub number: String,
+    pub number: TransportNumber,
 
     /// The request's CTS transport function.
     pub kind: TransportKind,
@@ -121,7 +170,7 @@ pub struct TransportRequest {
 
 impl AsRef<str> for TransportRequest {
     fn as_ref(&self) -> &str {
-        &self.number
+        self.number.as_str()
     }
 }
 
@@ -284,7 +333,7 @@ pub struct TransportObjectLock {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TransportTask {
     /// The CTS task number.
-    pub number: String,
+    pub number: TransportNumber,
 
     /// The task's CTS function.
     pub kind: TransportKind,
@@ -309,7 +358,7 @@ pub struct TransportTask {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TransportProject {
     /// The request associated with this project entry.
-    pub request_number: String,
+    pub request_number: TransportNumber,
 
     /// The external CTS project identifier.
     pub id: String,
@@ -322,7 +371,7 @@ pub struct TransportProject {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TransportCreation {
     /// The newly created transport request number.
-    pub transport_number: String,
+    pub transport_number: TransportNumber,
 
     /// An optional status message returned by integrated change management.
     pub message: Option<TransportCreationMessage>,
@@ -338,7 +387,7 @@ impl TransportCreation {
 
         let message = raw.values.data.message;
         Ok(Self {
-            transport_number: raw.values.data.transport_number,
+            transport_number: raw.values.data.transport_number.into(),
             message: (!message.severity.is_empty()
                 || !message.short_text.is_empty()
                 || !message.long_text.is_empty())
@@ -364,7 +413,7 @@ impl TransportCreation {
         };
 
         Ok(Self {
-            transport_number: transport_number.to_owned(),
+            transport_number: transport_number.into(),
             message: None,
         })
     }
@@ -431,7 +480,7 @@ impl TransportRequests {
 impl From<RawTransportRequest> for TransportRequest {
     fn from(raw: RawTransportRequest) -> Self {
         Self {
-            number: raw.number,
+            number: raw.number.into(),
             kind: TransportKind::parse(raw.kind),
             status: TransportStatus::parse(raw.status),
             target_system: non_empty(raw.target_system),
@@ -821,7 +870,7 @@ impl From<RawTransportObjectLock> for TransportObjectLock {
 impl From<RawTransportTask> for TransportTask {
     fn from(raw: RawTransportTask) -> Self {
         Self {
-            number: raw.number,
+            number: raw.number.into(),
             kind: TransportKind::parse(raw.kind),
             status: TransportStatus::parse(raw.status),
             owner: raw.owner,
@@ -854,7 +903,7 @@ struct RawTransportProject {
 impl From<RawTransportProject> for TransportProject {
     fn from(raw: RawTransportProject) -> Self {
         Self {
-            request_number: raw.request_number,
+            request_number: raw.request_number.into(),
             id: raw.id,
             description: raw.description,
         }
@@ -969,6 +1018,15 @@ mod tests {
     const TRANSPORT_CHECK_XML: &[u8] = include_bytes!("../../tests/fixtures/transport-check.xml");
 
     #[test]
+    fn transport_numbers_preserve_backend_specific_values() {
+        let number = TransportNumber::from("backend-specific/request");
+
+        assert_eq!(number.as_str(), "backend-specific/request");
+        assert_eq!(number.to_string(), "backend-specific/request");
+        assert_eq!(number.into_string(), "backend-specific/request");
+    }
+
+    #[test]
     fn parses_transport_request_headers_and_preserves_unknown_functions() {
         let transports = TransportRequests::parse(TRANSPORTS_XML).unwrap();
 
@@ -994,7 +1052,7 @@ mod tests {
     fn parses_a_single_transport_request() {
         let transport = TransportRequest::parse(TRANSPORT_XML).unwrap();
 
-        assert_eq!(transport.number, "DEVK900001");
+        assert_eq!(transport.number.as_str(), "DEVK900001");
         assert_eq!(transport.kind, TransportKind::Workbench);
         assert_eq!(transport.client, None);
         assert_eq!(transport.description, "Workbench request");
@@ -1070,13 +1128,13 @@ mod tests {
         );
 
         assert_eq!(check.requests.len(), 1);
-        assert_eq!(check.requests[0].number, "DEVK900001");
+        assert_eq!(check.requests[0].number.as_str(), "DEVK900001");
         assert_eq!(check.requests[0].target_system.as_deref(), Some("QAS"));
 
         assert_eq!(check.locks.len(), 1);
-        assert_eq!(check.locks[0].holder.number, "DEVK900001");
+        assert_eq!(check.locks[0].holder.number.as_str(), "DEVK900001");
         assert_eq!(check.locks[0].tasks.len(), 1);
-        assert_eq!(check.locks[0].tasks[0].number, "DEVK900002");
+        assert_eq!(check.locks[0].tasks[0].number.as_str(), "DEVK900002");
         assert_eq!(
             check.locks[0].tasks[0].kind,
             TransportKind::Other("R".to_owned())
@@ -1135,12 +1193,12 @@ mod tests {
             <LONG_TEXT></LONG_TEXT></MESSAGE></DATA></asx:values></asx:abap>"#;
 
         let modern = TransportCreation::parse(modern).unwrap();
-        assert_eq!(modern.transport_number, "DEVK900003");
+        assert_eq!(modern.transport_number.as_str(), "DEVK900003");
         assert_eq!(modern.message.unwrap().severity, "WARNING");
 
         let legacy =
             TransportCreation::parse_legacy(b"/com.sap.cts/object_record/DEVK900004\n").unwrap();
-        assert_eq!(legacy.transport_number, "DEVK900004");
+        assert_eq!(legacy.transport_number.as_str(), "DEVK900004");
         assert_eq!(legacy.message, None);
     }
 }

@@ -38,12 +38,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let session = client.create_user_session();
 
-    let lock = object.lock(AccessMode::Modify).execute(&session).await?;
+    let lock = object.lock(AccessMode::Show).execute(&session).await?;
     let res = object
         .component_source(ClassSourceComponent::Macros)
-        .update(&lock, "*Hi this is ZADT hheheheh!")?
-        // .transport(lock.transport_request().unwrap_or_default())
-        // .transport("A4HK900125")
+        .update(&lock, "*Hi this is ZADT!")?
         .execute(&session)
         .await;
 

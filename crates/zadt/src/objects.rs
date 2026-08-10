@@ -1,7 +1,7 @@
 use std::{fmt, hash::Hash, marker::PhantomData};
 
 use crate::{
-    AccessMode, JsonObjectPropertiesQuery, LockHandle, LockRequest, UnlockRequest,
+    AccessMode, JsonObjectPropertiesQuery, LockRequest, ObjectLock, UnlockRequest,
     client::{Client, Ready},
     error::ObjectError,
     resource::SourceRef,
@@ -107,15 +107,15 @@ impl RepositoryObject {
     }
 
     /// Creates an operation that releases this object's lock.
-    pub fn unlock(&self, lock_handle: LockHandle) -> Result<UnlockRequest, ObjectError> {
+    pub fn unlock(&self, object_lock: ObjectLock) -> Result<UnlockRequest, ObjectError> {
         let reference = self.reference();
-        if reference.uri() != lock_handle.object().uri() {
-            return Err(ObjectError::LockHandleObjectMismatch {
+        if reference.uri() != object_lock.object().uri() {
+            return Err(ObjectError::ObjectLockMismatch {
                 expected: reference.to_string(),
-                actual: lock_handle.object().to_string(),
+                actual: object_lock.object().to_string(),
             });
         }
-        Ok(UnlockRequest::new(lock_handle))
+        Ok(UnlockRequest::new(object_lock))
     }
 
     /// Creates a JSON-producing properties query for a modeled family.

@@ -19,7 +19,7 @@ pub use classes::{
 };
 pub use discovery::{Capabilities, Category, Collection, TemplateLink, Workspace};
 pub use exception::{AdtException, AdtExceptionProperty};
-pub use object::{AccessMode, LockHandle, SourceCode, SourceUpdateResult};
+pub use object::{AccessMode, ObjectLock, SourceCode, SourceUpdateResult};
 pub use packages::{
     PackageAssignment, PackageAttributes, PackageInterfaceReference, PackageProperties,
     PackagePropertiesV1, PackagePropertiesV2, PackagePropertiesVersion, PackageReference,
@@ -40,6 +40,6 @@ pub use repository::{
 pub use session::{SessionInformation, SessionUri, SystemInformationLink};
 pub use transports::{
     TransportCheckMessage, TransportCheckResult, TransportCreation, TransportCreationMessage,
-    TransportKind, TransportObjectKey, TransportObjectLock, TransportProject, TransportRequest,
-    TransportRequests, TransportStatus, TransportTask,
+    TransportKind, TransportNumber, TransportObjectKey, TransportObjectLock, TransportProject,
+    TransportRequest, TransportRequests, TransportStatus, TransportTask,
 };

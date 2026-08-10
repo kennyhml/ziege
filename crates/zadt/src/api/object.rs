@@ -3,7 +3,7 @@ use http::{Method, StatusCode};
 use crate::{
     client::{Client, ClientState},
     error::{ObjectError, OperationError, ResponseError},
-    models::{AccessMode, LockHandle, SourceCode, SourceUpdateResult},
+    models::{AccessMode, ObjectLock, SourceCode, SourceUpdateResult, TransportNumber},
     objects::{ObjectRef, ObjectType, Source},
     operation::{Operation, OperationResponse, Stateful, Stateless},
     protocol::{AdtRequest, AdtResponse},
@@ -57,14 +57,14 @@ impl<T: ObjectType> ObjectRef<T> {
     }
 
     /// Creates an operation that releases this object's lock.
-    pub fn unlock(&self, lock_handle: LockHandle) -> Result<UnlockRequest, ObjectError> {
-        if self.uri() != lock_handle.object().uri() {
-            return Err(ObjectError::LockHandleObjectMismatch {
+    pub fn unlock(&self, object_lock: ObjectLock) -> Result<UnlockRequest, ObjectError> {
+        if self.uri() != object_lock.object().uri() {
+            return Err(ObjectError::ObjectLockMismatch {
                 expected: self.to_string(),
-                actual: lock_handle.object().to_string(),
+                actual: object_lock.object().to_string(),
             });
         }
-        Ok(UnlockRequest::new(lock_handle))
+        Ok(UnlockRequest::new(object_lock))
     }
 }
 
@@ -78,7 +78,7 @@ impl<T: Source> ObjectRef<T> {
 /// Locks a repository object within a [`crate::UserSession`].
 ///
 /// The operation sends `POST` with `_action=LOCK` and the configured
-/// `accessMode`. The returned [`LockHandle`] must remain in the same user
+/// `accessMode`. The returned [`ObjectLock`] must remain in the same user
 /// session as subsequent update or unlock operations.
 #[derive(Debug)]
 pub struct LockRequest {
@@ -99,7 +99,7 @@ impl LockRequest {
 }
 
 impl<S: ClientState> Operation<S> for LockRequest {
-    type Response = LockHandle;
+    type Response = ObjectLock;
     type Kind = Stateful;
 
     fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
@@ -112,7 +112,7 @@ impl<S: ClientState> Operation<S> for LockRequest {
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         expect_ok(response.response())?;
-        Ok(LockHandle::parse(
+        Ok(ObjectLock::parse(
             self.object.clone(),
             self.access_mode,
             response.user_session(),
@@ -121,16 +121,16 @@ impl<S: ClientState> Operation<S> for LockRequest {
     }
 }
 
-/// Releases a [`LockHandle`] within its SAP user session.
+/// Releases an [`ObjectLock`] within its SAP user session.
 #[derive(Debug)]
 pub struct UnlockRequest {
     /// The lock to release.
-    pub lock_handle: LockHandle,
+    pub object_lock: ObjectLock,
 }
 
 impl UnlockRequest {
-    pub(crate) fn new(lock_handle: LockHandle) -> Self {
-        Self { lock_handle }
+    pub(crate) fn new(object_lock: ObjectLock) -> Self {
+        Self { object_lock }
     }
 }
 
@@ -139,10 +139,10 @@ impl<S: ClientState> Operation<S> for UnlockRequest {
     type Kind = Stateful;
 
     fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
-        let mut request = AdtRequest::new(Method::POST, self.lock_handle.object().uri().clone());
+        let mut request = AdtRequest::new(Method::POST, self.object_lock.object().uri().clone());
         request.push_query(query_parameter::ACTION, PostAction::Unlock.as_str());
-        request.push_query(query_parameter::LOCK_HANDLE, self.lock_handle.handle());
-        if let Some(user_session) = self.lock_handle.user_session() {
+        request.push_query(query_parameter::LOCK_HANDLE, self.object_lock.handle());
+        if let Some(user_session) = self.object_lock.user_session() {
             request.require_user_session(user_session);
         }
         Ok(request)
@@ -155,7 +155,7 @@ impl<S: ClientState> Operation<S> for UnlockRequest {
 
 /// Replaces the complete source code of an object.
 ///
-/// This operation is stateful and requires a [`LockHandle`] issued for the
+/// This operation is stateful and requires an [`ObjectLock`] issued for the
 /// object being updated. [`SourceRef::update`] verifies this relationship before
 /// constructing the operation.
 #[derive(Debug)]
@@ -164,61 +164,22 @@ pub struct ObjectSourceUpdate {
     source: SourceRef,
 
     /// A modification lock obtained for the source's owning object.
-    lock_handle: LockHandle,
+    object_lock: ObjectLock,
 
     /// The complete replacement source text.
     content: String,
 
     /// The transport request selected for this update, when recording is required.
-    transport_request: Option<String>,
+    transport_request: Option<TransportNumber>,
 }
 
 impl ObjectSourceUpdate {
-    fn new(
-        source: SourceRef,
-        lock_handle: LockHandle,
-        content: String,
-    ) -> Result<Self, ObjectError> {
-        if &source.object != lock_handle.object() {
-            return Err(ObjectError::LockHandleObjectMismatch {
-                expected: source.object.to_string(),
-                actual: lock_handle.object().to_string(),
-            });
-        }
-        if lock_handle.access_mode() != AccessMode::Modify {
-            return Err(ObjectError::LockHandleNotModifiable);
-        }
-        Ok(Self {
-            source,
-            lock_handle,
-            content,
-            transport_request: None,
-        })
-    }
-
-    /// Returns the source resource that will be replaced.
-    pub fn source(&self) -> &SourceRef {
-        &self.source
-    }
-
-    /// Returns the lock authorizing this update.
-    pub fn lock_handle(&self) -> &LockHandle {
-        &self.lock_handle
-    }
-
-    /// Returns the complete replacement source text.
-    pub fn content(&self) -> &str {
-        &self.content
-    }
-
-    /// Returns the transport request selected for this update.
-    pub fn transport_request(&self) -> Option<&str> {
-        self.transport_request.as_deref()
-    }
-
     /// Records this update in the supplied transport request.
-    pub fn transport(mut self, transport: impl AsRef<str>) -> Self {
-        self.transport_request = Some(transport.as_ref().to_owned());
+    ///
+    /// This replaces any transport request inherited from the lock.
+    #[must_use]
+    pub fn transport(mut self, transport_request: impl Into<TransportNumber>) -> Self {
+        self.transport_request = Some(transport_request.into());
         self
     }
 }
@@ -229,11 +190,14 @@ impl<S: ClientState> Operation<S> for ObjectSourceUpdate {
 
     fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
         let mut request = AdtRequest::new(Method::PUT, self.source.uri.clone());
-        request.push_query(query_parameter::LOCK_HANDLE, self.lock_handle.handle());
+        request.push_query(query_parameter::LOCK_HANDLE, self.object_lock.handle());
         if let Some(transport_request) = &self.transport_request {
-            request.push_query(query_parameter::TRANSPORT_REQUEST, transport_request);
+            request.push_query(
+                query_parameter::TRANSPORT_REQUEST,
+                transport_request.as_str(),
+            );
         }
-        if let Some(user_session) = self.lock_handle.user_session() {
+        if let Some(user_session) = self.object_lock.user_session() {
             request.require_user_session(user_session);
         }
         request.set_content_type(media_type::SOURCE_UPDATE);
@@ -255,7 +219,7 @@ impl<S: ClientState> Operation<S> for ObjectSourceUpdate {
     }
 }
 
-impl LockHandle {
+impl ObjectLock {
     /// Consumes this handle and creates an operation that removes the lock.
     pub fn remove(self) -> UnlockRequest {
         UnlockRequest::new(self)
@@ -271,12 +235,29 @@ impl SourceRef {
     }
 
     /// Replaces this source using a modification lock for its owning object.
+    ///
+    /// The update automatically uses the transport request attached to the lock,
+    /// when SAP supplied one.
     pub fn update(
         &self,
-        lock_handle: &LockHandle,
+        object_lock: &ObjectLock,
         content: impl Into<String>,
     ) -> Result<ObjectSourceUpdate, ObjectError> {
-        ObjectSourceUpdate::new(self.clone(), lock_handle.clone(), content.into())
+        if &self.object != object_lock.object() {
+            return Err(ObjectError::ObjectLockMismatch {
+                expected: self.object.to_string(),
+                actual: object_lock.object().to_string(),
+            });
+        }
+        if object_lock.access_mode() != AccessMode::Modify {
+            return Err(ObjectError::ObjectLockNotModifiable);
+        }
+        Ok(ObjectSourceUpdate {
+            source: self.clone(),
+            object_lock: object_lock.clone(),
+            content: content.into(),
+            transport_request: object_lock.transport_request().cloned(),
+        })
     }
 }
 
@@ -371,7 +352,7 @@ mod tests {
             "ZCL_EXAMPLE",
             crate::AdtUri::parse("/sap/bc/adt/oo/classes/zcl_example").unwrap(),
         );
-        let lock_handle = LockHandle::for_test(class.erase(), AccessMode::Modify);
+        let object_lock = ObjectLock::for_test(class.erase(), AccessMode::Modify);
         let client = Client::new(UnusedTransport);
 
         for component in [
@@ -379,7 +360,7 @@ mod tests {
             ClassSourceComponent::Implementations,
         ] {
             let source = class.component_source(component);
-            let update = source.update(&lock_handle, "source").unwrap();
+            let update = source.update(&object_lock, "source").unwrap();
             let request =
                 <ObjectSourceUpdate as Operation<Initial>>::request(&update, &client).unwrap();
 
@@ -401,44 +382,39 @@ mod tests {
             "ZSECOND",
             crate::AdtUri::parse("/sap/bc/adt/programs/programs/ZSECOND").unwrap(),
         );
-        let lock_handle = LockHandle::for_test(first.erase(), AccessMode::Modify);
+        let object_lock = ObjectLock::for_test(first.erase(), AccessMode::Modify);
 
         let error = second
             .source()
-            .update(&lock_handle, "REPORT zsecond.")
+            .update(&object_lock, "REPORT zsecond.")
             .unwrap_err();
 
-        assert!(matches!(
-            error,
-            ObjectError::LockHandleObjectMismatch { .. }
-        ));
+        assert!(matches!(error, ObjectError::ObjectLockMismatch { .. }));
     }
 
     #[test]
     fn source_update_requires_a_modification_lock() {
         let program = program();
-        let lock_handle = LockHandle::for_test(program.erase(), AccessMode::Show);
+        let object_lock = ObjectLock::for_test(program.erase(), AccessMode::Show);
 
         let error = program
             .source()
-            .update(&lock_handle, "REPORT zprogram.")
+            .update(&object_lock, "REPORT zprogram.")
             .unwrap_err();
 
-        assert!(matches!(error, ObjectError::LockHandleNotModifiable));
+        assert!(matches!(error, ObjectError::ObjectLockNotModifiable));
     }
 
     #[test]
-    fn source_update_uses_only_lock_and_transport_write_parameters() {
+    fn source_update_inherits_the_locks_transport_request() {
         let program = program();
         let mut source = program.source();
         source
             .query
             .push(("version".to_owned(), "inactive".to_owned()));
-        let lock_handle = LockHandle::for_test(program.erase(), AccessMode::Modify);
-        let update = source
-            .update(&lock_handle, "REPORT zprogram.")
-            .unwrap()
-            .transport("A4HK900001");
+        let object_lock =
+            ObjectLock::for_test_with_transport(program.erase(), AccessMode::Modify, "A4HK900001");
+        let update = source.update(&object_lock, "REPORT zprogram.").unwrap();
 
         let request = <ObjectSourceUpdate as Operation<Initial>>::request(
             &update,
@@ -459,11 +435,40 @@ mod tests {
     }
 
     #[test]
+    fn source_update_accepts_an_explicit_transport_request() {
+        let program = program();
+        let source = program.source();
+
+        for object_lock in [
+            ObjectLock::for_test(program.erase(), AccessMode::Modify),
+            ObjectLock::for_test_with_transport(program.erase(), AccessMode::Modify, "A4HK900001"),
+        ] {
+            let update = source
+                .update(&object_lock, "REPORT zprogram.")
+                .unwrap()
+                .transport("A4HK900002");
+            let request = <ObjectSourceUpdate as Operation<Initial>>::request(
+                &update,
+                &Client::new(UnusedTransport),
+            )
+            .unwrap();
+
+            assert_eq!(
+                request.query(),
+                [
+                    ("lockHandle".to_owned(), "LOCK-HANDLE".to_owned()),
+                    ("corrNr".to_owned(), "A4HK900002".to_owned()),
+                ]
+            );
+        }
+    }
+
+    #[test]
     fn source_update_decodes_canonical_content_and_etag() {
         let program = program();
         let source = program.source();
-        let lock_handle = LockHandle::for_test(program.erase(), AccessMode::Modify);
-        let update = source.update(&lock_handle, "REPORT zprogram.").unwrap();
+        let object_lock = ObjectLock::for_test(program.erase(), AccessMode::Modify);
+        let update = source.update(&object_lock, "REPORT zprogram.").unwrap();
         let mut headers = HeaderMap::new();
         headers.insert(header::ETAG, HeaderValue::from_static("source-etag-2"));
 
@@ -485,8 +490,8 @@ mod tests {
     fn source_update_decodes_structured_backend_exceptions() {
         let program = program();
         let source = program.source();
-        let lock_handle = LockHandle::for_test(program.erase(), AccessMode::Modify);
-        let update = source.update(&lock_handle, "REPORT zprogram.").unwrap();
+        let object_lock = ObjectLock::for_test(program.erase(), AccessMode::Modify);
+        let update = source.update(&object_lock, "REPORT zprogram.").unwrap();
         let body =
             br#"<exc:exception xmlns:exc="http://www.sap.com/abapxml/types/communicationframework">
             <namespace id="com.sap.adt"/>
@@ -519,8 +524,8 @@ mod tests {
     fn source_update_accepts_an_empty_success_response() {
         let program = program();
         let source = program.source();
-        let lock_handle = LockHandle::for_test(program.erase(), AccessMode::Modify);
-        let update = source.update(&lock_handle, "REPORT zprogram.").unwrap();
+        let object_lock = ObjectLock::for_test(program.erase(), AccessMode::Modify);
+        let update = source.update(&object_lock, "REPORT zprogram.").unwrap();
 
         let result = <ObjectSourceUpdate as Operation<Initial>>::decode(
             &update,
@@ -538,10 +543,10 @@ mod tests {
     #[tokio::test]
     async fn source_update_rejects_another_user_session_before_transport() {
         let program = program();
-        let lock_handle = LockHandle::for_test(program.erase(), AccessMode::Modify);
+        let object_lock = ObjectLock::for_test(program.erase(), AccessMode::Modify);
         let update = program
             .source()
-            .update(&lock_handle, "REPORT zprogram.")
+            .update(&object_lock, "REPORT zprogram.")
             .unwrap();
         let session = Client::new(UnusedTransport).create_user_session();
 
@@ -560,13 +565,10 @@ mod tests {
             "ZSECOND",
             crate::AdtUri::parse("/sap/bc/adt/programs/programs/ZSECOND").unwrap(),
         );
-        let lock_handle = LockHandle::for_test(first.erase(), AccessMode::Modify);
+        let object_lock = ObjectLock::for_test(first.erase(), AccessMode::Modify);
 
-        let error = second.unlock(lock_handle).unwrap_err();
+        let error = second.unlock(object_lock).unwrap_err();
 
-        assert!(matches!(
-            error,
-            ObjectError::LockHandleObjectMismatch { .. }
-        ));
+        assert!(matches!(error, ObjectError::ObjectLockMismatch { .. }));
     }
 }

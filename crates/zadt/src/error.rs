@@ -177,10 +177,10 @@ pub enum ObjectError {
     InvalidResponseEncoding(#[from] std::string::FromUtf8Error),
 
     #[error("lock for `{actual}` cannot be used with object `{expected}`")]
-    LockHandleObjectMismatch { expected: String, actual: String },
+    ObjectLockMismatch { expected: String, actual: String },
 
     #[error("updating source requires a modification lock")]
-    LockHandleNotModifiable,
+    ObjectLockNotModifiable,
 }
 
 /// An error encoding or decoding repository information system data.

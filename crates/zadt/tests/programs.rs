@@ -579,22 +579,22 @@ async fn program_lock_and_update_share_one_user_session() {
     let source = program.source().query().execute(&client).await.unwrap();
     let session = client.create_user_session();
 
-    let lock_handle = program
+    let object_lock = program
         .lock(AccessMode::Modify)
         .execute(&session)
         .await
         .unwrap();
     let updated = source
         .reference
-        .update(&lock_handle, source.content.as_str())
+        .update(&object_lock, source.content.as_str())
         .unwrap()
         .execute(&session)
         .await
         .unwrap();
-    assert_eq!(lock_handle.object().uri(), program.uri());
-    assert_eq!(lock_handle.handle(), "LOCK-HANDLE-1");
+    assert_eq!(object_lock.object().uri(), program.uri());
+    assert_eq!(object_lock.handle(), "LOCK-HANDLE-1");
     program
-        .unlock(lock_handle)
+        .unlock(object_lock)
         .unwrap()
         .execute(&session)
         .await

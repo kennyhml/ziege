@@ -4,7 +4,8 @@ use http::{Method, StatusCode, header};
 use crate::{
     AdtRequest, AdtUri, CategoryId, Client, CtsError, MediaVersionNegotiation, ObjectError,
     Operation, OperationError, OperationResponse, PostAction, Ready, ResponseError, Stateless,
-    TransportCheckResult, TransportCreation, TransportKind, TransportRequest, TransportRequests,
+    TransportCheckResult, TransportCreation, TransportKind, TransportNumber, TransportRequest,
+    TransportRequests,
     models::{TransportCheckRequest, TransportCreateRequest},
     target::CollectionTarget,
     vocabulary::query_parameter,
@@ -373,21 +374,21 @@ impl Operation<Ready> for TransportsQuery {
 /// Backend handler: `CL_CTS_ADT_RES_OBJ_RECORD`
 #[derive(Clone, Debug)]
 pub struct TransportPropertiesQuery {
-    transport_number: String,
+    transport_number: TransportNumber,
 }
 
 impl TransportPropertiesQuery {
     const TARGET: CollectionTarget = CollectionTarget::new(TRANSPORTS_CATEGORY);
 
     /// Creates a query for one transport request.
-    pub fn new(transport_number: impl Into<String>) -> Self {
+    pub fn new(transport_number: impl Into<TransportNumber>) -> Self {
         Self {
             transport_number: transport_number.into(),
         }
     }
 
     /// Returns the requested transport number.
-    pub fn transport_number(&self) -> &str {
+    pub fn transport_number(&self) -> &TransportNumber {
         &self.transport_number
     }
 }
@@ -400,7 +401,7 @@ impl Operation<Ready> for TransportPropertiesQuery {
         let collection = Self::TARGET.collection(client)?;
         let target = collection
             .target()
-            .append_segments([&self.transport_number])
+            .append_segments([self.transport_number.as_str()])
             .map_err(|source| ResponseError::Object(ObjectError::InvalidTarget(source)))?;
         let mut request = AdtRequest::new(Method::GET, target);
         request.set_accept(TRANSPORT_REQUEST_MEDIA_TYPE);

@@ -139,8 +139,8 @@ async fn transport_check_uses_the_discovered_endpoint_and_link_up_mode() {
         .unwrap();
 
     assert_eq!(result.object.object_type, "CINC");
-    assert_eq!(result.requests[0].number, "DEVK900001");
-    assert_eq!(result.locks[0].tasks[0].number, "DEVK900002");
+    assert_eq!(result.requests[0].number.as_str(), "DEVK900001");
+    assert_eq!(result.locks[0].tasks[0].number.as_str(), "DEVK900002");
     csrf.assert_async().await;
     check.assert_async().await;
 }
@@ -204,7 +204,7 @@ async fn wildcard_transport_query_uses_the_discovered_cts_collection() {
         .unwrap();
 
     assert_eq!(response.len(), 2);
-    assert_eq!(response.requests[0].number, "DEVK900001");
+    assert_eq!(response.requests[0].number.as_str(), "DEVK900001");
     assert_eq!(response.requests[0].kind, TransportKind::Workbench);
     discovery.assert_async().await;
     core_discovery.assert_async().await;
@@ -264,10 +264,13 @@ async fn transport_properties_use_the_singular_asx_contract() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(response.number, "DEVK900001");
+    assert_eq!(response.number.as_str(), "DEVK900001");
     assert_eq!(response.kind, TransportKind::Workbench);
     assert_eq!(response.client, None);
-    assert_eq!(response.properties_query().transport_number(), "DEVK900001");
+    assert_eq!(
+        response.properties_query().transport_number().as_str(),
+        "DEVK900001"
+    );
     properties.assert_async().await;
 }
 
@@ -385,7 +388,7 @@ async fn transport_creation_prefers_the_v1_asx_contract() {
         .await
         .unwrap();
 
-    assert_eq!(creation.transport_number, "DEVK900003");
+    assert_eq!(creation.transport_number.as_str(), "DEVK900003");
     assert_eq!(creation.message, None);
     csrf.assert_async().await;
     create.assert_async().await;
@@ -428,7 +431,7 @@ async fn transport_creation_falls_back_to_the_legacy_contract() {
         .await
         .unwrap();
 
-    assert_eq!(creation.transport_number, "DEVK900004");
+    assert_eq!(creation.transport_number.as_str(), "DEVK900004");
     assert_eq!(creation.message, None);
     csrf.assert_async().await;
     create.assert_async().await;

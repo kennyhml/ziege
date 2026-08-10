@@ -178,6 +178,6 @@ pub type ParserRef = OwnedResourceRef<kind::Parser>;
 /// A source URI alone does not establish which object lock authorizes an
 /// update. `SourceRef` therefore retains both the source URI and its
 /// [`ObjectRef`]. [`SourceRef::update`](crate::SourceRef::update) uses that
-/// relationship to validate a [`LockHandle`](crate::LockHandle) before creating
+/// relationship to validate an [`ObjectLock`](crate::ObjectLock) before creating
 /// the update operation.
 pub type SourceRef = OwnedResourceRef<kind::Source>;
