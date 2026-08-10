@@ -1,12 +1,14 @@
 use super::{
-    Class, GlobalWorkbenchType, Include, ObjectNamePolicy, ObjectRef, ObjectVersion, Package,
-    Program, SourceComponent,
+    Class, GlobalWorkbenchType, Include, ObjectNamePolicy, ObjectProperties, ObjectRef,
+    ObjectVersion, Package, Program, SourceComponent,
 };
 use crate::{
+    api::properties::ObjectPropertiesQuery,
     client::{Client, Ready},
-    error::{ObjectError, OperationError, ResponseError},
-    operation::OperationResponse,
+    error::{OperationError, ResponseError},
+    operation::{Operation, OperationResponse},
     protocol::AdtRequest,
+    vocabulary::CategoryId,
 };
 
 /// A type erased object type that provides capabilities at runtime.
@@ -18,13 +20,11 @@ pub(crate) trait RuntimeObjectTypeDescriptor: Sync {
 
     fn naming_policy(&self) -> ObjectNamePolicy;
 
+    fn category(&self) -> CategoryId;
+
     fn source_path(&self) -> Option<&'static [&'static str]>;
 
     fn source_components(&self) -> &'static [&'static dyn SourceComponent];
-
-    fn resolve(&self, client: &Client<Ready>, name: &str) -> Result<ObjectRef, ObjectError>;
-
-    fn normalize_reference(&self, reference: &ObjectRef) -> Result<ObjectRef, ObjectError>;
 
     fn properties(&self) -> &dyn RuntimeObjectProperties;
 }
@@ -60,6 +60,27 @@ pub(crate) trait RuntimeObjectProperties: Sync {
         resource: &ObjectRef,
         response: OperationResponse,
     ) -> Result<serde_json::Value, ResponseError>;
+}
+
+// Generated descriptors forward type-specific properties behavior here.
+pub(crate) fn properties_request<T: ObjectProperties>(
+    resource: &ObjectRef,
+    version: Option<ObjectVersion>,
+    client: &Client<Ready>,
+) -> Result<AdtRequest, OperationError> {
+    let mut query = ObjectPropertiesQuery::<T>::new(resource.retype());
+    if let Some(version) = version {
+        query = query.version(version);
+    }
+    query.request(client)
+}
+
+pub(crate) fn properties_decode<T: ObjectProperties>(
+    resource: &ObjectRef,
+    response: OperationResponse,
+) -> Result<serde_json::Value, ResponseError> {
+    let query = ObjectPropertiesQuery::<T>::new(resource.retype());
+    serde_json::to_value(query.decode(response)?).map_err(Into::into)
 }
 
 #[cfg(test)]

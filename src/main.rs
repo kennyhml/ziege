@@ -2,9 +2,9 @@ use std::{env, error::Error, io};
 
 use tracing_subscriber::EnvFilter;
 use zadt::{
-    AdtUri, Class, Client, GlobalWorkbenchType, Operation, Program, ReqwestTransport,
-    TransportCheck, TransportCheckOperation, TransportCreateBuilder, TransportExt,
-    TransportsQueryBuilder,
+    AdtUri, Class, ClassSourceComponent, Client, GlobalWorkbenchType, Operation, Program,
+    ReqwestTransport, TransportCheck, TransportCheckOperation, TransportCreateBuilder,
+    TransportExt, TransportsQueryBuilder,
 };
 
 #[tokio::main]
@@ -35,6 +35,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let object_type: GlobalWorkbenchType = "CLAS/OC".parse()?;
     let object = client.repository_object(&object_type, "ZZZZ")?;
+
+    if let Some(class) = object.typed::<Class>() {
+        class
+            .component_source(ClassSourceComponent::TestClasses)
+            .query()
+            .execute(&client)
+            .await?;
+    }
+    if let Some(prog) = object.typed::<Program>() {
+        prog.source().query().execute(&client).await?;
+    }
 
     let json = object.properties()?.execute(&client).await?;
     println!("{:#?}", json);

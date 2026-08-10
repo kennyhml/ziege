@@ -59,7 +59,7 @@ impl RepositoryObject {
     ) -> Result<Self, ObjectError> {
         let descriptor = descriptors::object_type_descriptor(&object_type);
         let reference = match descriptor {
-            Some(descriptor) => descriptor.normalize_reference(&reference)?,
+            Some(descriptor) => reference.normalized(descriptor.naming_policy())?,
             None => reference,
         };
         Ok(Self {
@@ -193,6 +193,21 @@ impl ObjectRef {
     pub(crate) fn named(name: String, uri: AdtUri) -> Self {
         Self::typed(name, uri)
     }
+
+    fn from_parts_with_policy(
+        name: String,
+        uri: AdtUri,
+        naming_policy: ObjectNamePolicy,
+    ) -> Result<Self, ObjectError> {
+        naming_policy.validate(&name)?;
+
+        // TODO: Dont always uppercase!
+        Ok(Self::named(name.to_ascii_uppercase(), uri))
+    }
+
+    fn normalized(&self, naming_policy: ObjectNamePolicy) -> Result<Self, ObjectError> {
+        Self::from_parts_with_policy(self.name.clone(), self.uri.clone(), naming_policy)
+    }
 }
 
 impl<T> ObjectRef<T> {
@@ -218,10 +233,6 @@ impl<T> ObjectRef<T> {
         ObjectRef::typed(self.name.clone(), self.uri.clone())
     }
 
-    pub(crate) fn raw_name(&self) -> &str {
-        &self.name
-    }
-
     pub(crate) fn source_from_component<C>(&self, component: &C) -> SourceRef
     where
         C: SourceComponent + ?Sized,
@@ -245,10 +256,8 @@ impl<T: ObjectType> ObjectRef<T> {
     }
 
     pub(crate) fn from_parts(name: String, uri: AdtUri) -> Result<Self, ObjectError> {
-        T::NAMING_POLICY.validate(&name)?;
-
-        // TODO: Dont always uppercase!
-        Ok(Self::typed(name.to_ascii_uppercase(), uri))
+        ObjectRef::from_parts_with_policy(name, uri, T::NAMING_POLICY)
+            .map(|reference| reference.retype())
     }
 }
 
@@ -306,17 +315,27 @@ impl<T> fmt::Display for ObjectRef<T> {
 }
 
 impl Client<Ready> {
+    fn object_reference(
+        &self,
+        category: CategoryId,
+        naming_policy: ObjectNamePolicy,
+        name: &str,
+    ) -> Result<ObjectRef, ObjectError> {
+        naming_policy.validate(name)?;
+        let name = name.to_ascii_uppercase();
+        let uri_name = name.to_ascii_lowercase();
+        let collection = self.require_collection(category)?;
+        let uri = collection.target().append_segments([&uri_name])?;
+        Ok(ObjectRef::named(name, uri))
+    }
+
     /// Resolves a typed object reference from its statically known collection.
     ///
     /// Constructing a reference performs no request; the collection URI comes
     /// from the capabilities already retained by the ready client.
     pub fn object<T: ObjectType>(&self, name: &str) -> Result<ObjectRef<T>, ObjectError> {
-        T::NAMING_POLICY.validate(name)?;
-        let name = name.to_ascii_uppercase();
-        let uri_name = name.to_ascii_lowercase();
-        let collection = self.require_collection(T::CATEGORY)?;
-        let uri = collection.target().append_segments([&uri_name])?;
-        Ok(ObjectRef::typed(name, uri))
+        self.object_reference(T::CATEGORY, T::NAMING_POLICY, name)
+            .map(|reference| reference.retype())
     }
 
     /// Resolves a runtime repository object from its Workbench type and name.
@@ -330,8 +349,10 @@ impl Client<Ready> {
                 object_type: object_type.clone(),
             }
         })?;
+        let reference =
+            self.object_reference(descriptor.category(), descriptor.naming_policy(), name)?;
         Ok(RepositoryObject {
-            reference: descriptor.resolve(self, name)?,
+            reference,
             object_type: object_type.clone(),
             descriptor: Some(descriptor),
         })

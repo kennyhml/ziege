@@ -318,6 +318,10 @@ fn expand_object_type(
                 <#ident as crate::objects::ObjectType>::NAMING_POLICY
             }
 
+            fn category(&self) -> crate::vocabulary::CategoryId {
+                <#ident as crate::objects::ObjectType>::CATEGORY
+            }
+
             fn source_path(&self) -> Option<&'static [&'static str]> {
                 #source_path
             }
@@ -326,25 +330,6 @@ fn expand_object_type(
                 &self,
             ) -> &'static [&'static dyn crate::objects::SourceComponent] {
                 #runtime_source_components
-            }
-
-            fn resolve(
-                &self,
-                client: &crate::client::Client<crate::client::Ready>,
-                name: &str,
-            ) -> Result<crate::objects::ObjectRef, crate::error::ObjectError> {
-                client.object::<#ident>(name).map(|reference| reference.erase())
-            }
-
-            fn normalize_reference(
-                &self,
-                reference: &crate::objects::ObjectRef,
-            ) -> Result<crate::objects::ObjectRef, crate::error::ObjectError> {
-                crate::objects::ObjectRef::<#ident>::from_parts(
-                    reference.raw_name().to_owned(),
-                    reference.uri().clone(),
-                )
-                .map(|reference| reference.erase())
             }
 
             fn properties(&self) -> &dyn crate::objects::RuntimeObjectProperties {
@@ -359,13 +344,11 @@ fn expand_object_type(
                 version: Option<crate::objects::ObjectVersion>,
                 client: &crate::client::Client<crate::client::Ready>,
             ) -> Result<crate::protocol::AdtRequest, crate::error::OperationError> {
-                let mut query =
-                    crate::api::properties::ObjectPropertiesQuery::<#ident>::new(resource.retype());
-                if let Some(version) = version {
-                    query = query.version(version);
-                }
-                <crate::api::properties::ObjectPropertiesQuery<#ident> as
-                    crate::operation::Operation<crate::client::Ready>>::request(&query, client)
+                crate::objects::descriptors::properties_request::<#ident>(
+                    resource,
+                    version,
+                    client,
+                )
             }
 
             fn decode(
@@ -373,12 +356,7 @@ fn expand_object_type(
                 resource: &crate::objects::ObjectRef,
                 response: crate::operation::OperationResponse,
             ) -> Result<serde_json::Value, crate::error::ResponseError> {
-                let query =
-                    crate::api::properties::ObjectPropertiesQuery::<#ident>::new(resource.retype());
-                let properties =
-                    <crate::api::properties::ObjectPropertiesQuery<#ident> as
-                        crate::operation::Operation<crate::client::Ready>>::decode(&query, response)?;
-                serde_json::to_value(properties).map_err(Into::into)
+                crate::objects::descriptors::properties_decode::<#ident>(resource, response)
             }
         }
     })
