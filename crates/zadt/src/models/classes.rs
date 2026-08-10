@@ -497,7 +497,7 @@ fn package_reference(raw: RawPackageReference) -> Result<ObjectRef<Package>, Obj
         href: raw.uri.clone(),
         source,
     })?;
-    ObjectRef::from_parts(raw.name, uri)
+    Ok(ObjectRef::from_parts(raw.name, uri))
 }
 
 #[derive(Deserialize)]

@@ -457,7 +457,7 @@ fn package_reference(
             source,
         })?
         .target;
-    let reference = ObjectRef::<Package>::from_parts(name, target)?;
+    let reference = ObjectRef::<Package>::from_parts(name, target);
     Ok(Some(PackageReference {
         reference,
         description: raw.description,

@@ -234,7 +234,10 @@ impl RepositoryObjectEntry {
             });
         }
 
-        ObjectRef::from_parts(self.name.clone(), self.reference.uri().clone())
+        Ok(ObjectRef::from_parts(
+            self.name.clone(),
+            self.reference.uri().clone(),
+        ))
     }
 }
 
@@ -450,7 +453,10 @@ impl RepositoryObjectProperties {
                         relation: PACKAGE_RELATION,
                     },
                 )?;
-                ObjectRef::from_parts(property.value.clone(), link.target.clone())
+                Ok(ObjectRef::from_parts(
+                    property.value.clone(),
+                    link.target.clone(),
+                ))
             })
             .collect()
     }
@@ -823,7 +829,6 @@ mod tests {
         let object = content.objects[0].repository_object().unwrap();
 
         assert_eq!(object.object_type().as_str(), "DDLS/DF");
-        assert!(object.naming_policy().is_none());
         assert!(object.typed::<Class>().is_none());
     }
 
@@ -946,7 +951,6 @@ mod tests {
             assert!(content.objects[0].typed_reference::<Class>().is_err());
             let object = content.objects[0].repository_object().unwrap();
             assert_eq!(object.object_type().as_str(), object_type);
-            assert!(object.naming_policy().is_none());
         }
     }
 

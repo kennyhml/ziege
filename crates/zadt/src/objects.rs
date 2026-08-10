@@ -12,7 +12,6 @@ use crate::{
 mod capabilities;
 mod descriptors;
 mod families;
-mod policies;
 mod version;
 mod workbench;
 
@@ -21,7 +20,6 @@ pub use capabilities::{
 };
 pub(crate) use descriptors::{RuntimeObjectProperties, RuntimeObjectTypeDescriptor};
 pub use families::{Class, ClassSourceComponent, Include, Package, Program};
-pub use policies::ObjectNamePolicy;
 pub use version::ObjectVersion;
 pub use workbench::{GlobalWorkbenchType, InvalidWorkbenchType};
 
@@ -33,9 +31,6 @@ pub(crate) mod private {
 pub trait ObjectType: private::Sealed + Send + Sync + Sized + 'static {
     /// The objects global Workbench type.
     const WORKBENCH_TYPE: GlobalWorkbenchType;
-
-    /// The objects naming constraints.
-    const NAMING_POLICY: ObjectNamePolicy;
 
     /// The stable category identifying the canonical object collection.
     const CATEGORY: CategoryId;
@@ -58,10 +53,6 @@ impl RepositoryObject {
         object_type: GlobalWorkbenchType,
     ) -> Result<Self, ObjectError> {
         let descriptor = descriptors::object_type_descriptor(&object_type);
-        let reference = match descriptor {
-            Some(descriptor) => reference.normalized(descriptor.naming_policy())?,
-            None => reference,
-        };
         Ok(Self {
             reference,
             object_type,
@@ -77,11 +68,6 @@ impl RepositoryObject {
     /// Returns the exact runtime object type.
     pub fn object_type(&self) -> &GlobalWorkbenchType {
         &self.object_type
-    }
-
-    /// Returns the naming policy when the family is modeled.
-    pub fn naming_policy(&self) -> Option<ObjectNamePolicy> {
-        self.descriptor.map(|descriptor| descriptor.naming_policy())
     }
 
     /// Returns the statically known secondary source components for this family.
@@ -193,21 +179,6 @@ impl ObjectRef {
     pub(crate) fn named(name: String, uri: AdtUri) -> Self {
         Self::typed(name, uri)
     }
-
-    fn from_parts_with_policy(
-        name: String,
-        uri: AdtUri,
-        naming_policy: ObjectNamePolicy,
-    ) -> Result<Self, ObjectError> {
-        naming_policy.validate(&name)?;
-
-        // TODO: Dont always uppercase!
-        Ok(Self::named(name.to_ascii_uppercase(), uri))
-    }
-
-    fn normalized(&self, naming_policy: ObjectNamePolicy) -> Result<Self, ObjectError> {
-        Self::from_parts_with_policy(self.name.clone(), self.uri.clone(), naming_policy)
-    }
 }
 
 impl<T> ObjectRef<T> {
@@ -250,14 +221,13 @@ impl<T> ObjectRef<T> {
 }
 
 impl<T: ObjectType> ObjectRef<T> {
-    /// Returns the canonical uppercase object name.
+    /// Returns the object name.
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    pub(crate) fn from_parts(name: String, uri: AdtUri) -> Result<Self, ObjectError> {
-        ObjectRef::from_parts_with_policy(name, uri, T::NAMING_POLICY)
-            .map(|reference| reference.retype())
+    pub(crate) fn from_parts(name: String, uri: AdtUri) -> Self {
+        Self::typed(name, uri)
     }
 }
 
@@ -315,13 +285,7 @@ impl<T> fmt::Display for ObjectRef<T> {
 }
 
 impl Client<Ready> {
-    fn object_reference(
-        &self,
-        category: CategoryId,
-        naming_policy: ObjectNamePolicy,
-        name: &str,
-    ) -> Result<ObjectRef, ObjectError> {
-        naming_policy.validate(name)?;
+    fn object_reference(&self, category: CategoryId, name: &str) -> Result<ObjectRef, ObjectError> {
         let name = name.to_ascii_uppercase();
         let uri_name = name.to_ascii_lowercase();
         let collection = self.require_collection(category)?;
@@ -334,7 +298,7 @@ impl Client<Ready> {
     /// Constructing a reference performs no request; the collection URI comes
     /// from the capabilities already retained by the ready client.
     pub fn object<T: ObjectType>(&self, name: &str) -> Result<ObjectRef<T>, ObjectError> {
-        self.object_reference(T::CATEGORY, T::NAMING_POLICY, name)
+        self.object_reference(T::CATEGORY, name)
             .map(|reference| reference.retype())
     }
 
@@ -349,8 +313,7 @@ impl Client<Ready> {
                 object_type: object_type.clone(),
             }
         })?;
-        let reference =
-            self.object_reference(descriptor.category(), descriptor.naming_policy(), name)?;
+        let reference = self.object_reference(descriptor.category(), name)?;
         Ok(RepositoryObject {
             reference,
             object_type: object_type.clone(),

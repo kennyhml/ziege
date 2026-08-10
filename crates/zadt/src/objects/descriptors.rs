@@ -1,6 +1,6 @@
 use super::{
-    Class, GlobalWorkbenchType, Include, ObjectNamePolicy, ObjectProperties, ObjectRef,
-    ObjectVersion, Package, Program, SourceComponent,
+    Class, GlobalWorkbenchType, Include, ObjectProperties, ObjectRef, ObjectVersion, Package,
+    Program, SourceComponent,
 };
 use crate::{
     api::properties::ObjectPropertiesQuery,
@@ -17,8 +17,6 @@ use crate::{
 /// serve as a capability registry.
 pub(crate) trait RuntimeObjectTypeDescriptor: Sync {
     fn object_type(&self) -> GlobalWorkbenchType;
-
-    fn naming_policy(&self) -> ObjectNamePolicy;
 
     fn category(&self) -> CategoryId;
 

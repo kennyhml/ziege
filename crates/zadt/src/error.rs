@@ -98,12 +98,6 @@ pub enum ObjectError {
     #[error(transparent)]
     Compatibility(#[from] CompatibilityError),
 
-    #[error("object name `{name}` is empty or contains invalid whitespace or control characters")]
-    InvalidName { name: String },
-
-    #[error("object name `{name}` exceeds the maximum length of {maximum_length} characters")]
-    NameTooLong { name: String, maximum_length: usize },
-
     #[error("could not construct the object resource URI: {0}")]
     InvalidTarget(#[from] AdtUriError),
 

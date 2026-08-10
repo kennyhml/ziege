@@ -8,7 +8,6 @@ use zadt_macros::object_type;
 /// An ABAP class object.
 #[object_type(
     workbench_type = "CLAS/OC",
-    naming_policy = 30,
     collection(
         scheme = "http://www.sap.com/adt/categories/oo",
         term = "classes",

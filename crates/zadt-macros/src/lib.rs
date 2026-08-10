@@ -3,8 +3,7 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
-    Data, DeriveInput, Error, Fields, Ident, Item, LitInt, LitStr, Result, Token, Type,
-    parenthesized,
+    Data, DeriveInput, Error, Fields, Ident, Item, LitStr, Result, Token, Type, parenthesized,
     parse::{Parse, ParseStream},
     parse_macro_input,
     spanned::Spanned,
@@ -32,7 +31,6 @@ pub fn source_component(item: TokenStream) -> TokenStream {
 
 struct ObjectTypeAttributes {
     workbench_type: LitStr,
-    naming_policy: LitInt,
     collection: Collection,
     source: bool,
     source_components: Option<Type>,
@@ -52,7 +50,6 @@ struct Properties {
 impl Parse for ObjectTypeAttributes {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let mut workbench_type = None;
-        let mut naming_policy = None;
         let mut collection = None;
         let mut source = false;
         let mut source_components = None;
@@ -64,10 +61,6 @@ impl Parse for ObjectTypeAttributes {
                 "workbench_type" => {
                     input.parse::<Token![=]>()?;
                     set_once(&mut workbench_type, input.parse()?, &key)?;
-                }
-                "naming_policy" => {
-                    input.parse::<Token![=]>()?;
-                    set_once(&mut naming_policy, input.parse()?, &key)?;
                 }
                 "collection" => {
                     let content;
@@ -90,7 +83,6 @@ impl Parse for ObjectTypeAttributes {
         }
 
         let workbench_type = required(workbench_type, input, "workbench_type")?;
-        let naming_policy = required(naming_policy, input, "naming_policy")?;
         let collection = required(collection, input, "collection")?;
         let properties = required(properties, input, "Properties capability")?;
         if source_components.is_some() && !source {
@@ -102,7 +94,6 @@ impl Parse for ObjectTypeAttributes {
 
         Ok(Self {
             workbench_type,
-            naming_policy,
             collection,
             source,
             source_components,
@@ -223,7 +214,6 @@ fn expand_object_type(
 
     let ObjectTypeAttributes {
         workbench_type,
-        naming_policy,
         collection,
         source,
         source_components,
@@ -273,8 +263,6 @@ fn expand_object_type(
         impl crate::objects::ObjectType for #ident {
             const WORKBENCH_TYPE: crate::objects::GlobalWorkbenchType =
                 crate::objects::GlobalWorkbenchType::new(#workbench_type);
-            const NAMING_POLICY: crate::objects::ObjectNamePolicy =
-                crate::objects::ObjectNamePolicy::new(#naming_policy);
             const CATEGORY: crate::vocabulary::CategoryId = crate::vocabulary::CategoryId {
                 scheme: #scheme,
                 term: #term,
@@ -312,10 +300,6 @@ fn expand_object_type(
         impl crate::objects::RuntimeObjectTypeDescriptor for #descriptor {
             fn object_type(&self) -> crate::objects::GlobalWorkbenchType {
                 <#ident as crate::objects::ObjectType>::WORKBENCH_TYPE
-            }
-
-            fn naming_policy(&self) -> crate::objects::ObjectNamePolicy {
-                <#ident as crate::objects::ObjectType>::NAMING_POLICY
             }
 
             fn category(&self) -> crate::vocabulary::CategoryId {

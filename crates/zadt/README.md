@@ -46,7 +46,7 @@ ADT object types often arrive at runtime from a command line or network request.
 case with a descriptor-backed `RepositoryObject` while retaining `ObjectRef<T>` for statically known
 object types. Each modeled type has one `#[object_type(...)]` declaration that generates its static trait
 implementations and a private runtime descriptor. The explicit registry lists only those generated
-descriptors, so discovery identity, naming policy, source capabilities, and property parsing come from the
+descriptors, so discovery identity, source capabilities, and property parsing come from the
 same declaration. RIS entries with an unmodeled type retain their identity without pretending that
 family-specific operations exist.
 

@@ -5,7 +5,6 @@ use zadt_macros::object_type;
 /// The package (devclass) object type.
 #[object_type(
     workbench_type = "DEVC/K",
-    naming_policy = 30,
     collection(
         scheme = "http://www.sap.com/wbobj/packages",
         term = "devck",

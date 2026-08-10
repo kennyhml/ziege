@@ -7,7 +7,6 @@ use zadt_macros::object_type;
 /// The ABAP program object type.
 #[object_type(
     workbench_type = "PROG/P",
-    naming_policy = 30,
     collection(
         scheme = "http://www.sap.com/adt/categories/programs",
         term = "programs",
@@ -26,7 +25,6 @@ pub enum Program {}
 /// The standalone ABAP include object type.
 #[object_type(
     workbench_type = "PROG/I",
-    naming_policy = 40,
     collection(
         scheme = "http://www.sap.com/adt/categories/programs",
         term = "includes",
