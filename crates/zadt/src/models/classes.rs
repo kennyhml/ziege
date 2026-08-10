@@ -160,8 +160,10 @@ pub struct ClassPropertiesV4 {
     pub message_class: Option<ClassObjectReference>,
     /// The root entity, when advertised.
     pub root_entity: Option<ClassObjectReference>,
-    /// Source components currently advertised by this class.
-    pub sources: Vec<ClassSourceProperties>,
+    /// The required main source advertised by this class.
+    pub main_source: ClassSourceProperties,
+    /// Secondary source components currently advertised by this class.
+    pub source_components: Vec<ClassSourceProperties>,
     /// The entity tag of these class properties, when present.
     pub etag: Option<EntityTag>,
     relations: Relations,
@@ -173,17 +175,16 @@ impl ClassPropertiesV4 {
         &self.relations
     }
 
-    /// Finds an advertised source component.
+    /// Finds an advertised secondary source component.
     pub fn source(&self, component: ClassSourceComponent) -> Option<&ClassSourceProperties> {
-        self.sources
+        self.source_components
             .iter()
             .find(|source| source.component == Some(component))
     }
 
     /// Returns the required main source component.
     pub fn main_source(&self) -> &ClassSourceProperties {
-        self.source(ClassSourceComponent::Main)
-            .expect("class properties are validated to contain a main source")
+        &self.main_source
     }
 
     /// Resolves the advertised object-structure resource, when present.
@@ -226,9 +227,23 @@ impl ClassPropertiesV4 {
             .into_iter()
             .map(|source| ClassSourceProperties::from_raw(&reference, source))
             .collect::<Result<Vec<_>, _>>()?;
-        for (index, source) in sources.iter().enumerate() {
+
+        let mut main_source = None;
+        let mut source_components: Vec<ClassSourceProperties> =
+            Vec::with_capacity(sources.len().saturating_sub(1));
+        for source in sources {
+            if source.include_type == "main" {
+                if main_source.is_some() {
+                    return Err(ObjectError::DuplicateSourceComponent {
+                        component: "main".to_owned(),
+                    });
+                }
+                main_source = Some(source);
+                continue;
+            }
+
             if let Some(component) = source.component
-                && sources[..index]
+                && source_components
                     .iter()
                     .any(|previous| previous.component == Some(component))
             {
@@ -236,15 +251,11 @@ impl ClassPropertiesV4 {
                     component: component.as_str().to_owned(),
                 });
             }
+            source_components.push(source);
         }
-        if !sources
-            .iter()
-            .any(|source| source.component == Some(ClassSourceComponent::Main))
-        {
-            return Err(ObjectError::MissingRelation {
-                relation: "main class source",
-            });
-        }
+        let main_source = main_source.ok_or(ObjectError::MissingRelation {
+            relation: "main class source",
+        })?;
         let syntax_configuration = raw
             .syntax_configuration
             .and_then(|syntax| syntax.language)
@@ -301,7 +312,8 @@ impl ClassPropertiesV4 {
             super_class,
             message_class,
             root_entity,
-            sources,
+            main_source,
+            source_components,
             etag,
             relations,
         })
@@ -312,7 +324,7 @@ impl ClassPropertiesV4 {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClassSourceProperties {
-    /// The recognized source component, or `None` for a newer server-defined type.
+    /// The recognized secondary component, or `None` for the main or an unknown source type.
     pub component: Option<ClassSourceComponent>,
     /// The exact include type supplied by SAP.
     pub include_type: String,
@@ -380,8 +392,20 @@ impl ClassSourceProperties {
             });
         }
 
-        let component = ClassSourceComponent::from_name(&raw.include_type);
-        if let Some(component) = component {
+        let is_main = raw.include_type == "main";
+        let component = (!is_main)
+            .then(|| ClassSourceComponent::from_name(&raw.include_type))
+            .flatten();
+        if is_main {
+            let expected = reference.source();
+            if expected.uri != source.uri {
+                return Err(ObjectError::RelationMismatch {
+                    relation: "main class source",
+                    declared: expected.uri.to_string(),
+                    advertised: source.uri.to_string(),
+                });
+            }
+        } else if let Some(component) = component {
             let expected = reference.component_source(component);
             if expected.uri != source.uri {
                 return Err(ObjectError::RelationMismatch {
@@ -654,7 +678,7 @@ mod tests {
         assert_eq!(class.version, ObjectVersion::Active);
         assert_eq!(class.package.name(), "SADT_TOOLS_CORE");
         assert_eq!(class.abap_language_version.as_deref(), Some("X"));
-        assert_eq!(class.sources.len(), 5);
+        assert_eq!(class.source_components.len(), 4);
         assert_eq!(class.relations().len(), 7);
         assert_eq!(class.etag.as_deref(), Some("class-etag"));
         assert_eq!(
@@ -701,7 +725,7 @@ mod tests {
 
         assert!(class.is_abstract);
         assert!(class.constructor_generated);
-        assert_eq!(class.sources.len(), 2);
+        assert_eq!(class.source_components.len(), 1);
         assert_eq!(
             class
                 .source(ClassSourceComponent::LocalTypes)
@@ -743,8 +767,8 @@ mod tests {
         );
         let class = parse(&body).unwrap();
 
-        assert_eq!(class.sources[0].component, None);
-        assert_eq!(class.sources[0].include_type, "future-source");
+        assert_eq!(class.source_components[0].component, None);
+        assert_eq!(class.source_components[0].include_type, "future-source");
     }
 
     #[test]
@@ -794,6 +818,19 @@ mod tests {
             parse(&body),
             Err(ResponseError::Object(ObjectError::RelationMismatch {
                 relation: "class source component",
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn rejects_the_main_source_at_a_secondary_path() {
+        let body = CLASS_XML.replace("source/main", "includes/main");
+
+        assert!(matches!(
+            parse(&body),
+            Err(ResponseError::Object(ObjectError::RelationMismatch {
+                relation: "main class source",
                 ..
             }))
         ));

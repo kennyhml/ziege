@@ -217,7 +217,7 @@ mod tests {
     use super::*;
     use crate::{
         AdtResponse, CompatibilityError, EntityTag, IncludeProperties, IncludePropertyVersion,
-        MediaVersionNegotiation, ObjectCollection, ProgramProperties, ProgramPropertiesVersion,
+        MediaVersionNegotiation, ObjectType, ProgramProperties, ProgramPropertiesVersion,
         Revalidation,
     };
 

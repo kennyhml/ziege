@@ -71,12 +71,7 @@ impl<T: ObjectType> ObjectRef<T> {
 impl<T: Source> ObjectRef<T> {
     /// Returns the objects conventional source resource.
     pub fn source(&self) -> SourceRef {
-        let component = T::SOURCE_COMPONENTS
-            .iter()
-            .copied()
-            .find(|component| component.is_primary())
-            .expect("Source object types must advertise one primary source component");
-        self.source_from_component(component)
+        self.source_from_path(T::SOURCE_PATH)
     }
 }
 
@@ -350,8 +345,14 @@ mod tests {
             crate::AdtUri::parse("/sap/bc/adt/oo/classes/zcl_example").unwrap(),
         );
 
+        let main_source = class.source();
+        assert_eq!(
+            main_source.uri.as_str(),
+            "/sap/bc/adt/oo/classes/zcl_example/source/main"
+        );
+        assert_eq!(main_source.object, class.erase());
+
         for (component, suffix) in [
-            (ClassSourceComponent::Main, "source/main"),
             (ClassSourceComponent::Definitions, "includes/definitions"),
             (
                 ClassSourceComponent::Implementations,

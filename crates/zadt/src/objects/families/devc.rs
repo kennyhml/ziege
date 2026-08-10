@@ -1,45 +1,22 @@
-use super::super::{
-    GlobalWorkbenchType, ObjectCollection, ObjectNamePolicy, ObjectProperties, ObjectRef,
-    ObjectType, private,
-};
-use crate::{
-    error::ResponseError,
-    models::{PackageProperties, PackagePropertiesVersion},
-    protocol::EntityTag,
-    vocabulary::CategoryId,
-};
+use super::super::ObjectRef;
+use crate::models::{PackageProperties, PackagePropertiesVersion};
+use zadt_macros::object_type;
 
 /// The package (devclass) object type.
+#[object_type(
+    workbench_type = "DEVC/K",
+    naming_policy = 30,
+    collection(
+        scheme = "http://www.sap.com/wbobj/packages",
+        term = "devck",
+    ),
+    capabilities(Properties(
+        media_version = PackagePropertiesVersion,
+        model = PackageProperties,
+    )),
+)]
 #[derive(Debug)]
 pub enum Package {}
-
-impl private::Sealed for Package {}
-
-impl ObjectType for Package {
-    const WORKBENCH_TYPE: GlobalWorkbenchType = GlobalWorkbenchType::new("DEVC/K");
-    const NAMING_POLICY: ObjectNamePolicy = ObjectNamePolicy::new(30);
-}
-
-impl ObjectCollection for Package {
-    const CATEGORY: CategoryId = CategoryId {
-        scheme: "http://www.sap.com/wbobj/packages",
-        term: "devck",
-    };
-}
-
-impl ObjectProperties for Package {
-    type MediaVersion = PackagePropertiesVersion;
-    type Properties = PackageProperties;
-
-    fn parse(
-        resource: &ObjectRef<Self>,
-        version: Self::MediaVersion,
-        body: &[u8],
-        etag: Option<EntityTag>,
-    ) -> Result<Self::Properties, ResponseError> {
-        PackageProperties::parse(resource, version, body, etag)
-    }
-}
 
 impl ObjectRef<Package> {
     #[cfg(test)]

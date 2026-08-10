@@ -1,4 +1,4 @@
-use super::{ObjectCollection, ObjectRef, ObjectType};
+use super::{ObjectRef, ObjectType};
 use crate::{compatibility::MediaVersionNegotiation, error::ResponseError, protocol::EntityTag};
 
 /// A statically known source component exposed by an object family.
@@ -8,33 +8,17 @@ pub trait SourceComponent: Sync {
 
     /// Returns the component path relative to its owning object.
     fn path(&self) -> &'static [&'static str];
-
-    /// Returns whether this is the conventional source component.
-    fn is_primary(&self) -> bool {
-        false
-    }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct MainSource;
-
-impl SourceComponent for MainSource {
-    fn name(&self) -> &'static str {
-        "main"
-    }
-
-    fn path(&self) -> &'static [&'static str] {
-        &["source", "main"]
-    }
-
-    fn is_primary(&self) -> bool {
-        true
-    }
+/// A closed set of source components exposed by an object family.
+#[doc(hidden)]
+pub trait SourceComponentSet: SourceComponent + Sized + 'static {
+    const COMPONENTS: &'static [&'static dyn SourceComponent];
 }
 
 /// Annotates an object type that supports fetching and decoding properties.
 #[doc(hidden)]
-pub trait ObjectProperties: ObjectCollection {
+pub trait ObjectProperties: ObjectType {
     type MediaVersion: MediaVersionNegotiation;
     type Properties: serde::Serialize + Send;
 
@@ -46,8 +30,14 @@ pub trait ObjectProperties: ObjectCollection {
     ) -> Result<Self::Properties, ResponseError>;
 }
 
-/// Annotates an object type that has a primary source component.
-///
-/// Implementors must include exactly one primary component in
-/// [`ObjectType::SOURCE_COMPONENTS`].
-pub trait Source: ObjectType {}
+/// An object type with a conventional primary source resource.
+pub trait Source: ObjectType {
+    /// The primary source path relative to the object resource.
+    const SOURCE_PATH: &'static [&'static str] = &["source", "main"];
+}
+
+/// An object type with secondary source components in addition to its primary source.
+pub trait SourceComponents: Source {
+    /// The statically known secondary source component type.
+    type Component: SourceComponentSet;
+}

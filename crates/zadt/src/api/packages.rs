@@ -5,9 +5,9 @@ use stduritemplate::Value;
 
 use super::properties::ObjectPropertiesQuery;
 use crate::{
-    AdtUri, CategoryId, Client, ObjectCollection, ObjectError, ObjectRef, Operation,
-    OperationError, OperationResponse, Package, PackageSettings, PackageTree, PackageTreeKind,
-    Ready, ResponseError, Stateless,
+    AdtUri, CategoryId, Client, ObjectError, ObjectRef, ObjectType, Operation, OperationError,
+    OperationResponse, Package, PackageSettings, PackageTree, PackageTreeKind, Ready,
+    ResponseError, Stateless,
     protocol::{AdtRequest, AdtResponse},
     target::{CollectionTarget, TemplateTarget},
 };

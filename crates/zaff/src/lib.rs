@@ -18,7 +18,7 @@ const PROGRAM_FILES: &[FileSpec] = &[
     FileSpec::new(
         "<name>.prog.abap",
         Cardinality::One,
-        FileComponent::Source(SourceComponent::Program),
+        FileComponent::Source(SourceComponent::Main),
     ),
     FileSpec::new(
         "<name>.prog.texts.<lang>.properties",
@@ -46,7 +46,7 @@ const CLASS_FILES: &[FileSpec] = &[
     FileSpec::new(
         "<name>.clas.abap",
         Cardinality::One,
-        FileComponent::Source(SourceComponent::Class(ClassSourceComponent::Main)),
+        FileComponent::Source(SourceComponent::Main),
     ),
     FileSpec::new(
         "<name>.clas.definitions.abap",
@@ -185,9 +185,9 @@ pub enum FileComponent {
 /// An ADT source resource represented by an AFF source file.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum SourceComponent {
-    /// The main source of a `PROG` file family, covering both `PROG/P` and `PROG/I`.
-    Program,
-    /// One source component owned by a `CLAS/OC` object.
+    /// The primary source of an object.
+    Main,
+    /// One secondary source component owned by a `CLAS/OC` object.
     Class(ClassSourceComponent),
 }
 
@@ -278,9 +278,10 @@ impl ResolvedFile {
         }
 
         match self.component {
-            FileComponent::Source(SourceComponent::Program) => match entry.object_type.as_str() {
+            FileComponent::Source(SourceComponent::Main) => match entry.object_type.as_str() {
                 "PROG/P" => Ok(entry.typed_reference::<Program>()?.source()),
                 "PROG/I" => Ok(entry.typed_reference::<Include>()?.source()),
+                "CLAS/OC" => Ok(entry.typed_reference::<Class>()?.source()),
                 _ => Err(ProjectionError::UnsupportedRepositoryType {
                     object_type: entry.object_type.clone(),
                 }),
@@ -613,7 +614,7 @@ mod tests {
             ResolvedFile {
                 object_name: "ZEXAMPLE".to_owned(),
                 format: ObjectFormat::Program,
-                component: FileComponent::Source(SourceComponent::Program),
+                component: FileComponent::Source(SourceComponent::Main),
                 language: None,
             }
         );
@@ -657,6 +658,13 @@ mod tests {
             "/sap/bc/adt/oo/classes/zcl_myclass/includes/testclasses"
         );
         assert_eq!(source.object.uri(), entry.reference.uri());
+
+        let resolved = resolve_file_name("zcl_myclass.clas.abap").unwrap();
+        let source = resolved.source_ref(&entry).unwrap();
+        assert_eq!(
+            source.uri.as_str(),
+            "/sap/bc/adt/oo/classes/zcl_myclass/source/main"
+        );
 
         let resolved = resolve_file_name("zcl_myclass.clas.locals.abap").unwrap();
         let source = resolved.source_ref(&entry).unwrap();

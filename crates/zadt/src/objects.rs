@@ -16,8 +16,9 @@ mod policies;
 mod version;
 mod workbench;
 
-pub(crate) use capabilities::MainSource;
-pub use capabilities::{ObjectProperties, Source, SourceComponent};
+pub use capabilities::{
+    ObjectProperties, Source, SourceComponent, SourceComponentSet, SourceComponents,
+};
 pub(crate) use descriptors::{RuntimeObjectProperties, RuntimeObjectTypeDescriptor};
 pub use families::{Class, ClassSourceComponent, Include, Package, Program};
 pub use policies::ObjectNamePolicy;
@@ -29,9 +30,6 @@ pub(crate) mod private {
 }
 
 /// Statically identified ADT object resource family.
-///
-/// This allows object types to automatically implement various traits while
-/// keeping their protocol location separate in [`ObjectCollection`].
 pub trait ObjectType: private::Sealed + Send + Sync + Sized + 'static {
     /// The objects global Workbench type.
     const WORKBENCH_TYPE: GlobalWorkbenchType;
@@ -39,12 +37,6 @@ pub trait ObjectType: private::Sealed + Send + Sync + Sized + 'static {
     /// The objects naming constraints.
     const NAMING_POLICY: ObjectNamePolicy;
 
-    /// Source components with statically known paths relative to the object.
-    const SOURCE_COMPONENTS: &'static [&'static dyn SourceComponent] = &[];
-}
-
-/// An object type whose canonical collection is advertised through discovery.
-pub trait ObjectCollection: ObjectType {
     /// The stable category identifying the canonical object collection.
     const CATEGORY: CategoryId;
 }
@@ -92,23 +84,21 @@ impl RepositoryObject {
         self.descriptor.map(|descriptor| descriptor.naming_policy())
     }
 
-    /// Returns the statically known source components for this family.
+    /// Returns the statically known secondary source components for this family.
     pub fn source_components(&self) -> &'static [&'static dyn SourceComponent] {
         self.descriptor
             .map(|descriptor| descriptor.source_components())
             .unwrap_or(&[])
     }
 
-    /// Resolves the conventional source component when available.
+    /// Resolves the primary source when available.
     pub fn source(&self) -> Option<SourceRef> {
-        self.source_components()
-            .iter()
-            .copied()
-            .find(|component| component.is_primary())
-            .map(|component| self.reference.source_from_component(component))
+        self.descriptor
+            .and_then(|descriptor| descriptor.source_path())
+            .map(|path| self.reference.source_from_path(path))
     }
 
-    /// Resolves one named source component when available.
+    /// Resolves one named secondary source component when available.
     pub fn source_component(&self, name: &str) -> Option<SourceRef> {
         self.source_components()
             .iter()
@@ -159,7 +149,7 @@ impl RepositoryObject {
 
 impl<T> From<ObjectRef<T>> for RepositoryObject
 where
-    T: ObjectCollection,
+    T: ObjectType,
 {
     fn from(reference: ObjectRef<T>) -> Self {
         let object_type = T::WORKBENCH_TYPE;
@@ -187,7 +177,7 @@ impl fmt::Debug for RepositoryObject {
 ///
 /// A bare `ObjectRef` is type-erased and proves only the objects identity and
 /// location. [`Client::object`] returns `ObjectRef<T>` for a known
-/// [`ObjectCollection`].
+/// [`ObjectType`].
 pub struct ObjectRef<T = ()> {
     name: String,
     uri: AdtUri,
@@ -236,10 +226,14 @@ impl<T> ObjectRef<T> {
     where
         C: SourceComponent + ?Sized,
     {
+        self.source_from_path(component.path())
+    }
+
+    pub(crate) fn source_from_path(&self, path: &[&str]) -> SourceRef {
         let uri = self
             .uri()
-            .append_segments(component.path())
-            .expect("static source component path forms a valid ADT URI");
+            .append_segments(path)
+            .expect("static source path forms a valid ADT URI");
         SourceRef::new(self.erase(), uri)
     }
 }
@@ -316,7 +310,7 @@ impl Client<Ready> {
     ///
     /// Constructing a reference performs no request; the collection URI comes
     /// from the capabilities already retained by the ready client.
-    pub fn object<T: ObjectCollection>(&self, name: &str) -> Result<ObjectRef<T>, ObjectError> {
+    pub fn object<T: ObjectType>(&self, name: &str) -> Result<ObjectRef<T>, ObjectError> {
         T::NAMING_POLICY.validate(name)?;
         let name = name.to_ascii_uppercase();
         let uri_name = name.to_ascii_lowercase();
@@ -379,7 +373,6 @@ mod tests {
                 .map(|component| component.name())
                 .collect::<Vec<_>>(),
             [
-                "main",
                 "definitions",
                 "implementations",
                 "macros",
@@ -387,10 +380,8 @@ mod tests {
                 "localtypes",
             ]
         );
-        assert_eq!(
-            object.source(),
-            Some(class.component_source(ClassSourceComponent::Main))
-        );
+        assert_eq!(object.source(), Some(class.source()));
+        assert!(object.source_component("main").is_none());
         assert_eq!(
             object.source_component("definitions"),
             Some(class.component_source(ClassSourceComponent::Definitions))

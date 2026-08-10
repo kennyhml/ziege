@@ -1,85 +1,46 @@
-use super::super::{
-    GlobalWorkbenchType, MainSource, ObjectCollection, ObjectNamePolicy, ObjectProperties,
-    ObjectRef, ObjectType, Source, SourceComponent, private,
+use super::super::ObjectRef;
+use crate::models::{
+    IncludeProperties, IncludePropertyVersion, ProgramProperties, ProgramPropertiesVersion,
 };
-use crate::{
-    error::ResponseError,
-    models::{
-        IncludeProperties, IncludePropertyVersion, ProgramProperties, ProgramPropertiesVersion,
-    },
-    protocol::EntityTag,
-    vocabulary::CategoryId,
-};
+use zadt_macros::object_type;
 
 /// The ABAP program object type.
+#[object_type(
+    workbench_type = "PROG/P",
+    naming_policy = 30,
+    collection(
+        scheme = "http://www.sap.com/adt/categories/programs",
+        term = "programs",
+    ),
+    capabilities(
+        Source,
+        Properties(
+            media_version = ProgramPropertiesVersion,
+            model = ProgramProperties,
+        ),
+    ),
+)]
 #[derive(Debug)]
 pub enum Program {}
 
-impl private::Sealed for Program {}
-
-impl ObjectType for Program {
-    const WORKBENCH_TYPE: GlobalWorkbenchType = GlobalWorkbenchType::new("PROG/P");
-    const NAMING_POLICY: ObjectNamePolicy = ObjectNamePolicy::new(30);
-    const SOURCE_COMPONENTS: &'static [&'static dyn SourceComponent] = &[&MainSource];
-}
-
-impl ObjectCollection for Program {
-    const CATEGORY: CategoryId = CategoryId {
-        scheme: "http://www.sap.com/adt/categories/programs",
-        term: "programs",
-    };
-}
-
-impl Source for Program {}
-
-impl ObjectProperties for Program {
-    type MediaVersion = ProgramPropertiesVersion;
-    type Properties = ProgramProperties;
-
-    fn parse(
-        resource: &ObjectRef<Self>,
-        version: Self::MediaVersion,
-        body: &[u8],
-        etag: Option<EntityTag>,
-    ) -> Result<Self::Properties, ResponseError> {
-        ProgramProperties::parse(resource, version, body, etag)
-    }
-}
-
 /// The standalone ABAP include object type.
+#[object_type(
+    workbench_type = "PROG/I",
+    naming_policy = 40,
+    collection(
+        scheme = "http://www.sap.com/adt/categories/programs",
+        term = "includes",
+    ),
+    capabilities(
+        Source,
+        Properties(
+            media_version = IncludePropertyVersion,
+            model = IncludeProperties,
+        ),
+    ),
+)]
 #[derive(Debug)]
 pub enum Include {}
-
-impl private::Sealed for Include {}
-
-impl ObjectType for Include {
-    const WORKBENCH_TYPE: GlobalWorkbenchType = GlobalWorkbenchType::new("PROG/I");
-    const NAMING_POLICY: ObjectNamePolicy = ObjectNamePolicy::new(40);
-    const SOURCE_COMPONENTS: &'static [&'static dyn SourceComponent] = &[&MainSource];
-}
-
-impl ObjectCollection for Include {
-    const CATEGORY: CategoryId = CategoryId {
-        scheme: "http://www.sap.com/adt/categories/programs",
-        term: "includes",
-    };
-}
-
-impl Source for Include {}
-
-impl ObjectProperties for Include {
-    type MediaVersion = IncludePropertyVersion;
-    type Properties = IncludeProperties;
-
-    fn parse(
-        resource: &ObjectRef<Self>,
-        version: Self::MediaVersion,
-        body: &[u8],
-        etag: Option<EntityTag>,
-    ) -> Result<Self::Properties, ResponseError> {
-        IncludeProperties::parse(resource, version, body, etag)
-    }
-}
 
 impl ObjectRef<Program> {
     #[cfg(test)]

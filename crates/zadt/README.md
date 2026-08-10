@@ -44,10 +44,11 @@ and their relations. You can find more on the technical details down below.
 
 ADT object types often arrive at runtime from a command line or network request. `ZADT` supports that
 case with a descriptor-backed `RepositoryObject` while retaining `ObjectRef<T>` for statically known
-object types. Each modeled type has one private `ObjectTypeDescriptor::of::<T>()` registry entry that
-connects its discovery collection, naming policy, source components, and property parser. Registration
-requires `T: ObjectProperties`, so a modeled type without that capability fails to compile. RIS entries with
-an unmodeled type retain their identity without pretending that family-specific operations exist.
+object types. Each modeled type has one `#[object_type(...)]` declaration that generates its static trait
+implementations and a private runtime descriptor. The explicit registry lists only those generated
+descriptors, so discovery identity, naming policy, source capabilities, and property parsing come from the
+same declaration. RIS entries with an unmodeled type retain their identity without pretending that
+family-specific operations exist.
 
 `GlobalWorkbenchType` preserves the exact ADT registry identifier. Although values commonly look like
 `CLAS/OC`, the vocabulary is opaque and also includes compact values such as `AUTH` and identifiers with
@@ -57,6 +58,11 @@ Common operations dispatch through that descriptor. Operations whose response de
 such as reading `ProgramProperties` or `ClassProperties`, still use the concrete typed parser internally.
 The runtime properties operation serializes that validated result to JSON, giving command-line and network
 callers one response type without weakening the typed API or adding a variant for every SAP object type.
+
+Primary source and secondary component sources are modeled separately. `ObjectRef<T>::source()` and
+`RepositoryObject::source()` resolve the primary source, while class definitions, implementations, and
+other includes are exposed through `component_source(...)` and `source_component(...)`. Runtime component
+enumeration therefore never includes a synthetic `main` component.
 
 Source updates remain resource-driven rather than descriptor-dispatched. A `SourceRef` retains its owning
 object and accepts any modification lock for that object. The lock remains independent from an individual

@@ -68,8 +68,12 @@ async fn repository_object_fetches_class_properties_as_json() {
         "/sap/bc/adt/oo/classes/cl_adt_uri_mapper"
     );
     assert_eq!(
-        json["properties"]["sources"][0]["source"]["etag"],
+        json["properties"]["sourceComponents"][0]["source"]["etag"],
         "201701161841300011"
+    );
+    assert_eq!(
+        json["properties"]["mainSource"]["source"]["uri"],
+        "/sap/bc/adt/oo/classes/cl_adt_uri_mapper/source/main"
     );
     assert_eq!(json["properties"]["relations"].as_array().unwrap().len(), 7);
 
@@ -174,7 +178,7 @@ async fn class_properties_query_converts_the_live_v4_manifest() {
     assert_eq!(class.name, "CL_ADT_URI_MAPPER");
     assert_eq!(class.version, ObjectVersion::Active);
     assert_eq!(class.package.name(), "SADT_TOOLS_CORE");
-    assert_eq!(class.sources.len(), 5);
+    assert_eq!(class.source_components.len(), 4);
     assert_eq!(class.etag.as_deref(), Some("20210406145501001000181"));
     assert_eq!(
         class
