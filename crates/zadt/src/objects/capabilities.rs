@@ -1,5 +1,33 @@
 use super::{ObjectRef, ObjectType};
-use crate::{compatibility::MediaVersionNegotiation, error::ResponseError, protocol::EntityTag};
+use crate::{
+    compatibility::MediaVersionNegotiation, error::ResponseError, protocol::EntityTag,
+    target::TemplateTarget, vocabulary::CategoryId,
+};
+
+/// Discovery metadata for one immediate plain-text object-run operation.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RunCapability {
+    pub(crate) target: TemplateTarget,
+    pub(crate) name_variable: &'static str,
+}
+
+impl RunCapability {
+    pub(crate) const fn new(
+        category: CategoryId,
+        relation: &'static str,
+        name_variable: &'static str,
+    ) -> Self {
+        Self {
+            target: TemplateTarget::new(category, relation),
+            name_variable,
+        }
+    }
+}
+
+/// An object family with an immediate plain-text run contract.
+pub(crate) trait ImmediateRun: ObjectType {
+    const RUN: RunCapability;
+}
 
 /// A statically known source component exposed by an object family.
 pub trait SourceComponent: Sync {

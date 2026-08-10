@@ -59,6 +59,15 @@ such as reading `ProgramProperties` or `ClassProperties`, still use the concrete
 The runtime properties operation serializes that validated result to JSON, giving command-line and network
 callers one response type without weakening the typed API or adding a variant for every SAP object type.
 
+Programs and classes retain distinct typed run operations because ADT advertises
+separate protocol contracts for them. Runtime callers can use the same capability
+through `RepositoryObject::run()` without trying each modeled object type:
+
+```rust,ignore
+let typed_output = program.run().execute(&client).await?;
+let runtime_output = repository_object.run()?.execute(&client).await?;
+```
+
 Primary source and secondary component sources are modeled separately. `ObjectRef<T>::source()` and
 `RepositoryObject::source()` resolve the primary source, while class definitions, implementations, and
 other includes are exposed through `component_source(...)` and `source_component(...)`. Runtime component

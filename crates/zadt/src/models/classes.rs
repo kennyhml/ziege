@@ -11,6 +11,22 @@ use crate::{
 
 const CLASS_INCLUDE_TYPE: GlobalWorkbenchType = GlobalWorkbenchType::new("CLAS/I");
 
+/// The plain-text console output produced by running an ABAP class.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClassRunResult {
+    /// The class that was executed.
+    pub reference: ObjectRef<Class>,
+
+    /// The rendered class-run output returned by SAP.
+    pub content: String,
+}
+
+impl ClassRunResult {
+    pub(crate) fn new(reference: ObjectRef<Class>, content: String) -> Self {
+        Self { reference, content }
+    }
+}
+
 /// The SAP media-type version used to decode class properties.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ClassPropertiesVersion {

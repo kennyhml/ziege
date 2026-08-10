@@ -1,21 +1,13 @@
-use std::collections::HashMap;
-
-use super::properties::ObjectPropertiesQuery;
+use super::{object::ObjectRun, properties::ObjectPropertiesQuery};
 use crate::{
-    AdtUri, AdtUriError,
     client::{Client, Ready},
-    error::{ObjectError, OperationError, ResponseError},
+    error::{OperationError, ResponseError},
     models::ProgramRunResult,
-    objects::{Include, ObjectRef, Program},
+    objects::{ImmediateRun, Include, ObjectRef, Program, RunCapability},
     operation::{Operation, OperationResponse, Stateless},
     protocol::AdtRequest,
-    target::TemplateTarget,
-    vocabulary::{CategoryId, media_type, query_parameter},
+    vocabulary::CategoryId,
 };
-use derive_builder::Builder;
-use http::Method;
-use stduritemplate::Value;
-use url::Url;
 
 const PROGRAM_NAME_VARIABLE: &str = "programname";
 const PROGRAM_RUN_CATEGORY: CategoryId = CategoryId {
@@ -43,19 +35,33 @@ pub type ProgramPropertiesQuery = ObjectPropertiesQuery<Program>;
 /// seems to be a way to have them predefined too. Must be clarified
 ///
 /// - Backend handler: `CL_SEDI_ADT_PROGRAMRUN`
-#[derive(Builder, Debug)]
-#[builder(setter(into))]
+#[derive(Debug)]
 pub struct ProgramRun {
     /// The executable program to run.
-    pub program: ObjectRef<Program>,
-
-    /// An optional ABAP profiler trace identifier.
-    #[builder(setter(strip_option), default)]
-    pub profiler_id: Option<String>,
+    program: ObjectRef<Program>,
+    run: ObjectRun,
 }
 
 impl ProgramRun {
-    const TARGET: TemplateTarget = TemplateTarget::new(PROGRAM_RUN_CATEGORY, PROGRAM_RUN_RELATION);
+    fn new(program: ObjectRef<Program>) -> Self {
+        let run = ObjectRun::typed(&program);
+        Self { program, run }
+    }
+
+    /// Runs the program with the supplied ABAP profiler trace identifier.
+    #[must_use]
+    pub fn profiler_id(mut self, profiler_id: impl Into<String>) -> Self {
+        self.run = self.run.profiler_id(profiler_id);
+        self
+    }
+}
+
+impl ImmediateRun for Program {
+    const RUN: RunCapability = RunCapability::new(
+        PROGRAM_RUN_CATEGORY,
+        PROGRAM_RUN_RELATION,
+        PROGRAM_NAME_VARIABLE,
+    );
 }
 
 impl Operation<Ready> for ProgramRun {
@@ -63,26 +69,12 @@ impl Operation<Ready> for ProgramRun {
     type Kind = Stateless;
 
     fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        let template = Self::TARGET.template(client)?;
-        let uri_name = self.program.name().to_ascii_lowercase();
-        let (target, query) =
-            expand_program_run_target(template, &uri_name, self.profiler_id.as_deref())
-                .map_err(object_operation_error)?;
-        let mut request = AdtRequest::new(Method::POST, target);
-        for (name, value) in query {
-            request.push_query(name, value);
-        }
-        request.set_accept(media_type::SOURCE);
-        Ok(request)
+        self.run.request(client)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        if !response.status().is_success() {
-            return Err(ResponseError::unexpected_status(response.response()));
-        }
-        let content = String::from_utf8(response.into_body())
-            .map_err(ObjectError::InvalidResponseEncoding)?;
-        Ok(ProgramRunResult::new(self.program.clone(), content))
+        let output = self.run.decode(response)?;
+        Ok(ProgramRunResult::new(self.program.clone(), output.content))
     }
 }
 
@@ -90,120 +82,10 @@ impl Operation<Ready> for ProgramRun {
 pub type IncludePropertiesQuery = ObjectPropertiesQuery<Include>;
 
 impl ObjectRef<Program> {
-    /// Creates a builder for an operation that runs this program.
-    pub fn run(&self) -> ProgramRunBuilder {
-        let mut builder = ProgramRunBuilder::default();
-        builder.program(self.clone());
-        builder
+    /// Creates an operation that runs this program.
+    pub fn run(&self) -> ProgramRun {
+        ProgramRun::new(self.clone())
     }
-}
-
-fn expand_program_run_target(
-    template: &str,
-    program_name: &str,
-    profiler_id: Option<&str>,
-) -> Result<(AdtUri, Vec<(String, String)>), ObjectError> {
-    if !template_has_variable(template, PROGRAM_NAME_VARIABLE) {
-        return Err(ObjectError::InvalidTemplate {
-            template: template.to_owned(),
-            reason: format!("missing `{PROGRAM_NAME_VARIABLE}` variable"),
-        });
-    }
-    if profiler_id.is_some() && !template_has_variable(template, query_parameter::PROFILER_ID) {
-        return Err(ObjectError::UnsupportedTemplateParameter {
-            parameter: query_parameter::PROFILER_ID,
-        });
-    }
-
-    let mut variables = HashMap::from([(
-        PROGRAM_NAME_VARIABLE.to_owned(),
-        Value::String(program_name.to_owned()),
-    )]);
-    if let Some(profiler_id) = profiler_id {
-        variables.insert(
-            query_parameter::PROFILER_ID.to_owned(),
-            Value::String(profiler_id.to_owned()),
-        );
-    }
-    let expanded = stduritemplate::expand(template, &variables).map_err(|error| {
-        ObjectError::InvalidTemplate {
-            template: template.to_owned(),
-            reason: error.to_string(),
-        }
-    })?;
-    parse_program_run_target(&expanded).map_err(|source| ObjectError::InvalidExpandedTarget {
-        target: expanded,
-        source,
-    })
-}
-
-fn template_has_variable(template: &str, expected: &str) -> bool {
-    let mut remaining = template;
-    while let Some(start) = remaining.find('{') {
-        remaining = &remaining[start + 1..];
-        let Some(end) = remaining.find('}') else {
-            return false;
-        };
-        let expression = &remaining[..end];
-        let expression = expression
-            .chars()
-            .next()
-            .filter(|operator| "+#./;?&".contains(*operator))
-            .map_or(expression, |operator| &expression[operator.len_utf8()..]);
-        if expression.split(',').any(|variable| {
-            let variable = variable.strip_suffix('*').unwrap_or(variable);
-            variable.split_once(':').map_or(variable, |(name, _)| name) == expected
-        }) {
-            return true;
-        }
-        remaining = &remaining[end + 1..];
-    }
-    false
-}
-
-fn parse_program_run_target(
-    expanded: &str,
-) -> Result<(AdtUri, Vec<(String, String)>), AdtUriError> {
-    let (path, query) = match Url::parse(expanded) {
-        Ok(url) => {
-            if !matches!(url.scheme(), "http" | "https")
-                || !url.username().is_empty()
-                || url.password().is_some()
-            {
-                return Err(AdtUriError::Absolute);
-            }
-            if url.fragment().is_some() {
-                return Err(AdtUriError::QueryOrFragment);
-            }
-            (url.path().to_owned(), url.query().map(str::to_owned))
-        }
-        Err(url::ParseError::RelativeUrlWithoutBase) => {
-            if expanded.starts_with("//") {
-                return Err(AdtUriError::Absolute);
-            }
-            if expanded.contains('#') {
-                return Err(AdtUriError::QueryOrFragment);
-            }
-            expanded.split_once('?').map_or_else(
-                || (expanded.to_owned(), None),
-                |(path, query)| (path.to_owned(), Some(query.to_owned())),
-            )
-        }
-        Err(error) => return Err(AdtUriError::Url(error)),
-    };
-    let target = AdtUri::parse(&path)?;
-    let query = query
-        .map(|query| {
-            url::form_urlencoded::parse(query.as_bytes())
-                .into_owned()
-                .collect()
-        })
-        .unwrap_or_default();
-    Ok((target, query))
-}
-
-fn object_operation_error(error: ObjectError) -> OperationError {
-    OperationError::Response(ResponseError::Object(error))
 }
 
 #[cfg(test)]
@@ -213,11 +95,12 @@ mod tests {
 
     use super::*;
     use crate::{
-        AdtResponse, CompatibilityError, EntityTag, IncludeProperties, IncludePropertyVersion,
-        MediaVersionNegotiation, ObjectType, ProgramProperties, ProgramPropertiesVersion,
-        Revalidation,
+        AdtResponse, AdtUri, CompatibilityError, EntityTag, IncludeProperties,
+        IncludePropertyVersion, MediaVersionNegotiation, ObjectError, ObjectType,
+        ProgramProperties, ProgramPropertiesVersion, Revalidation, vocabulary::query_parameter,
     };
 
+    const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
     const PROGRAM_XML: &str = include_str!("../../tests/fixtures/program-z-test.xml");
     const INCLUDE_XML: &str = include_str!("../../tests/fixtures/include-ztest.xml");
     struct UnusedTransport;
@@ -268,13 +151,11 @@ mod tests {
     }
 
     fn program_run() -> ProgramRun {
-        ProgramRunBuilder::default()
-            .program(ObjectRef::<Program>::for_test(
-                "Z_TEST",
-                crate::AdtUri::parse("/sap/bc/adt/programs/programs/Z_TEST").unwrap(),
-            ))
-            .build()
-            .unwrap()
+        ObjectRef::<Program>::for_test(
+            "Z_TEST",
+            crate::AdtUri::parse("/sap/bc/adt/programs/programs/Z_TEST").unwrap(),
+        )
+        .run()
     }
 
     fn request_target() -> AdtUri {
@@ -295,44 +176,63 @@ mod tests {
 
     #[test]
     fn expands_namespaced_program_run_variables() {
-        let (target, query) = expand_program_run_target(
-            "/sap/bc/adt/programs/programrun/{programname}{?profilerId}",
+        let client = ready_client(DISCOVERY_XML);
+        let request = ObjectRef::<Program>::for_test(
             "/DMO/PROGRAM",
-            Some("TRACE ID"),
+            AdtUri::parse("/sap/bc/adt/programs/programs/%2Fdmo%2Fprogram").unwrap(),
         )
+        .run()
+        .profiler_id("TRACE ID")
+        .request(&client)
         .unwrap();
 
         assert_eq!(
-            target.as_str(),
-            "/sap/bc/adt/programs/programrun/%2FDMO%2FPROGRAM"
+            request.target().as_str(),
+            "/sap/bc/adt/programs/programrun/%2Fdmo%2Fprogram"
         );
-        assert_eq!(query, [("profilerId".to_owned(), "TRACE ID".to_owned())]);
+        assert_eq!(
+            request.query(),
+            [("profilerId".to_owned(), "TRACE ID".to_owned())]
+        );
     }
 
     #[test]
     fn omits_an_unset_program_run_profiler() {
-        let (_, query) = expand_program_run_target(
-            "/sap/bc/adt/programs/programrun/{programname}{?profilerId}",
-            "Z_TEST",
-            None,
-        )
-        .unwrap();
+        let request = program_run().request(&ready_client(DISCOVERY_XML)).unwrap();
 
-        assert!(query.is_empty());
+        assert!(request.query().is_empty());
     }
 
     #[test]
     fn rejects_profiling_when_the_template_does_not_advertise_it() {
-        let error = expand_program_run_target(
-            "/sap/bc/adt/programs/programrun/{programname}",
-            "Z_TEST",
-            Some("TRACE-ID"),
-        )
-        .unwrap_err();
+        let client = ready_client(
+            br#"<app:service xmlns:app="http://www.w3.org/2007/app"
+                    xmlns:atom="http://www.w3.org/2005/Atom"
+                    xmlns:adtcomp="http://www.sap.com/adt/compatibility">
+                    <app:workspace>
+                        <atom:title>Programs</atom:title>
+                        <app:collection href="/sap/bc/adt/programs/programrun">
+                            <atom:category term="programrun"
+                                scheme="http://www.sap.com/adt/categories/programs" />
+                            <adtcomp:templateLinks>
+                                <adtcomp:templateLink
+                                    rel="http://www.sap.com/adt/relations/programs/programrun"
+                                    template="/sap/bc/adt/programs/programrun/{programname}" />
+                            </adtcomp:templateLinks>
+                        </app:collection>
+                    </app:workspace>
+                </app:service>"#,
+        );
+        let error = program_run()
+            .profiler_id("TRACE-ID")
+            .request(&client)
+            .unwrap_err();
 
         assert!(matches!(
             error,
-            ObjectError::UnsupportedTemplateParameter { parameter }
+            OperationError::Response(ResponseError::Object(
+                ObjectError::UnsupportedTemplateParameter { parameter }
+            ))
                 if parameter == query_parameter::PROFILER_ID
         ));
     }

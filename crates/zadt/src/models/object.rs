@@ -3,7 +3,8 @@ use std::fmt;
 use serde::Deserialize;
 
 use crate::{
-    EntityTag, ObjectError, ObjectRef, SourceRef, TransportNumber, operation::UserSessionId,
+    EntityTag, GlobalWorkbenchType, ObjectError, ObjectRef, SourceRef, TransportNumber,
+    operation::UserSessionId,
 };
 
 /// A fetched source representation and its attached metadata.
@@ -52,6 +53,33 @@ impl SourceUpdateResult {
             reference,
             content,
             etag,
+        }
+    }
+}
+
+/// Plain-text output produced by running a type-erased repository object.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObjectRunResult {
+    /// The type-erased object that was executed.
+    pub reference: ObjectRef,
+
+    /// The exact Workbench type of the executed object.
+    pub object_type: GlobalWorkbenchType,
+
+    /// The rendered output returned by SAP.
+    pub content: String,
+}
+
+impl ObjectRunResult {
+    pub(crate) fn new(
+        reference: ObjectRef,
+        object_type: GlobalWorkbenchType,
+        content: String,
+    ) -> Self {
+        Self {
+            reference,
+            object_type,
+            content,
         }
     }
 }

@@ -13,6 +13,7 @@ const CLASS_XML: &str = include_str!("fixtures/class-cl-adt-uri-mapper-v4.xml");
 const SESSION_XML: &str = include_str!("fixtures/http-session-v3.xml");
 const SESSION_MEDIA_TYPE: &str = "application/vnd.sap.adt.core.http.session.v3+xml";
 const SOURCE: &str = "CLASS cl_adt_uri_mapper DEFINITION.\nENDCLASS.\n";
+const RUN_OUTPUT: &str = "Hello from IF_OO_ADT_CLASSRUN\n";
 
 async fn mock_logon(server: &MockServer) -> Mock<'_> {
     server
@@ -23,6 +24,52 @@ async fn mock_logon(server: &MockServer) -> Mock<'_> {
                 .body(SESSION_XML);
         })
         .await
+}
+
+#[tokio::test]
+async fn class_run_uses_the_advertised_plain_text_contract() {
+    let server = MockServer::start_async().await;
+    let logon = mock_logon(&server).await;
+    let _core_discovery = mock_core_discovery(&server).await;
+    let discovery = mock_discovery(&server).await;
+    let csrf = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/sap/bc/adt/core/discovery")
+                .header("x-csrf-token", "Fetch")
+                .header("x-sap-adt-sessiontype", "stateless");
+            then.status(200).header("x-csrf-token", "CSRF-TOKEN-RUN");
+        })
+        .await;
+    let run = server
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/sap/bc/adt/oo/classrun/cl_adt_uri_mapper")
+                .query_param("profilerId", "TRACE ID")
+                .header("accept", "text/plain")
+                .header("x-csrf-token", "CSRF-TOKEN-RUN")
+                .body("");
+            then.status(200)
+                .header("content-type", "text/plain; charset=utf-8")
+                .body(RUN_OUTPUT);
+        })
+        .await;
+
+    let client = ready_client(transport(&server)).await;
+    let class = client.object::<Class>("CL_ADT_URI_MAPPER").unwrap();
+    let output = class
+        .run()
+        .profiler_id("TRACE ID")
+        .execute(&client)
+        .await
+        .unwrap();
+
+    assert_eq!(output.reference, class);
+    assert_eq!(output.content, RUN_OUTPUT);
+    logon.assert_async().await;
+    discovery.assert_async().await;
+    csrf.assert_async().await;
+    run.assert_async().await;
 }
 
 #[tokio::test]

@@ -9,6 +9,7 @@ use crate::{
     OperationResponse, Package, PackageSettings, PackageTree, PackageTreeKind, Ready,
     ResponseError, Stateless,
     protocol::{AdtRequest, AdtResponse},
+    resource::AdtUriTemplate,
     target::{CollectionTarget, TemplateTarget},
 };
 
@@ -48,7 +49,8 @@ impl Operation<Ready> for PackageTreeQuery {
 
     fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
         let template = Self::TARGET.template(client)?;
-        let (target, query) = expand_tree_target(template, self.package.name(), self.kind)?;
+        let (target, query) =
+            expand_tree_target(template.as_str(), self.package.name(), self.kind)?;
         let mut request = AdtRequest::new(Method::GET, target);
         for (name, value) in query {
             request.push_query(name, value);
@@ -108,6 +110,16 @@ fn expand_tree_target(
     package_name: &str,
     kind: PackageTreeKind,
 ) -> Result<(AdtUri, Vec<(String, String)>), OperationError> {
+    let template = AdtUriTemplate::new(template);
+    for expected in ["packagename", "type"] {
+        if !template.has_variable(expected) {
+            return Err(ResponseError::Object(ObjectError::InvalidTemplate {
+                template: template.as_str().to_owned(),
+                reason: format!("missing `{expected}` query variable"),
+            })
+            .into());
+        }
+    }
     let variables = HashMap::from([
         (
             "packagename".to_owned(),
@@ -115,34 +127,11 @@ fn expand_tree_target(
         ),
         ("type".to_owned(), Value::String(kind.as_str().to_owned())),
     ]);
-    let expanded = stduritemplate::expand(template, &variables).map_err(|error| {
-        ResponseError::Object(ObjectError::InvalidTemplate {
-            template: template.to_owned(),
-            reason: error.to_string(),
-        })
-    })?;
-    let (path, query) = expanded
-        .split_once('?')
-        .map_or((expanded.as_str(), None), |(path, query)| {
-            (path, Some(query))
-        });
-    let target = AdtUri::parse(path).map_err(|source| {
-        ResponseError::Object(ObjectError::InvalidExpandedTarget {
-            target: expanded.clone(),
-            source,
-        })
-    })?;
-    let query: Vec<(String, String)> = query
-        .map(|query| {
-            url::form_urlencoded::parse(query.as_bytes())
-                .into_owned()
-                .collect()
-        })
-        .unwrap_or_default();
+    let (target, query) = template.expand(&variables).map_err(ResponseError::Object)?;
     for expected in ["packagename", "type"] {
         if !query.iter().any(|(name, _)| name == expected) {
             return Err(ResponseError::Object(ObjectError::InvalidTemplate {
-                template: template.to_owned(),
+                template: template.as_str().to_owned(),
                 reason: format!("missing `{expected}` query variable"),
             })
             .into());

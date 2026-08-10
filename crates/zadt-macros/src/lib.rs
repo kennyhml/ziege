@@ -34,6 +34,7 @@ struct ObjectTypeAttributes {
     collection: Collection,
     source: bool,
     source_components: Option<Type>,
+    run: bool,
     properties: Properties,
 }
 
@@ -53,6 +54,7 @@ impl Parse for ObjectTypeAttributes {
         let mut collection = None;
         let mut source = false;
         let mut source_components = None;
+        let mut run = false;
         let mut properties = None;
 
         while !input.is_empty() {
@@ -74,6 +76,7 @@ impl Parse for ObjectTypeAttributes {
                         &content,
                         &mut source,
                         &mut source_components,
+                        &mut run,
                         &mut properties,
                     )?;
                 }
@@ -97,6 +100,7 @@ impl Parse for ObjectTypeAttributes {
             collection,
             source,
             source_components,
+            run,
             properties,
         })
     }
@@ -125,6 +129,7 @@ fn parse_capabilities(
     input: ParseStream<'_>,
     source: &mut bool,
     source_components: &mut Option<Type>,
+    run: &mut bool,
     properties: &mut Option<Properties>,
 ) -> Result<()> {
     while !input.is_empty() {
@@ -142,6 +147,12 @@ fn parse_capabilities(
                 let component = content.parse()?;
                 parse_optional_comma(&content)?;
                 set_once(source_components, component, &capability)?;
+            }
+            "Run" | "run" => {
+                if *run {
+                    return Err(Error::new(capability.span(), "duplicate Run capability"));
+                }
+                *run = true;
             }
             "Properties" | "properties" => {
                 let content;
@@ -217,6 +228,7 @@ fn expand_object_type(
         collection,
         source,
         source_components,
+        run,
         properties,
     } = attributes;
     let Collection { scheme, term } = collection;
@@ -253,6 +265,11 @@ fn expand_object_type(
             quote!(<#component as crate::objects::SourceComponentSet>::COMPONENTS)
         }
         None => quote!(&[]),
+    };
+    let runtime_run = if run {
+        quote!(Some(<#ident as crate::objects::ImmediateRun>::RUN))
+    } else {
+        quote!(None)
     };
 
     Ok(quote! {
@@ -314,6 +331,10 @@ fn expand_object_type(
                 &self,
             ) -> &'static [&'static dyn crate::objects::SourceComponent] {
                 #runtime_source_components
+            }
+
+            fn run(&self) -> Option<crate::objects::RunCapability> {
+                #runtime_run
             }
 
             fn properties(&self) -> &dyn crate::objects::RuntimeObjectProperties {

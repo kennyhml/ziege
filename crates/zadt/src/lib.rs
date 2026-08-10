@@ -15,14 +15,13 @@ mod vocabulary;
 
 pub mod transport;
 
-pub use api::classes::ClassPropertiesQuery;
+pub use api::classes::{ClassPropertiesQuery, ClassRun};
 pub use api::discovery::{CoreDiscoveryQuery, DiscoveryQuery};
-pub use api::object::{LockRequest, ObjectSourceQuery, ObjectSourceUpdate, UnlockRequest};
-pub use api::packages::{PackagePropertiesQuery, PackageSettingsQuery, PackageTreeQuery};
-pub use api::programs::{
-    IncludePropertiesQuery, ProgramPropertiesQuery, ProgramRun, ProgramRunBuilder,
-    ProgramRunBuilderError,
+pub use api::object::{
+    LockRequest, ObjectRun, ObjectSourceQuery, ObjectSourceUpdate, UnlockRequest,
 };
+pub use api::packages::{PackagePropertiesQuery, PackageSettingsQuery, PackageTreeQuery};
+pub use api::programs::{IncludePropertiesQuery, ProgramPropertiesQuery, ProgramRun};
 pub use api::properties::{JsonObjectPropertiesQuery, ObjectPropertiesQuery};
 pub use api::repository::{
     RepositoryContentOperation, RepositoryContentQuery, RepositoryContentQueryBuilder,
@@ -47,17 +46,17 @@ pub use error::{
 pub use models::{
     AccessMode, AdtException, AdtExceptionProperty, Capabilities, Category, ClassObjectReference,
     ClassProperties, ClassPropertiesV2, ClassPropertiesV3, ClassPropertiesV4,
-    ClassPropertiesVersion, ClassSourceProperties, Collection, IncludeProperties,
-    IncludePropertiesV2, IncludePropertyVersion, ObjectLock, PackageAssignment, PackageAttributes,
-    PackageInterfaceReference, PackageProperties, PackagePropertiesV1, PackagePropertiesV2,
-    PackagePropertiesVersion, PackageReference, PackageSettings, PackageTransport, PackageTree,
-    PackageTreeKind, PackageTreeNode, PackageUseAccess, ProgramProperties, ProgramPropertiesV2,
-    ProgramPropertiesV3, ProgramPropertiesVersion, ProgramRunResult, RepositoryContent,
-    RepositoryFacet, RepositoryFacetDefinition, RepositoryFacetValuesLink, RepositoryFacets,
-    RepositoryObjectEntry, RepositoryObjectProperties, RepositoryObjectSummary,
-    RepositoryPreselection, RepositoryPreselectionInfo, RepositoryProperty,
-    RepositoryVirtualFolder, SessionInformation, SessionUri, SourceCode, SourceUpdateResult,
-    SyntaxConfiguration, SyntaxLanguage, SystemInformationLink, TemplateLink,
+    ClassPropertiesVersion, ClassRunResult, ClassSourceProperties, Collection, IncludeProperties,
+    IncludePropertiesV2, IncludePropertyVersion, ObjectLock, ObjectRunResult, PackageAssignment,
+    PackageAttributes, PackageInterfaceReference, PackageProperties, PackagePropertiesV1,
+    PackagePropertiesV2, PackagePropertiesVersion, PackageReference, PackageSettings,
+    PackageTransport, PackageTree, PackageTreeKind, PackageTreeNode, PackageUseAccess,
+    ProgramProperties, ProgramPropertiesV2, ProgramPropertiesV3, ProgramPropertiesVersion,
+    ProgramRunResult, RepositoryContent, RepositoryFacet, RepositoryFacetDefinition,
+    RepositoryFacetValuesLink, RepositoryFacets, RepositoryObjectEntry, RepositoryObjectProperties,
+    RepositoryObjectSummary, RepositoryPreselection, RepositoryPreselectionInfo,
+    RepositoryProperty, RepositoryVirtualFolder, SessionInformation, SessionUri, SourceCode,
+    SourceUpdateResult, SyntaxConfiguration, SyntaxLanguage, SystemInformationLink, TemplateLink,
     TransportCheckMessage, TransportCheckResult, TransportCreation, TransportCreationMessage,
     TransportKind, TransportNumber, TransportObjectKey, TransportObjectLock, TransportProject,
     TransportRequest, TransportRequests, TransportStatus, TransportTask, Workspace,

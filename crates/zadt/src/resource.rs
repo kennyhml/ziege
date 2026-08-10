@@ -1,6 +1,7 @@
 mod link;
 mod refs;
 mod relations;
+mod template;
 
 pub use link::{AdtLink, AdtLinkError};
 pub use refs::{
@@ -11,3 +12,4 @@ pub use refs::{
 pub use relations::Relations;
 
 pub(crate) use link::{AdvertisedLink, resolve_href};
+pub(crate) use template::AdtUriTemplate;

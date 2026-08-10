@@ -73,6 +73,18 @@
                 term="classes"
                 scheme="http://www.sap.com/adt/categories/oo" />
         </app:collection>
+        <app:collection href="/sap/bc/adt/oo/classrun">
+            <atom:title>Run a class</atom:title>
+            <atom:category
+                term="classrun"
+                scheme="http://www.sap.com/adt/categories/oo" />
+            <adtcomp:templateLinks xmlns:adtcomp="http://www.sap.com/adt/compatibility">
+                <adtcomp:templateLink
+                    rel="http://www.sap.com/adt/relations/oo/classrun"
+                    template="/sap/bc/adt/oo/classrun/{classname}{?profilerId}"
+                    type="text/plain" />
+            </adtcomp:templateLinks>
+        </app:collection>
     </app:workspace>
     <app:workspace>
         <atom:title>Change and Transport System</atom:title>

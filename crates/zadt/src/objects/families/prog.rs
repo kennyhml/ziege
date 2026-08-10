@@ -13,6 +13,7 @@ use zadt_macros::object_type;
     ),
     capabilities(
         Source,
+        Run,
         Properties(
             media_version = ProgramPropertiesVersion,
             model = ProgramProperties,

@@ -15,6 +15,7 @@ use zadt_macros::object_type;
     capabilities(
         Source,
         SourceComponents(ClassSourceComponent),
+        Run,
         Properties(
             media_version = ClassPropertiesVersion,
             model = ClassProperties,

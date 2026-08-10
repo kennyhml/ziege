@@ -2,7 +2,7 @@ use http::Method;
 
 use crate::{
     AdtRequest, AdtUri, CategoryId, Client, Collection, ObjectError, OperationError, Ready,
-    ResponseError,
+    ResponseError, resource::AdtUriTemplate,
 };
 
 pub(crate) const CENTRAL_DISCOVERY: FixedTarget = FixedTarget::new("/sap/bc/adt/discovery");
@@ -70,13 +70,16 @@ impl TemplateTarget {
         }
     }
 
-    pub(crate) fn template(self, client: &Client<Ready>) -> Result<&str, OperationError> {
+    pub(crate) fn template<'a>(
+        self,
+        client: &'a Client<Ready>,
+    ) -> Result<AdtUriTemplate<'a>, OperationError> {
         self.collection
             .collection(client)?
             .template_links()
             .iter()
             .find(|link| link.relation() == self.relation)
-            .map(|link| link.template())
+            .map(|link| AdtUriTemplate::new(link.template()))
             .ok_or_else(|| {
                 OperationError::Response(ResponseError::Object(ObjectError::MissingTemplate {
                     relation: self.relation,

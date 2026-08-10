@@ -1,6 +1,6 @@
 use super::{
     Class, GlobalWorkbenchType, Include, ObjectProperties, ObjectRef, ObjectVersion, Package,
-    Program, SourceComponent,
+    Program, RunCapability, SourceComponent,
 };
 use crate::{
     api::properties::ObjectPropertiesQuery,
@@ -23,6 +23,8 @@ pub(crate) trait RuntimeObjectTypeDescriptor: Sync {
     fn source_path(&self) -> Option<&'static [&'static str]>;
 
     fn source_components(&self) -> &'static [&'static dyn SourceComponent];
+
+    fn run(&self) -> Option<RunCapability>;
 
     fn properties(&self) -> &dyn RuntimeObjectProperties;
 }

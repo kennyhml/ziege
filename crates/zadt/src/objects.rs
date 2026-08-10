@@ -2,6 +2,7 @@ use std::{fmt, hash::Hash, marker::PhantomData};
 
 use crate::{
     AccessMode, JsonObjectPropertiesQuery, LockRequest, ObjectLock, UnlockRequest,
+    api::object::ObjectRun,
     client::{Client, Ready},
     error::ObjectError,
     resource::SourceRef,
@@ -15,6 +16,7 @@ mod families;
 mod version;
 mod workbench;
 
+pub(crate) use capabilities::{ImmediateRun, RunCapability};
 pub use capabilities::{
     ObjectProperties, Source, SourceComponent, SourceComponentSet, SourceComponents,
 };
@@ -91,6 +93,22 @@ impl RepositoryObject {
             .copied()
             .find(|component| component.name() == name)
             .map(|component| self.reference.source_from_component(component))
+    }
+
+    /// Creates an immediate run operation when this object family supports it.
+    pub fn run(&self) -> Result<ObjectRun, ObjectError> {
+        let run = self
+            .descriptor
+            .and_then(|descriptor| descriptor.run())
+            .ok_or_else(|| ObjectError::UnsupportedCapability {
+                object_type: self.object_type.clone(),
+                capability: "immediate run",
+            })?;
+        Ok(ObjectRun::new(
+            self.reference.clone(),
+            self.object_type.clone(),
+            run,
+        ))
     }
 
     /// Recovers a typed reference when this object has the requested type.
@@ -195,6 +213,11 @@ impl<T> ObjectRef<T> {
         &self.uri
     }
 
+    /// Returns the object name when this reference carries one.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     /// Returns a type-erased copy of this object identity.
     pub fn erase(&self) -> ObjectRef {
         ObjectRef::typed(self.name.clone(), self.uri.clone())
@@ -221,11 +244,6 @@ impl<T> ObjectRef<T> {
 }
 
 impl<T: ObjectType> ObjectRef<T> {
-    /// Returns the object name.
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
     pub(crate) fn from_parts(name: String, uri: AdtUri) -> Self {
         Self::typed(name, uri)
     }
@@ -413,6 +431,41 @@ mod tests {
     }
 
     #[test]
+    fn descriptor_registry_exposes_immediate_run_only_for_programs_and_classes() {
+        let program = ObjectRef::<Program>::for_test(
+            "Z_TEST",
+            AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
+        );
+        let class = ObjectRef::<Class>::for_test(
+            "ZCL_TEST",
+            AdtUri::parse("/sap/bc/adt/oo/classes/zcl_test").unwrap(),
+        );
+        let include = ObjectRef::<Include>::for_test(
+            "ZTEST",
+            AdtUri::parse("/sap/bc/adt/programs/includes/ztest").unwrap(),
+        );
+        let package = ObjectRef::<Package>::for_test(
+            "ZPACKAGE",
+            AdtUri::parse("/sap/bc/adt/packages/zpackage").unwrap(),
+        );
+
+        assert!(RepositoryObject::from(program).run().is_ok());
+        assert!(RepositoryObject::from(class).run().is_ok());
+        for object in [
+            RepositoryObject::from(include),
+            RepositoryObject::from(package),
+        ] {
+            assert!(matches!(
+                object.run(),
+                Err(ObjectError::UnsupportedCapability {
+                    capability: "immediate run",
+                    ..
+                })
+            ));
+        }
+    }
+
+    #[test]
     fn other_repository_objects_report_unsupported_properties() {
         let unsupported = ObjectRef::named(
             "Z_UNSUPPORTED".to_owned(),
@@ -426,6 +479,13 @@ mod tests {
             Err(ObjectError::UnsupportedCapability {
                 object_type,
                 capability: "object properties",
+            }) if object_type.as_str() == "TEST/X"
+        ));
+        assert!(matches!(
+            object.run(),
+            Err(ObjectError::UnsupportedCapability {
+                object_type,
+                capability: "immediate run",
             }) if object_type.as_str() == "TEST/X"
         ));
     }

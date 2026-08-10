@@ -34,18 +34,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let client = Client::new(transport).discover().await?;
 
     let object_type: GlobalWorkbenchType = "CLAS/OC".parse()?;
-    let object = client.object::<Class>("ztarftar")?;
+    let object = client.repository_object(&object_type, "zzzz")?;
 
-    let session = client.create_user_session();
+    let res = object.run()?.execute(&client).await?;
 
-    let lock = object.lock(AccessMode::Show).execute(&session).await?;
-    let res = object
-        .component_source(ClassSourceComponent::Macros)
-        .update(&lock, "*Hi this is ZADT!")?
-        .execute(&session)
-        .await;
+    // let session = client.create_user_session();
 
-    lock.remove().execute(&session).await?;
+    // let lock = object.lock(AccessMode::Show).execute(&session).await?;
+    // let res = object
+    //     .component_source(ClassSourceComponent::Macros)
+    //     .update(&lock, "*Hi this is ZADT!")?
+    //     .execute(&session)
+    //     .await;
+    //
+    // lock.remove().execute(&session).await?;
     println!("{res:#?}");
 
     Ok(())

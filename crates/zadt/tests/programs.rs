@@ -93,8 +93,6 @@ async fn program_run_uses_the_advertised_profiled_template() {
     let output = program
         .run()
         .profiler_id("TRACE ID")
-        .build()
-        .unwrap()
         .execute(&client)
         .await
         .unwrap();
