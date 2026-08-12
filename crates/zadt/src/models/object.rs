@@ -57,6 +57,16 @@ impl SourceUpdateResult {
     }
 }
 
+/// The canonical properties returned after an object-properties update.
+#[derive(Debug)]
+pub struct ObjectPropertiesUpdateResult<P> {
+    /// Server-confirmed properties when SAP returned a representation body.
+    pub properties: Option<P>,
+
+    /// The updated entity tag supplied by SAP, when present.
+    pub etag: Option<EntityTag>,
+}
+
 /// Plain-text output produced by running a type-erased repository object.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ObjectRunResult {

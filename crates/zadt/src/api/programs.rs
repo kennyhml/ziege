@@ -1,9 +1,9 @@
-use super::{object::ObjectRun, properties::ObjectPropertiesQuery};
+use super::object::ObjectRun;
 use crate::{
     client::{Client, Ready},
     error::{OperationError, ResponseError},
     models::ProgramRunResult,
-    objects::{ImmediateRun, Include, ObjectRef, Program, RunCapability},
+    objects::{ImmediateRun, ObjectRef, Program, RunCapability},
     operation::{Operation, OperationResponse, Stateless},
     protocol::AdtRequest,
     vocabulary::CategoryId,
@@ -15,9 +15,6 @@ const PROGRAM_RUN_CATEGORY: CategoryId = CategoryId {
     term: "programrun",
 };
 const PROGRAM_RUN_RELATION: &str = "http://www.sap.com/adt/relations/programs/programrun";
-
-/// Fetches program properties using the generic object-properties protocol.
-pub type ProgramPropertiesQuery = ObjectPropertiesQuery<Program>;
 
 /// Runs an executable ABAP program and returns its rendered console output.
 ///
@@ -78,9 +75,6 @@ impl Operation<Ready> for ProgramRun {
     }
 }
 
-/// Fetches include properties using the generic object-properties protocol.
-pub type IncludePropertiesQuery = ObjectPropertiesQuery<Include>;
-
 impl ObjectRef<Program> {
     /// Creates an operation that runs this program.
     pub fn run(&self) -> ProgramRun {
@@ -95,9 +89,10 @@ mod tests {
 
     use super::*;
     use crate::{
-        AdtResponse, AdtUri, CompatibilityError, EntityTag, IncludeProperties,
-        IncludePropertyVersion, MediaVersionNegotiation, ObjectError, ObjectType,
-        ProgramProperties, ProgramPropertiesVersion, Revalidation, vocabulary::query_parameter,
+        AdtResponse, AdtUri, CompatibilityError, EntityTag, Include, IncludeProperties,
+        IncludePropertyVersion, MediaVersionNegotiation, ObjectError, ObjectPropertiesQuery,
+        ObjectType, ProgramProperties, ProgramPropertiesVersion, Revalidation,
+        vocabulary::query_parameter,
     };
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
@@ -119,7 +114,7 @@ mod tests {
         )
     }
 
-    fn program_properties_query() -> ProgramPropertiesQuery {
+    fn program_properties_query() -> ObjectPropertiesQuery<Program> {
         ObjectRef::<Program>::for_test(
             "Z_TEST",
             crate::AdtUri::parse("/sap/bc/adt/programs/programs/Z_TEST").unwrap(),
@@ -142,7 +137,7 @@ mod tests {
         ))
     }
 
-    fn include_properties_query() -> IncludePropertiesQuery {
+    fn include_properties_query() -> ObjectPropertiesQuery<Include> {
         ObjectRef::<Include>::for_test(
             "ZTEST",
             crate::AdtUri::parse("/sap/bc/adt/programs/includes/ZTEST").unwrap(),
@@ -168,9 +163,13 @@ mod tests {
 
     #[test]
     fn include_properties_query_defaults_to_v2() {
+        let request = include_properties_query()
+            .request(&ready_client(DISCOVERY_XML))
+            .unwrap();
+
         assert_eq!(
-            include_properties_query().priority,
-            [IncludePropertyVersion::V2]
+            request.headers()[header::ACCEPT],
+            IncludePropertyVersion::V2.media_type()
         );
     }
 

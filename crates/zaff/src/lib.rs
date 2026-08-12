@@ -5,8 +5,16 @@ use std::path::Path;
 use serde::Deserialize;
 use thiserror::Error;
 use zadt::{
-    Class, ClassSourceComponent, GlobalWorkbenchType, Include, Program, RepositoryObjectEntry,
-    SourceRef,
+    Class, ClassSourceComponent, DataElement, DataElementProperties, GlobalWorkbenchType, Include,
+    ObjectRef, Program, RepositoryObject, RepositoryObjectEntry, SourceRef,
+};
+
+mod data_element;
+
+pub use data_element::{
+    AffAbapLanguageVersion, AffBasicDirection, AffBidirectionalOptions, AffDataElement,
+    AffDataElementAdditionalProperties, AffDataElementCategory, AffDataElementFieldLabels,
+    AffDataElementHeader, AffDataElementTypeInformation, AffPredefinedType, AffSearchHelp,
 };
 
 const PROGRAM_FILES: &[FileSpec] = &[
@@ -82,11 +90,19 @@ const CLASS_FILES: &[FileSpec] = &[
     ),
 ];
 
+const DATA_ELEMENT_FILES: &[FileSpec] = &[FileSpec::new(
+    "<name>.dtel.json",
+    Cardinality::One,
+    FileComponent::Metadata,
+)];
+
 /// An ABAP File Formats object family supported by this projection layer.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum ObjectFormat {
     Program,
     Class,
+    DataElement,
 }
 
 impl ObjectFormat {
@@ -95,6 +111,7 @@ impl ObjectFormat {
         match self {
             Self::Program => "PROG",
             Self::Class => "CLAS",
+            Self::DataElement => "DTEL",
         }
     }
 
@@ -108,6 +125,7 @@ impl ObjectFormat {
         match self {
             Self::Program => PROGRAM_FILES,
             Self::Class => CLASS_FILES,
+            Self::DataElement => DATA_ELEMENT_FILES,
         }
     }
 
@@ -130,6 +148,7 @@ impl ObjectFormat {
 
         match self {
             Self::Class => Ok(GlobalWorkbenchType::new("CLAS/OC")),
+            Self::DataElement => Ok(GlobalWorkbenchType::new("DTEL/DE")),
             Self::Program => match metadata
                 .general_information
                 .and_then(|information| information.program_type)
@@ -151,6 +170,7 @@ impl ObjectFormat {
         match object_type.as_str() {
             "PROG/P" | "PROG/I" => Ok(Self::Program),
             "CLAS/OC" => Ok(Self::Class),
+            "DTEL/DE" => Ok(Self::DataElement),
             _ => Err(ProjectionError::UnsupportedRepositoryType {
                 object_type: object_type.clone(),
             }),
@@ -163,6 +183,14 @@ impl TryFrom<&RepositoryObjectEntry> for ObjectFormat {
 
     fn try_from(entry: &RepositoryObjectEntry) -> Result<Self, Self::Error> {
         Self::for_workbench_type(&entry.object_type)
+    }
+}
+
+impl TryFrom<&RepositoryObject> for ObjectFormat {
+    type Error = ProjectionError;
+
+    fn try_from(object: &RepositoryObject) -> Result<Self, Self::Error> {
+        Self::for_workbench_type(object.object_type())
     }
 }
 
@@ -205,6 +233,108 @@ pub struct FileSpec {
     pub template: &'static str,
     pub cardinality: Cardinality,
     pub component: FileComponent,
+}
+
+/// The ADT resource used to materialize one projected AFF file.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub enum FileBacking {
+    /// A plain-text source resource.
+    Source(SourceRef),
+    /// Object properties that require an AFF schema transformation.
+    Properties(ObjectRef<DataElement>),
+}
+
+/// One materializable AFF file bound to its originating repository object.
+#[derive(Clone, Debug)]
+pub struct ProjectedFile {
+    pub name: String,
+    pub format: ObjectFormat,
+    pub cardinality: Cardinality,
+    pub component: FileComponent,
+    pub backing: FileBacking,
+}
+
+impl ProjectedFile {
+    /// Renders properties returned by ZADT as this file's AFF JSON content.
+    pub fn render_properties(
+        &self,
+        properties: &DataElementProperties,
+    ) -> Result<String, ProjectionError> {
+        match (&self.backing, self.format, self.component) {
+            (
+                FileBacking::Properties(object),
+                ObjectFormat::DataElement,
+                FileComponent::Metadata,
+            ) => {
+                data_element::validate_data_element_binding(object, properties)?;
+                data_element::render_data_element_properties(properties)
+            }
+            _ => Err(ProjectionError::NotPropertiesFile {
+                component: self.component,
+            }),
+        }
+    }
+
+    /// Merges edited AFF JSON into the original ZADT properties representation.
+    pub fn merge_properties(
+        &self,
+        original: &DataElementProperties,
+        edited: &str,
+    ) -> Result<DataElementProperties, ProjectionError> {
+        match (&self.backing, self.format, self.component) {
+            (
+                FileBacking::Properties(object),
+                ObjectFormat::DataElement,
+                FileComponent::Metadata,
+            ) => {
+                data_element::validate_data_element_binding(object, original)?;
+                data_element::merge_data_element_properties(original, edited)
+            }
+            _ => Err(ProjectionError::NotPropertiesFile {
+                component: self.component,
+            }),
+        }
+    }
+}
+
+/// A repository object's currently materializable editor-facing AFF files.
+#[derive(Clone, Debug)]
+pub struct Projection {
+    pub format: ObjectFormat,
+    pub files: Vec<ProjectedFile>,
+}
+
+/// Projects a runtime repository object into its currently materializable AFF files.
+///
+/// Optional source specifications remain possible files; the consumer decides
+/// whether the corresponding backend resource exists. Specifications without
+/// an implemented content backing are omitted.
+pub fn project(object: &RepositoryObject) -> Result<Projection, ProjectionError> {
+    let format = ObjectFormat::try_from(object)?;
+    let object_name = object.reference().name().to_owned();
+    let files = format
+        .files()
+        .iter()
+        .filter(|specification| match format {
+            ObjectFormat::DataElement => specification.component == FileComponent::Metadata,
+            ObjectFormat::Program | ObjectFormat::Class => {
+                matches!(specification.component, FileComponent::Source(_))
+            }
+        })
+        .map(|specification| {
+            let name = specification.file_name(&object_name, None)?;
+            let resolved = resolve_file_name(&name)?;
+            Ok(ProjectedFile {
+                name,
+                format,
+                cardinality: specification.cardinality,
+                component: specification.component,
+                backing: resolved.bind(object)?,
+            })
+        })
+        .collect::<Result<_, ProjectionError>>()?;
+    Ok(Projection { format, files })
 }
 
 impl FileSpec {
@@ -256,6 +386,53 @@ pub struct ResolvedFile {
 }
 
 impl ResolvedFile {
+    /// Binds this projected path to the runtime repository object that produced it.
+    pub fn bind(&self, object: &RepositoryObject) -> Result<FileBacking, ProjectionError> {
+        let reference = object.reference();
+        if !self.object_name.eq_ignore_ascii_case(reference.name()) {
+            return Err(ProjectionError::BindingNameMismatch {
+                projected_name: self.object_name.clone(),
+                repository_name: reference.name().to_owned(),
+            });
+        }
+
+        let repository_format = ObjectFormat::try_from(object)?;
+        if self.format != repository_format {
+            return Err(ProjectionError::BindingTypeMismatch {
+                projected_type: self.format.object_type(),
+                repository_type: object.object_type().clone(),
+            });
+        }
+
+        match self.component {
+            FileComponent::Source(SourceComponent::Main) => object
+                .source()
+                .map(FileBacking::Source)
+                .ok_or_else(|| ProjectionError::UnsupportedFileComponent {
+                    object_type: object.object_type().clone(),
+                    component: self.component,
+                }),
+            FileComponent::Source(SourceComponent::Class(component)) => object
+                .source_component(component.as_str())
+                .map(FileBacking::Source)
+                .ok_or_else(|| ProjectionError::UnsupportedFileComponent {
+                    object_type: object.object_type().clone(),
+                    component: self.component,
+                }),
+            FileComponent::Metadata if self.format == ObjectFormat::DataElement => object
+                .typed::<DataElement>()
+                .map(FileBacking::Properties)
+                .ok_or_else(|| ProjectionError::UnsupportedFileComponent {
+                    object_type: object.object_type().clone(),
+                    component: self.component,
+                }),
+            _ => Err(ProjectionError::UnsupportedFileComponent {
+                object_type: object.object_type().clone(),
+                component: self.component,
+            }),
+        }
+    }
+
     /// Resolves this projected file to its ADT source resource.
     ///
     /// The repository entry is the authoritative remote identity retained when
@@ -325,7 +502,11 @@ pub fn resolve_path(path: impl AsRef<Path>) -> Result<ResolvedFile, ProjectionEr
 
 /// Resolves an AFF file name into its object family and logical component.
 pub fn resolve_file_name(file_name: &str) -> Result<ResolvedFile, ProjectionError> {
-    for format in [ObjectFormat::Class, ObjectFormat::Program] {
+    for format in [
+        ObjectFormat::Class,
+        ObjectFormat::Program,
+        ObjectFormat::DataElement,
+    ] {
         for specification in format.files() {
             if let Some((object_name, language)) = match_template(specification.template, file_name)
             {
@@ -482,8 +663,34 @@ pub enum ProjectionError {
         repository_type: GlobalWorkbenchType,
     },
 
+    #[error(
+        "projected object resource `{projected_uri}` cannot bind to properties for `{properties_uri}`"
+    )]
+    BindingResourceMismatch {
+        projected_uri: String,
+        properties_uri: String,
+    },
+
     #[error("AFF component `{component:?}` is not an ADT source resource")]
     NotSourceFile { component: FileComponent },
+
+    #[error("AFF component `{component:?}` is not backed by ADT object properties")]
+    NotPropertiesFile { component: FileComponent },
+
+    #[error("repository object type `{object_type}` cannot supply AFF component `{component:?}`")]
+    UnsupportedFileComponent {
+        object_type: GlobalWorkbenchType,
+        component: FileComponent,
+    },
+
+    #[error("invalid AFF Data Element document: {0}")]
+    InvalidDataElementDocument(#[source] serde_json::Error),
+
+    #[error("invalid AFF Data Element field `{field}`: {message}")]
+    InvalidDataElementField {
+        field: &'static str,
+        message: String,
+    },
 
     #[error(transparent)]
     InvalidObjectReference(#[from] zadt::ObjectError),
@@ -551,6 +758,7 @@ mod tests {
             ("PROG/P", ObjectFormat::Program),
             ("PROG/I", ObjectFormat::Program),
             ("CLAS/OC", ObjectFormat::Class),
+            ("DTEL/DE", ObjectFormat::DataElement),
         ] {
             let repository_type: GlobalWorkbenchType = repository_type.parse().unwrap();
             assert_eq!(
@@ -590,6 +798,13 @@ mod tests {
                 .unwrap()
                 .to_string(),
             "CLAS/OC"
+        );
+        assert_eq!(
+            ObjectFormat::DataElement
+                .repository_type_from_metadata(br#"{"formatVersion":"1","header":{}}"#)
+                .unwrap()
+                .to_string(),
+            "DTEL/DE"
         );
     }
 
@@ -640,6 +855,39 @@ mod tests {
                 language: None,
             }
         );
+        assert_eq!(
+            resolve_path("src/zexample.dtel.json").unwrap(),
+            ResolvedFile {
+                object_name: "ZEXAMPLE".to_owned(),
+                format: ObjectFormat::DataElement,
+                component: FileComponent::Metadata,
+                language: None,
+            }
+        );
+    }
+
+    #[test]
+    fn projects_data_elements_as_one_properties_backed_file() {
+        let entry = repository_entry(
+            "ZEXAMPLE",
+            "DTEL/DE",
+            "/sap/bc/adt/ddic/dataelements/zexample",
+        );
+        let object = entry.repository_object().unwrap();
+
+        let projection = project(&object).unwrap();
+
+        assert_eq!(projection.format, ObjectFormat::DataElement);
+        assert_eq!(projection.files.len(), 1);
+        let file = &projection.files[0];
+        assert_eq!(file.name, "zexample.dtel.json");
+        assert_eq!(file.cardinality, Cardinality::One);
+        assert_eq!(file.component, FileComponent::Metadata);
+        let FileBacking::Properties(bound) = &file.backing else {
+            panic!("Data Element metadata must be properties-backed");
+        };
+        assert_eq!(bound.name(), "ZEXAMPLE");
+        assert_eq!(bound.uri(), entry.reference.uri());
     }
 
     #[test]
@@ -722,7 +970,11 @@ mod tests {
 
     #[test]
     fn renders_and_resolves_every_supported_file_specification() {
-        for format in [ObjectFormat::Program, ObjectFormat::Class] {
+        for format in [
+            ObjectFormat::Program,
+            ObjectFormat::Class,
+            ObjectFormat::DataElement,
+        ] {
             for specification in format.files() {
                 let language =
                     matches!(specification.cardinality, Cardinality::ZeroOrMore).then_some("en-GB");

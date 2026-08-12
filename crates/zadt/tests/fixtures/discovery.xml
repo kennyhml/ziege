@@ -126,4 +126,19 @@
                 scheme="http://www.sap.com/adt/categories/repository" />
         </app:collection>
     </app:workspace>
+    <app:workspace>
+        <atom:title>ABAP Dictionary</atom:title>
+        <app:collection href="/sap/bc/adt/ddic/dataelements">
+            <atom:title>Data Elements</atom:title>
+            <app:accept>application/vnd.sap.adt.dataelements.v2+xml</app:accept>
+            <atom:category
+                term="dtelde"
+                scheme="http://www.sap.com/wbobj/dictionary" />
+            <adtcomp:templateLinks xmlns:adtcomp="http://www.sap.com/adt/compatibility">
+                <adtcomp:templateLink
+                    rel="http://www.sap.com/wbobj/dictionary/dtelde/properties"
+                    template="/sap/bc/adt/ddic/dataelements/{object_name}{?corrNr,lockHandle,version,accessMode,_action}" />
+            </adtcomp:templateLinks>
+        </app:collection>
+    </app:workspace>
 </app:service>

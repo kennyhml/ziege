@@ -9,7 +9,7 @@ use zadt_macros::object_type;
         scheme = "http://www.sap.com/wbobj/packages",
         term = "devck",
     ),
-    capabilities(Properties(
+    capabilities(ReadProperties(
         media_version = PackagePropertiesVersion,
         model = PackageProperties,
     )),

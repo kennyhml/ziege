@@ -2617,7 +2617,6 @@ dependencies = [
  "secrecy",
  "serde",
  "serde-xml-rs",
- "serde_json",
  "std-uritemplate",
  "thiserror 2.0.19",
  "tokio",

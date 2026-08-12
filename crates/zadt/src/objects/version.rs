@@ -6,8 +6,7 @@
 /// # References
 /// - `IF_ADT_URI_QUERY_PARAMETERS` defines `CO_VERSION` and its external values
 /// - `CL_ADT_UTILITY->GET_WB_VERSION` maps it to Workbench `R3STATE` values
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ObjectVersion {
     /// The persistent active object (R3STATE `A`).
     Active,

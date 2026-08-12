@@ -1,10 +1,10 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::{
     AdtUri, EnhancementImplementationsRef, EntityTag, GlobalWorkbenchType, HtmlSourceRef, Include,
     MediaVersionNegotiation, ObjectEnhancementOptionsRef, ObjectError, ObjectRef, ObjectStateRef,
-    ObjectStructureRef, ObjectType, ObjectVersion, ParserRef, Program, ResponseError,
-    SourceEnhancementOptionsRef, SourceRef, SourceVersionsRef, TextElementsRef,
+    ObjectStructureRef, ObjectType, ObjectVersion, ParserRef, Program, RawObjectProperties,
+    ResponseError, SourceEnhancementOptionsRef, SourceRef, SourceVersionsRef, TextElementsRef,
     objects::Package,
     resource::{AdtLinkError, AdvertisedLink, Relations, resolve_href},
 };
@@ -47,8 +47,7 @@ enum ProgramPropertiesVersionKind {
 ///
 /// Multiple media type versions exist. They do, however, appear to be
 /// identical under regular circumstances - to be clarified.
-#[derive(Clone, Debug, Serialize)]
-#[serde(tag = "mediaVersion", content = "properties", rename_all = "lowercase")]
+#[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum ProgramProperties {
     V2(Box<ProgramPropertiesV2>),
@@ -70,17 +69,16 @@ impl ProgramProperties {
             Self::V2(program) | Self::V3(program) => program.etag.as_ref(),
         }
     }
+}
 
-    pub(crate) fn parse(
-        resource: &ObjectRef<Program>,
-        media_version: ProgramPropertiesVersion,
-        body: &[u8],
-        etag: Option<EntityTag>,
-    ) -> Result<Self, ResponseError> {
-        let parsed: RawProgramProperties =
-            serde_xml_rs::from_reader(body).map_err(ObjectError::InvalidResponse)?;
-        let properties = ProgramPropertiesV3::from_raw(resource.clone(), parsed, etag)?;
-        Ok(match media_version.kind {
+impl TryFrom<RawObjectProperties<Program>> for ProgramProperties {
+    type Error = ResponseError;
+
+    fn try_from(raw: RawObjectProperties<Program>) -> Result<Self, Self::Error> {
+        let properties: RawProgramProperties =
+            serde_xml_rs::from_reader(raw.body.as_slice()).map_err(ObjectError::InvalidResponse)?;
+        let properties = ProgramPropertiesV3::from_raw(raw.resource, properties, raw.etag)?;
+        Ok(match raw.version.kind {
             ProgramPropertiesVersionKind::V2 => Self::V2(Box::new(properties)),
             ProgramPropertiesVersionKind::V3 => Self::V3(Box::new(properties)),
         })
@@ -104,8 +102,7 @@ impl MediaVersionNegotiation for IncludePropertyVersion {
 }
 
 /// Include properties tagged with the media-type version returned by ADT.
-#[derive(Clone, Debug, Serialize)]
-#[serde(tag = "mediaVersion", content = "properties", rename_all = "lowercase")]
+#[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum IncludeProperties {
     V2(Box<IncludePropertiesV2>),
@@ -125,17 +122,16 @@ impl IncludeProperties {
             Self::V2(include) => include.etag.as_deref(),
         }
     }
+}
 
-    pub(crate) fn parse(
-        resource: &ObjectRef<Include>,
-        version: IncludePropertyVersion,
-        body: &[u8],
-        etag: Option<EntityTag>,
-    ) -> Result<Self, ResponseError> {
-        let parsed: RawIncludeProperties =
-            serde_xml_rs::from_reader(body).map_err(ObjectError::InvalidResponse)?;
-        let properties = IncludePropertiesV2::from_raw(resource.clone(), parsed, etag)?;
-        Ok(match version {
+impl TryFrom<RawObjectProperties<Include>> for IncludeProperties {
+    type Error = ResponseError;
+
+    fn try_from(raw: RawObjectProperties<Include>) -> Result<Self, Self::Error> {
+        let properties: RawIncludeProperties =
+            serde_xml_rs::from_reader(raw.body.as_slice()).map_err(ObjectError::InvalidResponse)?;
+        let properties = IncludePropertiesV2::from_raw(raw.resource, properties, raw.etag)?;
+        Ok(match raw.version {
             IncludePropertyVersion::V2 => Self::V2(Box::new(properties)),
         })
     }
@@ -161,8 +157,7 @@ impl ProgramRunResult {
 pub type ProgramPropertiesV2 = ProgramPropertiesV3;
 
 /// The ABAP program-properties payload shared by the V2 and V3 media types.
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug)]
 pub struct ProgramPropertiesV3 {
     /// The program resource that was fetched.
     pub reference: ObjectRef<Program>,
@@ -357,8 +352,7 @@ impl ProgramPropertiesV3 {
 }
 
 /// The V2 standalone ABAP include-properties payload.
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug)]
 pub struct IncludePropertiesV2 {
     /// The include resource that was fetched.
     pub reference: ObjectRef<Include>,
@@ -537,8 +531,7 @@ impl IncludePropertiesV2 {
 }
 
 /// The source parser configuration advertised by a program.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SyntaxConfiguration {
     /// The configured ABAP language.
     pub language: SyntaxLanguage,
@@ -562,8 +555,7 @@ impl SyntaxConfiguration {
 }
 
 /// An ABAP language version, description, and optional parser grammar.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SyntaxLanguage {
     /// The language version identifier, such as `X`.
     pub version: String,
@@ -730,15 +722,15 @@ mod tests {
     const INCLUDE_XML: &str = include_str!("../../tests/fixtures/include-ztest.xml");
 
     fn parse(body: &str) -> Result<ProgramPropertiesV3, ResponseError> {
-        let properties = ProgramProperties::parse(
-            &ObjectRef::<Program>::for_test(
+        let properties = ProgramProperties::try_from(RawObjectProperties {
+            resource: ObjectRef::<Program>::for_test(
                 "Z_TEST",
                 crate::AdtUri::parse("/sap/bc/adt/programs/programs/Z_TEST").unwrap(),
             ),
-            ProgramPropertiesVersion::V3,
-            body.as_bytes(),
-            Some(EntityTag::from_static("program-etag")),
-        )?;
+            version: ProgramPropertiesVersion::V3,
+            body: body.as_bytes().to_vec(),
+            etag: Some(EntityTag::from_static("program-etag")),
+        })?;
         Ok(match properties {
             ProgramProperties::V2(properties) | ProgramProperties::V3(properties) => *properties,
         })
@@ -774,12 +766,12 @@ mod tests {
             "ZTEST",
             crate::AdtUri::parse("/sap/bc/adt/programs/includes/ZTEST").unwrap(),
         );
-        let properties = IncludeProperties::parse(
-            &reference,
-            IncludePropertyVersion::V2,
-            INCLUDE_XML.as_bytes(),
-            Some(EntityTag::from_static("include-etag")),
-        )
+        let properties = IncludeProperties::try_from(RawObjectProperties {
+            resource: reference.clone(),
+            version: IncludePropertyVersion::V2,
+            body: INCLUDE_XML.as_bytes().to_vec(),
+            etag: Some(EntityTag::from_static("include-etag")),
+        })
         .unwrap();
         let IncludeProperties::V2(include) = properties;
         let include = *include;
@@ -849,12 +841,12 @@ mod tests {
         );
 
         assert!(matches!(
-            IncludeProperties::parse(
-                &reference,
-                IncludePropertyVersion::V2,
-                body.as_bytes(),
-                None,
-            ),
+            IncludeProperties::try_from(RawObjectProperties {
+                resource: reference,
+                version: IncludePropertyVersion::V2,
+                body: body.into_bytes(),
+                etag: None,
+            }),
             Err(ResponseError::Object(ObjectError::UnexpectedObjectType {
                 expected,
                 actual,
@@ -906,18 +898,8 @@ mod tests {
 
         let program = parse(&body).unwrap();
         let error = program.text_elements().unwrap_err();
-        let json = serde_json::to_value(&program).unwrap();
-        let relation = json["relations"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|relation| relation["href"] == invalid_href)
-            .unwrap();
 
         assert_eq!(error.href(), invalid_href);
-        assert_eq!(relation["resolved"], false);
-        assert!(relation["target"].is_null());
-        assert!(relation["resolutionError"].is_string());
     }
 
     #[test]

@@ -54,10 +54,10 @@ family-specific operations exist.
 `CLAS/OC`, the vocabulary is opaque and also includes compact values such as `AUTH` and identifiers with
 more than one slash; callers should compare the complete value rather than decomposing it.
 
-Common operations dispatch through that descriptor. Operations whose response depends on the object type,
-such as reading `ProgramProperties` or `ClassProperties`, still use the concrete typed parser internally.
-The runtime properties operation serializes that validated result to JSON, giving command-line and network
-callers one response type without weakening the typed API or adding a variant for every SAP object type.
+Common runtime operations dispatch through that descriptor. Properties reads and writes remain available
+only through `ObjectRef<T>`, where the concrete object family determines the media-version and model types.
+The placeholder `RepositoryObject::properties()` and `RepositoryObject::update(...)` methods currently panic
+while runtime properties dispatch is being redesigned.
 
 Programs and classes retain distinct typed run operations because ADT advertises
 separate protocol contracts for them. Runtime callers can use the same capability

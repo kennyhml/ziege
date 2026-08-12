@@ -4,7 +4,7 @@ use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
     Class, ClassProperties, ClassPropertiesVersion, ClassSourceComponent, Client, EntityTag, Logon,
-    ObjectVersion, Operation, Ready, RepositoryObject, ReqwestTransport, Revalidation,
+    ObjectVersion, Operation, Ready, ReqwestTransport, Revalidation,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -70,67 +70,6 @@ async fn class_run_uses_the_advertised_plain_text_contract() {
     discovery.assert_async().await;
     csrf.assert_async().await;
     run.assert_async().await;
-}
-
-#[tokio::test]
-async fn repository_object_fetches_class_properties_as_json() {
-    let server = MockServer::start_async().await;
-    let logon = mock_logon(&server).await;
-    let _core_discovery = mock_core_discovery(&server).await;
-    let discovery = mock_discovery(&server).await;
-    let metadata = server
-        .mock_async(|when, then| {
-            when.method(GET)
-                .path("/sap/bc/adt/oo/classes/cl_adt_uri_mapper")
-                .query_param("version", "active")
-                .header("accept", "application/vnd.sap.adt.oo.classes.v4+xml")
-                .header("cache-control", "no-cache");
-            then.status(200)
-                .header(
-                    "content-type",
-                    "application/vnd.sap.adt.oo.classes.v4+xml; charset=utf-8",
-                )
-                .header("etag", "20210406145501001000181")
-                .body(CLASS_XML);
-        })
-        .await;
-
-    let client = ready_client(transport(&server)).await;
-    let reference = client.object::<Class>("CL_ADT_URI_MAPPER").unwrap();
-    let object = RepositoryObject::from(reference);
-    let json = object
-        .properties()
-        .unwrap()
-        .version(ObjectVersion::Active)
-        .execute(&client)
-        .await
-        .unwrap();
-
-    assert_eq!(json["mediaVersion"], "v4");
-    assert_eq!(json["properties"]["name"], "CL_ADT_URI_MAPPER");
-    assert_eq!(json["properties"]["objectType"], "CLAS/OC");
-    assert_eq!(json["properties"]["version"], "active");
-    assert_eq!(
-        json["properties"]["reference"]["uri"],
-        "/sap/bc/adt/oo/classes/cl_adt_uri_mapper"
-    );
-    assert_eq!(
-        json["properties"]["sourceComponents"][0]["source"]["etag"],
-        "201701161841300011"
-    );
-    assert_eq!(
-        json["properties"]["mainSource"]["source"]["uri"],
-        "/sap/bc/adt/oo/classes/cl_adt_uri_mapper/source/main"
-    );
-    assert_eq!(json["properties"]["relations"].as_array().unwrap().len(), 7);
-
-    let mut batch = client.batch().unwrap();
-    let _key = batch.push(object.properties().unwrap());
-    assert_eq!(batch.len(), 1);
-
-    logon.assert_async().await;
-    discovery.assert_async().await;
-    metadata.assert_async().await;
 }
 
 async fn mock_core_discovery(server: &MockServer) -> Mock<'_> {
@@ -319,10 +258,8 @@ async fn class_properties_query_returns_not_modified_for_a_current_etag() {
 
     let client = ready_client(transport(&server)).await;
     let reference = client.object::<Class>("CX_ROOT").unwrap();
-    let object = RepositoryObject::from(reference);
-    let response = object
-        .properties()
-        .unwrap()
+    let response = reference
+        .query()
         .version(ObjectVersion::Active)
         .if_none_match(EntityTag::from_static("20180326130103001000061"))
         .execute(&client)

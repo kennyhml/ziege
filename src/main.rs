@@ -1,11 +1,7 @@
 use std::{env, error::Error, io};
 
 use tracing_subscriber::EnvFilter;
-use zadt::{
-    AccessMode, AdtUri, Class, ClassSourceComponent, Client, GlobalWorkbenchType, Operation,
-    Program, ReqwestTransport, TransportCheck, TransportCheckOperation, TransportCreateBuilder,
-    TransportExt, TransportsQueryBuilder,
-};
+use zadt::{AccessMode, Client, DataElement, Operation, ReqwestTransport, TransportExt};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -33,21 +29,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_body_logging(64 * 1024);
     let client = Client::new(transport).discover().await?;
 
-    let object_type: GlobalWorkbenchType = "CLAS/OC".parse()?;
-    let object = client.repository_object(&object_type, "zzzz")?;
+    let object = client.object::<DataElement>("ZTFRWTFRT")?;
+    let mut properties = object.query().execute(&client).await?;
+    properties.properties_mut().description = Some("Hi from ZADT!".into());
 
-    let res = object.run()?.execute(&client).await?;
+    let session = client.create_user_session();
+    let lock = object.lock(AccessMode::Modify).execute(&session).await?;
 
-    // let session = client.create_user_session();
+    let res = object.update(&lock, properties)?.execute(&session).await;
 
-    // let lock = object.lock(AccessMode::Show).execute(&session).await?;
-    // let res = object
-    //     .component_source(ClassSourceComponent::Macros)
-    //     .update(&lock, "*Hi this is ZADT!")?
-    //     .execute(&session)
-    //     .await;
-    //
-    // lock.remove().execute(&session).await?;
+    lock.remove().execute(&session).await?;
     println!("{res:#?}");
 
     Ok(())

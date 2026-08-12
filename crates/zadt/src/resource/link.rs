@@ -17,8 +17,7 @@ const LINK_RESOLUTION_ORIGIN: &str = "https://adt.invalid";
 /// an absolute path `href=sap/bc/adt/textelements/programs/zprog`, or
 /// contain query parameters, such as `?version=Active`. All of this
 /// information validated and resolved against the base resource.
-#[derive(Clone, Debug, Eq, Hash, PartialEq, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct AdtLink {
     /// The raw link exactly as advertised by ADT.
     pub href: String,
@@ -62,7 +61,7 @@ impl fmt::Display for AdtLink {
 ///
 /// This type is an implementation detail and essentially a stepping
 /// stone for the more meaningful [`AdtLink].
-#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, serde::Serialize)]
 pub(crate) struct AdvertisedLink {
     #[serde(rename = "@href")]
     pub href: String,

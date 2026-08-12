@@ -1,7 +1,7 @@
 use std::{fmt, hash::Hash, marker::PhantomData};
 
 use crate::{
-    AccessMode, JsonObjectPropertiesQuery, LockRequest, ObjectLock, UnlockRequest,
+    AccessMode, LockRequest, ObjectLock, UnlockRequest,
     api::object::ObjectRun,
     client::{Client, Ready},
     error::ObjectError,
@@ -16,12 +16,10 @@ mod families;
 mod version;
 mod workbench;
 
+pub use capabilities::{HasSource, ReadProperties, UpdateProperties, WritableProperties};
 pub(crate) use capabilities::{ImmediateRun, RunCapability};
-pub use capabilities::{
-    ObjectProperties, Source, SourceComponent, SourceComponentSet, SourceComponents,
-};
-pub(crate) use descriptors::{RuntimeObjectProperties, RuntimeObjectTypeDescriptor};
-pub use families::{Class, ClassSourceComponent, Include, Package, Program};
+pub(crate) use descriptors::RuntimeObjectTypeDescriptor;
+pub use families::{Class, ClassSourceComponent, DataElement, Include, Package, Program};
 pub use version::ObjectVersion;
 pub use workbench::{GlobalWorkbenchType, InvalidWorkbenchType};
 
@@ -72,11 +70,17 @@ impl RepositoryObject {
         &self.object_type
     }
 
-    /// Returns the statically known secondary source components for this family.
-    pub fn source_components(&self) -> &'static [&'static dyn SourceComponent] {
+    /// Resolves the statically known secondary source components for this family.
+    pub fn source_components(&self) -> Vec<SourceRef> {
         self.descriptor
-            .map(|descriptor| descriptor.source_components())
-            .unwrap_or(&[])
+            .map(|descriptor| {
+                descriptor
+                    .source_component_paths()
+                    .iter()
+                    .map(|path| self.reference.source_from_path(path))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Resolves the primary source when available.
@@ -88,11 +92,11 @@ impl RepositoryObject {
 
     /// Resolves one named secondary source component when available.
     pub fn source_component(&self, name: &str) -> Option<SourceRef> {
-        self.source_components()
+        self.descriptor?
+            .source_component_paths()
             .iter()
-            .copied()
-            .find(|component| component.name() == name)
-            .map(|component| self.reference.source_from_component(component))
+            .find(|path| path.last() == Some(&name))
+            .map(|path| self.reference.source_from_path(path))
     }
 
     /// Creates an immediate run operation when this object family supports it.
@@ -136,18 +140,14 @@ impl RepositoryObject {
         Ok(UnlockRequest::new(object_lock))
     }
 
-    /// Creates a JSON-producing properties query for a modeled family.
-    pub fn properties(&self) -> Result<JsonObjectPropertiesQuery, ObjectError> {
-        let descriptor = self
-            .descriptor
-            .ok_or_else(|| ObjectError::UnsupportedCapability {
-                object_type: self.object_type.clone(),
-                capability: "object properties",
-            })?;
-        Ok(JsonObjectPropertiesQuery::new(
-            self.reference.clone(),
-            descriptor.properties(),
-        ))
+    /// Placeholder while runtime properties dispatch is being redesigned.
+    pub fn properties(&self) -> ! {
+        panic!("type-erased object properties are not implemented")
+    }
+
+    /// Placeholder while runtime properties updates are being redesigned.
+    pub fn update<P>(&self, _object_lock: &ObjectLock, _properties: P) -> ! {
+        panic!("type-erased object properties updates are not implemented")
     }
 }
 
@@ -227,13 +227,6 @@ impl<T> ObjectRef<T> {
         ObjectRef::typed(self.name.clone(), self.uri.clone())
     }
 
-    pub(crate) fn source_from_component<C>(&self, component: &C) -> SourceRef
-    where
-        C: SourceComponent + ?Sized,
-    {
-        self.source_from_path(component.path())
-    }
-
     pub(crate) fn source_from_path(&self, path: &[&str]) -> SourceRef {
         let uri = self
             .uri()
@@ -262,23 +255,6 @@ impl<T> fmt::Debug for ObjectRef<T> {
             debug.field("name", &self.name);
         }
         debug.field("uri", &self.uri).finish()
-    }
-}
-
-impl<T> serde::Serialize for ObjectRef<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeStruct as _;
-
-        let mut reference =
-            serializer.serialize_struct("ObjectRef", if self.name.is_empty() { 1 } else { 2 })?;
-        if !self.name.is_empty() {
-            reference.serialize_field("name", &self.name)?;
-        }
-        reference.serialize_field("uri", &self.uri)?;
-        reference.end()
     }
 }
 
@@ -372,14 +348,14 @@ mod tests {
             object
                 .source_components()
                 .iter()
-                .map(|component| component.name())
+                .map(|component| component.uri.as_str())
                 .collect::<Vec<_>>(),
             [
-                "definitions",
-                "implementations",
-                "macros",
-                "testclasses",
-                "localtypes",
+                "/sap/bc/adt/oo/classes/zcl_test/includes/definitions",
+                "/sap/bc/adt/oo/classes/zcl_test/includes/implementations",
+                "/sap/bc/adt/oo/classes/zcl_test/includes/macros",
+                "/sap/bc/adt/oo/classes/zcl_test/includes/testclasses",
+                "/sap/bc/adt/oo/classes/zcl_test/includes/localtypes",
             ]
         );
         assert_eq!(object.source(), Some(class.source()));
@@ -406,31 +382,6 @@ mod tests {
     }
 
     #[test]
-    fn descriptor_registry_exposes_properties_for_every_modeled_type() {
-        let program = ObjectRef::<Program>::for_test(
-            "Z_TEST",
-            AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
-        );
-        let include = ObjectRef::<Include>::for_test(
-            "ZTEST",
-            AdtUri::parse("/sap/bc/adt/programs/includes/ztest").unwrap(),
-        );
-        let class = ObjectRef::<Class>::for_test(
-            "ZCL_TEST",
-            AdtUri::parse("/sap/bc/adt/oo/classes/zcl_test").unwrap(),
-        );
-        let package = ObjectRef::<Package>::for_test(
-            "ZPACKAGE",
-            AdtUri::parse("/sap/bc/adt/packages/zpackage").unwrap(),
-        );
-
-        assert!(RepositoryObject::from(program).properties().is_ok());
-        assert!(RepositoryObject::from(include).properties().is_ok());
-        assert!(RepositoryObject::from(class).properties().is_ok());
-        assert!(RepositoryObject::from(package).properties().is_ok());
-    }
-
-    #[test]
     fn descriptor_registry_exposes_immediate_run_only_for_programs_and_classes() {
         let program = ObjectRef::<Program>::for_test(
             "Z_TEST",
@@ -448,12 +399,17 @@ mod tests {
             "ZPACKAGE",
             AdtUri::parse("/sap/bc/adt/packages/zpackage").unwrap(),
         );
+        let data_element = ObjectRef::<DataElement>::for_test(
+            "ZDATA_ELEMENT",
+            AdtUri::parse("/sap/bc/adt/ddic/dataelements/zdata_element").unwrap(),
+        );
 
         assert!(RepositoryObject::from(program).run().is_ok());
         assert!(RepositoryObject::from(class).run().is_ok());
         for object in [
             RepositoryObject::from(include),
             RepositoryObject::from(package),
+            RepositoryObject::from(data_element),
         ] {
             assert!(matches!(
                 object.run(),
@@ -466,7 +422,7 @@ mod tests {
     }
 
     #[test]
-    fn other_repository_objects_report_unsupported_properties() {
+    fn other_repository_objects_report_unsupported_run_capability() {
         let unsupported = ObjectRef::named(
             "Z_UNSUPPORTED".to_owned(),
             AdtUri::parse("/sap/bc/adt/test/unsupported/z_unsupported").unwrap(),
@@ -474,13 +430,6 @@ mod tests {
         let object =
             RepositoryObject::from_reference(unsupported, "TEST/X".parse().unwrap()).unwrap();
 
-        assert!(matches!(
-            object.properties(),
-            Err(ObjectError::UnsupportedCapability {
-                object_type,
-                capability: "object properties",
-            }) if object_type.as_str() == "TEST/X"
-        ));
         assert!(matches!(
             object.run(),
             Err(ObjectError::UnsupportedCapability {

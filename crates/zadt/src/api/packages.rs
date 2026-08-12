@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use http::{Method, StatusCode, header};
 use stduritemplate::Value;
 
-use super::properties::ObjectPropertiesQuery;
 use crate::{
     AdtUri, CategoryId, Client, ObjectError, ObjectRef, ObjectType, Operation, OperationError,
     OperationResponse, Package, PackageSettings, PackageTree, PackageTreeKind, Ready,
@@ -20,9 +19,6 @@ const PACKAGE_SETTINGS: CategoryId = CategoryId {
     scheme: "http://www.sap.com/wbobj/packages",
     term: "settings",
 };
-
-/// Fetches package properties using the generic object-properties protocol.
-pub type PackagePropertiesQuery = ObjectPropertiesQuery<Package>;
 
 /// Fetches either the ancestors or immediate children of a package.
 #[derive(Clone, Debug)]

@@ -26,7 +26,6 @@ quick-xml = { version = "0.38", optional = true }
 reqwest = { version = "0.12", features = ["cookies"], optional = true }
 secrecy = "0.10"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
 serde-xml-rs = "0.8.1"
 std-uritemplate = "2.0"
 thiserror = "2.0"

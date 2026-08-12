@@ -104,6 +104,9 @@ pub enum ObjectError {
     #[error("invalid object representation: {0}")]
     InvalidResponse(#[source] serde_xml_rs::Error),
 
+    #[error("could not serialize object update request: {0}")]
+    InvalidRequest(#[source] serde_xml_rs::Error),
+
     #[error("object link `{href}` could not be resolved: {source}")]
     InvalidLink { href: String, source: AdtUriError },
 
@@ -125,6 +128,12 @@ pub enum ObjectError {
     #[error("unsupported object version `{version}`")]
     UnsupportedObjectVersion { version: String },
 
+    #[error("unsupported Data Element type kind `{kind}`")]
+    UnsupportedDataElementTypeKind { kind: String },
+
+    #[error("unsupported Data Element documentation status `{status}`")]
+    UnsupportedDataElementDocumentationStatus { status: String },
+
     #[error(
         "object `{relation}` reference `{declared}` disagrees with advertised relation `{advertised}`"
     )]
@@ -139,6 +148,9 @@ pub enum ObjectError {
         expected: GlobalWorkbenchType,
         actual: GlobalWorkbenchType,
     },
+
+    #[error("expected object name `{expected}`, but the response advertised `{actual}`")]
+    UnexpectedObjectName { expected: String, actual: String },
 
     #[error("expected repository object type `{expected}`, but RIS advertised `{actual}`")]
     UnexpectedRepositoryObjectType {
@@ -179,7 +191,10 @@ pub enum ObjectError {
     #[error("lock for `{actual}` cannot be used with object `{expected}`")]
     ObjectLockMismatch { expected: String, actual: String },
 
-    #[error("updating source requires a modification lock")]
+    #[error("properties for `{actual}` cannot be used with object `{expected}`")]
+    ObjectPropertiesMismatch { expected: String, actual: String },
+
+    #[error("updating an object requires a modification lock")]
     ObjectLockNotModifiable,
 }
 
@@ -285,9 +300,6 @@ pub enum ResponseError {
 
     #[error(transparent)]
     Cts(#[from] CtsError),
-
-    #[error("could not serialize object properties as JSON: {0}")]
-    JsonSerialization(#[from] serde_json::Error),
 }
 
 impl ResponseError {

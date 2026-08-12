@@ -12,9 +12,9 @@ use zadt_macros::object_type;
         term = "programs",
     ),
     capabilities(
-        Source,
+        HasSource,
         Run,
-        Properties(
+        ReadProperties(
             media_version = ProgramPropertiesVersion,
             model = ProgramProperties,
         ),
@@ -31,8 +31,8 @@ pub enum Program {}
         term = "includes",
     ),
     capabilities(
-        Source,
-        Properties(
+        HasSource,
+        ReadProperties(
             media_version = IncludePropertyVersion,
             model = IncludeProperties,
         ),

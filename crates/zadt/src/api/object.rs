@@ -9,7 +9,7 @@ use crate::{
     models::{
         AccessMode, ObjectLock, ObjectRunResult, SourceCode, SourceUpdateResult, TransportNumber,
     },
-    objects::{GlobalWorkbenchType, ImmediateRun, ObjectRef, ObjectType, RunCapability, Source},
+    objects::{GlobalWorkbenchType, HasSource, ImmediateRun, ObjectRef, ObjectType, RunCapability},
     operation::{Operation, OperationResponse, Stateful, Stateless},
     protocol::{AdtRequest, AdtResponse},
     resource::SourceRef,
@@ -163,7 +163,7 @@ impl<T: ObjectType> ObjectRef<T> {
     }
 }
 
-impl<T: Source> ObjectRef<T> {
+impl<T: HasSource> ObjectRef<T> {
     /// Returns the objects conventional source resource.
     pub fn source(&self) -> SourceRef {
         self.source_from_path(T::SOURCE_PATH)

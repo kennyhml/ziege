@@ -1,8 +1,8 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::{
     AdtUri, EntityTag, GlobalWorkbenchType, MediaVersionNegotiation, ObjectError, ObjectRef,
-    ObjectType, ObjectVersion, Package, ResponseError,
+    ObjectType, ObjectVersion, Package, RawObjectProperties, ResponseError,
     resource::{AdvertisedLink, Relations, resolve_href},
 };
 
@@ -32,8 +32,7 @@ impl MediaVersionNegotiation for PackagePropertiesVersion {
 }
 
 /// Package properties tagged with the media-type version returned by ADT.
-#[derive(Clone, Debug, Serialize)]
-#[serde(tag = "mediaVersion", content = "properties", rename_all = "lowercase")]
+#[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum PackageProperties {
     /// A V1 package-properties response.
@@ -58,17 +57,16 @@ impl PackageProperties {
             Self::V1(package) | Self::V2(package) => package.etag.as_ref(),
         }
     }
+}
 
-    pub(crate) fn parse(
-        resource: &ObjectRef<Package>,
-        media_version: PackagePropertiesVersion,
-        body: &[u8],
-        etag: Option<EntityTag>,
-    ) -> Result<Self, ResponseError> {
-        let raw: RawPackageProperties =
-            serde_xml_rs::from_reader(body).map_err(ObjectError::InvalidResponse)?;
-        let properties = PackagePropertiesV2::from_raw(resource.clone(), raw, etag)?;
-        Ok(match media_version {
+impl TryFrom<RawObjectProperties<Package>> for PackageProperties {
+    type Error = ResponseError;
+
+    fn try_from(raw: RawObjectProperties<Package>) -> Result<Self, Self::Error> {
+        let properties: RawPackageProperties =
+            serde_xml_rs::from_reader(raw.body.as_slice()).map_err(ObjectError::InvalidResponse)?;
+        let properties = PackagePropertiesV2::from_raw(raw.resource, properties, raw.etag)?;
+        Ok(match raw.version {
             PackagePropertiesVersion::V1 => Self::V1(Box::new(properties)),
             PackagePropertiesVersion::V2 => Self::V2(Box::new(properties)),
         })
@@ -79,8 +77,7 @@ impl PackageProperties {
 pub type PackagePropertiesV1 = PackagePropertiesV2;
 
 /// Properties of an ABAP package.
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug)]
 pub struct PackagePropertiesV2 {
     /// The package resource that was fetched.
     pub reference: ObjectRef<Package>,
@@ -217,8 +214,7 @@ impl PackagePropertiesV2 {
 }
 
 /// Package behavior and editor capability flags.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PackageAttributes {
     /// The semantic package type, such as `development`.
     pub package_type: String,
@@ -249,8 +245,7 @@ pub struct PackageAttributes {
 }
 
 /// A named package assignment with editor visibility and mutability flags.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PackageAssignment {
     /// The assigned value.
     pub name: String,
@@ -263,8 +258,7 @@ pub struct PackageAssignment {
 }
 
 /// Software-component and transport-layer assignments.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PackageTransport {
     /// The package's software component.
     pub software_component: PackageAssignment,
@@ -273,8 +267,7 @@ pub struct PackageTransport {
 }
 
 /// A typed package reference and its optional short description.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PackageReference {
     /// The typed package resource.
     pub reference: ObjectRef<Package>,
@@ -283,8 +276,7 @@ pub struct PackageReference {
 }
 
 /// A package-interface reference advertised through a package representation.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PackageInterfaceReference {
     /// The package-interface name.
     pub name: String,
@@ -297,8 +289,7 @@ pub struct PackageInterfaceReference {
 }
 
 /// A package-interface use access and the package that owns it, when advertised.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PackageUseAccess {
     /// The backend-defined use-access severity.
     pub severity: String,
@@ -731,12 +722,12 @@ mod tests {
 
     #[test]
     fn parses_live_package_properties() {
-        let properties = PackageProperties::parse(
-            &package_reference(),
-            PackagePropertiesVersion::V2,
-            PACKAGE_XML,
-            Some(EntityTag::try_from("package-etag").unwrap()),
-        )
+        let properties = PackageProperties::try_from(RawObjectProperties {
+            resource: package_reference(),
+            version: PackagePropertiesVersion::V2,
+            body: PACKAGE_XML.to_vec(),
+            etag: Some(EntityTag::try_from("package-etag").unwrap()),
+        })
         .unwrap();
         let PackageProperties::V2(properties) = properties else {
             panic!("unexpected package-properties version");

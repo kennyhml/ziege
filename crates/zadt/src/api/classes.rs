@@ -1,4 +1,4 @@
-use super::{object::ObjectRun, properties::ObjectPropertiesQuery};
+use super::object::ObjectRun;
 use crate::{
     AdtRequest, Client, Operation, OperationError, OperationResponse, Ready, ResponseError,
     Stateless,
@@ -13,9 +13,6 @@ const CLASS_RUN_CATEGORY: CategoryId = CategoryId {
     term: "classrun",
 };
 const CLASS_RUN_RELATION: &str = "http://www.sap.com/adt/relations/oo/classrun";
-
-/// Fetches class properties using the generic object-properties protocol.
-pub type ClassPropertiesQuery = ObjectPropertiesQuery<Class>;
 
 /// Runs an ABAP class and returns its rendered console output.
 #[derive(Debug)]

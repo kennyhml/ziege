@@ -699,7 +699,7 @@ struct RawRepositoryProperty {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AccessMode, Class, Include, Program};
+    use crate::{AccessMode, Class, DataElement, Include, Program};
 
     const CONTENT_XML: &[u8] = include_bytes!("../../tests/fixtures/repository-content.xml");
     const FACETS_XML: &[u8] = include_bytes!("../../tests/fixtures/repository-facets.xml");
@@ -805,7 +805,7 @@ mod tests {
             AdtUri::parse("/sap/bc/adt/repository/informationsystem/virtualfolders/contents")
                 .unwrap();
 
-        for object_type in ["PROG/P", "PROG/I", "CLAS/OC", "DEVC/K"] {
+        for object_type in ["PROG/P", "PROG/I", "CLAS/OC", "DEVC/K", "DTEL/DE"] {
             let xml = String::from_utf8(CONTENT_XML.to_vec())
                 .unwrap()
                 .replace("type=\"CLAS/OC\"", &format!("type=\"{object_type}\""));
@@ -818,6 +818,7 @@ mod tests {
                 "PROG/I" => object.typed::<Include>().is_some(),
                 "CLAS/OC" => object.typed::<Class>().is_some(),
                 "DEVC/K" => object.typed::<Package>().is_some(),
+                "DTEL/DE" => object.typed::<DataElement>().is_some(),
                 _ => unreachable!(),
             });
         }

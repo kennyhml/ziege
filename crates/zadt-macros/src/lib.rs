@@ -20,7 +20,7 @@ pub fn object_type(attributes: TokenStream, item: TokenStream) -> TokenStream {
         .into()
 }
 
-/// Derives one closed set of secondary source components.
+/// Derives the names and paths for one closed set of secondary source components.
 #[proc_macro_derive(SourceComponent, attributes(source_component))]
 pub fn source_component(item: TokenStream) -> TokenStream {
     let item = parse_macro_input!(item as DeriveInput);
@@ -32,10 +32,11 @@ pub fn source_component(item: TokenStream) -> TokenStream {
 struct ObjectTypeAttributes {
     workbench_type: LitStr,
     collection: Collection,
-    source: bool,
+    has_source: bool,
     source_components: Option<Type>,
     run: bool,
-    properties: Properties,
+    read_properties: Properties,
+    update_properties: bool,
 }
 
 struct Collection {
@@ -52,10 +53,11 @@ impl Parse for ObjectTypeAttributes {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let mut workbench_type = None;
         let mut collection = None;
-        let mut source = false;
+        let mut has_source = false;
         let mut source_components = None;
         let mut run = false;
-        let mut properties = None;
+        let mut read_properties = None;
+        let mut update_properties = false;
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -74,10 +76,11 @@ impl Parse for ObjectTypeAttributes {
                     parenthesized!(content in input);
                     parse_capabilities(
                         &content,
-                        &mut source,
+                        &mut has_source,
                         &mut source_components,
                         &mut run,
-                        &mut properties,
+                        &mut read_properties,
+                        &mut update_properties,
                     )?;
                 }
                 _ => return Err(Error::new(key.span(), "unknown object type attribute")),
@@ -87,21 +90,22 @@ impl Parse for ObjectTypeAttributes {
 
         let workbench_type = required(workbench_type, input, "workbench_type")?;
         let collection = required(collection, input, "collection")?;
-        let properties = required(properties, input, "Properties capability")?;
-        if source_components.is_some() && !source {
+        let read_properties = required(read_properties, input, "ReadProperties capability")?;
+        if source_components.is_some() && !has_source {
             return Err(Error::new(
                 input.span(),
-                "SourceComponents requires the Source capability",
+                "SourceComponents requires the HasSource capability",
             ));
         }
 
         Ok(Self {
             workbench_type,
             collection,
-            source,
+            has_source,
             source_components,
             run,
-            properties,
+            read_properties,
+            update_properties,
         })
     }
 }
@@ -127,19 +131,23 @@ fn parse_collection(input: ParseStream<'_>) -> Result<Collection> {
 
 fn parse_capabilities(
     input: ParseStream<'_>,
-    source: &mut bool,
+    has_source: &mut bool,
     source_components: &mut Option<Type>,
     run: &mut bool,
-    properties: &mut Option<Properties>,
+    read_properties: &mut Option<Properties>,
+    update_properties: &mut bool,
 ) -> Result<()> {
     while !input.is_empty() {
         let capability: Ident = input.parse()?;
         match capability.to_string().as_str() {
-            "Source" | "source" => {
-                if *source {
-                    return Err(Error::new(capability.span(), "duplicate Source capability"));
+            "HasSource" | "has_source" => {
+                if *has_source {
+                    return Err(Error::new(
+                        capability.span(),
+                        "duplicate HasSource capability",
+                    ));
                 }
-                *source = true;
+                *has_source = true;
             }
             "SourceComponents" | "source_components" => {
                 let content;
@@ -154,10 +162,19 @@ fn parse_capabilities(
                 }
                 *run = true;
             }
-            "Properties" | "properties" => {
+            "ReadProperties" | "read_properties" => {
                 let content;
                 parenthesized!(content in input);
-                set_once(properties, parse_properties(&content)?, &capability)?;
+                set_once(read_properties, parse_properties(&content)?, &capability)?;
+            }
+            "UpdateProperties" | "update_properties" => {
+                if *update_properties {
+                    return Err(Error::new(
+                        capability.span(),
+                        "duplicate UpdateProperties capability",
+                    ));
+                }
+                *update_properties = true;
             }
             _ => return Err(Error::new(capability.span(), "unknown object capability")),
         }
@@ -171,11 +188,16 @@ fn parse_properties(input: ParseStream<'_>) -> Result<Properties> {
     let mut model = None;
     while !input.is_empty() {
         let key: Ident = input.parse()?;
-        input.parse::<Token![=]>()?;
         match key.to_string().as_str() {
-            "media_version" => set_once(&mut media_version, input.parse()?, &key)?,
-            "model" => set_once(&mut model, input.parse()?, &key)?,
-            _ => return Err(Error::new(key.span(), "unknown Properties attribute")),
+            "media_version" => {
+                input.parse::<Token![=]>()?;
+                set_once(&mut media_version, input.parse()?, &key)?;
+            }
+            "model" => {
+                input.parse::<Token![=]>()?;
+                set_once(&mut model, input.parse()?, &key)?;
+            }
+            _ => return Err(Error::new(key.span(), "unknown ReadProperties attribute")),
         }
         parse_optional_comma(input)?;
     }
@@ -226,16 +248,17 @@ fn expand_object_type(
     let ObjectTypeAttributes {
         workbench_type,
         collection,
-        source,
+        has_source,
         source_components,
         run,
-        properties,
+        read_properties,
+        update_properties,
     } = attributes;
     let Collection { scheme, term } = collection;
     let Properties {
         media_version,
         model,
-    } = properties;
+    } = read_properties;
 
     let descriptor = format_ident!("__Zadt{}Descriptor", ident);
     let descriptor_static = format_ident!(
@@ -243,27 +266,18 @@ fn expand_object_type(
         ident.to_string().to_ascii_uppercase()
     );
 
-    let source_impl = source.then(|| {
+    let source_impl = has_source.then(|| {
         quote! {
-            impl crate::objects::Source for #ident {}
+            impl crate::objects::HasSource for #ident {}
         }
     });
-    let source_path = if source {
-        quote!(Some(<#ident as crate::objects::Source>::SOURCE_PATH))
+    let source_path = if has_source {
+        quote!(Some(<#ident as crate::objects::HasSource>::SOURCE_PATH))
     } else {
         quote!(None)
     };
-    let source_components_impl = source_components.as_ref().map(|component| {
-        quote! {
-            impl crate::objects::SourceComponents for #ident {
-                type Component = #component;
-            }
-        }
-    });
-    let runtime_source_components = match source_components.as_ref() {
-        Some(component) => {
-            quote!(<#component as crate::objects::SourceComponentSet>::COMPONENTS)
-        }
+    let runtime_source_components = match source_components {
+        Some(component) => quote!(#component::COMPONENT_PATHS),
         None => quote!(&[]),
     };
     let runtime_run = if run {
@@ -271,7 +285,11 @@ fn expand_object_type(
     } else {
         quote!(None)
     };
-
+    let update_properties_impl = update_properties.then(|| {
+        quote! {
+            impl crate::objects::UpdateProperties for #ident {}
+        }
+    });
     Ok(quote! {
         #item
 
@@ -287,21 +305,13 @@ fn expand_object_type(
         }
 
         #source_impl
-        #source_components_impl
 
-        impl crate::objects::ObjectProperties for #ident {
+        impl crate::objects::ReadProperties for #ident {
             type MediaVersion = #media_version;
             type Properties = #model;
-
-            fn parse(
-                resource: &crate::objects::ObjectRef<Self>,
-                version: Self::MediaVersion,
-                body: &[u8],
-                etag: Option<crate::protocol::EntityTag>,
-            ) -> Result<Self::Properties, crate::error::ResponseError> {
-                <#model>::parse(resource, version, body, etag)
-            }
         }
+
+        #update_properties_impl
 
         #[doc(hidden)]
         struct #descriptor;
@@ -327,41 +337,14 @@ fn expand_object_type(
                 #source_path
             }
 
-            fn source_components(
+            fn source_component_paths(
                 &self,
-            ) -> &'static [&'static dyn crate::objects::SourceComponent] {
+            ) -> &'static [&'static [&'static str]] {
                 #runtime_source_components
             }
 
             fn run(&self) -> Option<crate::objects::RunCapability> {
                 #runtime_run
-            }
-
-            fn properties(&self) -> &dyn crate::objects::RuntimeObjectProperties {
-                self
-            }
-        }
-
-        impl crate::objects::RuntimeObjectProperties for #descriptor {
-            fn request(
-                &self,
-                resource: &crate::objects::ObjectRef,
-                version: Option<crate::objects::ObjectVersion>,
-                client: &crate::client::Client<crate::client::Ready>,
-            ) -> Result<crate::protocol::AdtRequest, crate::error::OperationError> {
-                crate::objects::descriptors::properties_request::<#ident>(
-                    resource,
-                    version,
-                    client,
-                )
-            }
-
-            fn decode(
-                &self,
-                resource: &crate::objects::ObjectRef,
-                response: crate::operation::OperationResponse,
-            ) -> Result<serde_json::Value, crate::error::ResponseError> {
-                crate::objects::descriptors::properties_decode::<#ident>(resource, response)
             }
         }
     })
@@ -435,6 +418,11 @@ fn expand_source_component(item: DeriveInput) -> Result<proc_macro2::TokenStream
 
     Ok(quote! {
         impl #ident {
+            #[doc(hidden)]
+            pub const COMPONENT_PATHS: &'static [&'static [&'static str]] = &[
+                #(&[#prefix, #names]),*
+            ];
+
             /// Returns the component name used by ADT.
             pub const fn as_str(self) -> &'static str {
                 match self {
@@ -449,24 +437,53 @@ fn expand_source_component(item: DeriveInput) -> Result<proc_macro2::TokenStream
                     _ => None,
                 }
             }
-        }
 
-        impl crate::objects::SourceComponent for #ident {
-            fn name(&self) -> &'static str {
-                self.as_str()
-            }
-
-            fn path(&self) -> &'static [&'static str] {
+            /// Returns the component path relative to its owning object.
+            pub const fn path(self) -> &'static [&'static str] {
                 match self {
                     #(Self::#variant_idents => &[#prefix, #names]),*
                 }
             }
         }
-
-        impl crate::objects::SourceComponentSet for #ident {
-            const COMPONENTS: &'static [&'static dyn crate::objects::SourceComponent] = &[
-                #(&Self::#variant_idents),*
-            ];
-        }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn attributes(capabilities: &str) -> Result<ObjectTypeAttributes> {
+        syn::parse_str(&format!(
+            r#"
+                workbench_type = "DTEL/DE",
+                collection(scheme = "scheme", term = "term"),
+                capabilities({capabilities})
+            "#
+        ))
+    }
+
+    #[test]
+    fn parses_update_properties() {
+        let attributes = attributes(
+            "ReadProperties(media_version = PropertiesVersion, model = Properties), UpdateProperties",
+        )
+        .unwrap();
+
+        assert!(attributes.update_properties);
+    }
+
+    #[test]
+    fn rejects_duplicate_update_properties() {
+        let error = attributes(
+            "ReadProperties(media_version = PropertiesVersion, model = Properties), UpdateProperties, UpdateProperties",
+        )
+        .err()
+        .unwrap();
+
+        assert!(
+            error
+                .to_string()
+                .contains("duplicate UpdateProperties capability")
+        );
+    }
 }

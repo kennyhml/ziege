@@ -6,9 +6,9 @@ use httpmock::Mock;
 use httpmock::prelude::*;
 use std::sync::{Arc, Mutex};
 use zadt::{
-    AdtRequest, AdtResponse, CategoryId, Class, Client, CoreDiscoveryQuery, DiscoveryError,
-    DiscoveryQuery, GlobalWorkbenchType, Logon, ObjectError, Operation, OperationError,
-    ReqwestTransport, ResponseError, Transport, TransportError,
+    AdtRequest, AdtResponse, CategoryId, Class, Client, CoreDiscoveryQuery, DataElement,
+    DiscoveryError, DiscoveryQuery, GlobalWorkbenchType, Logon, ObjectError, Operation,
+    OperationError, ReqwestTransport, ResponseError, Transport, TransportError,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -138,6 +138,11 @@ async fn runtime_object_types_use_the_registered_descriptor() {
             "/sap/bc/adt/oo/classes/zcl_example",
         ),
         ("DEVC/K", "ZPACKAGE", "/sap/bc/adt/packages/zpackage"),
+        (
+            "DTEL/DE",
+            "ZTFRWTFRT",
+            "/sap/bc/adt/ddic/dataelements/ztfrwtfrt",
+        ),
     ] {
         let parsed_type: GlobalWorkbenchType = object_type.parse().unwrap();
         let object = client.repository_object(&parsed_type, name).unwrap();
@@ -149,6 +154,7 @@ async fn runtime_object_types_use_the_registered_descriptor() {
             "PROG/I" => object.typed::<zadt::Include>().is_some(),
             "CLAS/OC" => object.typed::<Class>().is_some(),
             "DEVC/K" => object.typed::<zadt::Package>().is_some(),
+            "DTEL/DE" => object.typed::<DataElement>().is_some(),
             _ => unreachable!(),
         });
     }

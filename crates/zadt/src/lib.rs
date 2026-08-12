@@ -15,14 +15,14 @@ mod vocabulary;
 
 pub mod transport;
 
-pub use api::classes::{ClassPropertiesQuery, ClassRun};
+pub use api::classes::ClassRun;
 pub use api::discovery::{CoreDiscoveryQuery, DiscoveryQuery};
 pub use api::object::{
     LockRequest, ObjectRun, ObjectSourceQuery, ObjectSourceUpdate, UnlockRequest,
 };
-pub use api::packages::{PackagePropertiesQuery, PackageSettingsQuery, PackageTreeQuery};
-pub use api::programs::{IncludePropertiesQuery, ProgramPropertiesQuery, ProgramRun};
-pub use api::properties::{JsonObjectPropertiesQuery, ObjectPropertiesQuery};
+pub use api::packages::{PackageSettingsQuery, PackageTreeQuery};
+pub use api::programs::ProgramRun;
+pub use api::properties::{ObjectPropertiesQuery, ObjectPropertiesUpdate, RawObjectProperties};
 pub use api::repository::{
     RepositoryContentOperation, RepositoryContentQuery, RepositoryContentQueryBuilder,
     RepositoryContentQueryBuilderError, RepositoryFacetsQuery, RepositoryObjectPropertiesQuery,
@@ -46,8 +46,11 @@ pub use error::{
 pub use models::{
     AccessMode, AdtException, AdtExceptionProperty, Capabilities, Category, ClassObjectReference,
     ClassProperties, ClassPropertiesV2, ClassPropertiesV3, ClassPropertiesV4,
-    ClassPropertiesVersion, ClassRunResult, ClassSourceProperties, Collection, IncludeProperties,
-    IncludePropertiesV2, IncludePropertyVersion, ObjectLock, ObjectRunResult, PackageAssignment,
+    ClassPropertiesVersion, ClassRunResult, ClassSourceProperties, Collection,
+    DataElementDefinition, DataElementDocumentationStatus, DataElementFieldLabel,
+    DataElementProperties, DataElementPropertiesV2, DataElementPropertiesVersion,
+    DataElementTypeKind, IncludeProperties, IncludePropertiesV2, IncludePropertyVersion,
+    ObjectLock, ObjectPropertiesUpdateResult, ObjectRunResult, PackageAssignment,
     PackageAttributes, PackageInterfaceReference, PackageProperties, PackagePropertiesV1,
     PackagePropertiesV2, PackagePropertiesVersion, PackageReference, PackageSettings,
     PackageTransport, PackageTree, PackageTreeKind, PackageTreeNode, PackageUseAccess,
@@ -62,9 +65,9 @@ pub use models::{
     TransportRequest, TransportRequests, TransportStatus, TransportTask, Workspace,
 };
 pub use objects::{
-    Class, ClassSourceComponent, GlobalWorkbenchType, Include, InvalidWorkbenchType,
-    ObjectProperties, ObjectRef, ObjectType, ObjectVersion, Package, Program, RepositoryObject,
-    Source, SourceComponent, SourceComponentSet, SourceComponents,
+    Class, ClassSourceComponent, DataElement, GlobalWorkbenchType, HasSource, Include,
+    InvalidWorkbenchType, ObjectRef, ObjectType, ObjectVersion, Package, Program, ReadProperties,
+    RepositoryObject, UpdateProperties, WritableProperties,
 };
 pub use operation::{
     BatchError, BatchKey, BatchOperation, BatchResponses, Batched, Execute, IfNoneMatch, Operation,

@@ -91,7 +91,7 @@ impl TryFrom<String> for GlobalWorkbenchType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Class, Include, ObjectType, Program};
+    use crate::{Class, DataElement, Include, ObjectType, Program};
 
     #[test]
     fn preserves_exact_static_global_workbench_types() {
@@ -102,6 +102,7 @@ mod tests {
         assert_eq!(Program::WORKBENCH_TYPE.to_string(), "PROG/P");
         assert_eq!(Include::WORKBENCH_TYPE.to_string(), "PROG/I");
         assert_eq!(Class::WORKBENCH_TYPE.to_string(), "CLAS/OC");
+        assert_eq!(DataElement::WORKBENCH_TYPE.to_string(), "DTEL/DE");
     }
 
     #[test]
@@ -118,18 +119,6 @@ mod tests {
 
             assert_eq!(object_type.as_str(), value);
             assert_eq!(object_type.to_string(), value);
-        }
-    }
-
-    #[test]
-    fn serializes_opaque_workbench_types_without_normalizing_them() {
-        for value in ["AUTH", "/RQ", "amdp", "CLAS/OCN/definitions"] {
-            let object_type: GlobalWorkbenchType = value.parse().unwrap();
-            let json = serde_json::to_string(&object_type).unwrap();
-            let decoded: GlobalWorkbenchType = serde_json::from_str(&json).unwrap();
-
-            assert_eq!(json, format!("\"{value}\""));
-            assert_eq!(decoded, object_type);
         }
     }
 

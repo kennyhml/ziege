@@ -1,11 +1,11 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::{
     AdtUri, Class, ClassSourceComponent, EnhancementImplementationsRef, EntityTag,
     GlobalWorkbenchType, HtmlSourceRef, MediaVersionNegotiation, ObjectEnhancementOptionsRef,
-    ObjectError, ObjectRef, ObjectStructureRef, ObjectType, ObjectVersion, Package, ResponseError,
-    SourceEnhancementOptionsRef, SourceRef, SourceVersionsRef, SyntaxConfiguration,
-    TextElementsRef,
+    ObjectError, ObjectRef, ObjectStructureRef, ObjectType, ObjectVersion, Package,
+    RawObjectProperties, ResponseError, SourceEnhancementOptionsRef, SourceRef, SourceVersionsRef,
+    SyntaxConfiguration, TextElementsRef,
     resource::{AdtLinkError, AdvertisedLink, Relations, resolve_href},
 };
 
@@ -51,8 +51,7 @@ impl MediaVersionNegotiation for ClassPropertiesVersion {
 }
 
 /// Class properties tagged with the media-type version returned by ADT.
-#[derive(Clone, Debug, Serialize)]
-#[serde(tag = "mediaVersion", content = "properties", rename_all = "lowercase")]
+#[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum ClassProperties {
     /// A V2 class-properties response.
@@ -79,17 +78,16 @@ impl ClassProperties {
             Self::V2(class) | Self::V3(class) | Self::V4(class) => class.etag.as_ref(),
         }
     }
+}
 
-    pub(crate) fn parse(
-        resource: &ObjectRef<Class>,
-        media_version: ClassPropertiesVersion,
-        body: &[u8],
-        etag: Option<EntityTag>,
-    ) -> Result<Self, ResponseError> {
-        let raw: RawClassProperties =
-            serde_xml_rs::from_reader(body).map_err(ObjectError::InvalidResponse)?;
-        let properties = ClassPropertiesV4::from_raw(resource.clone(), raw, etag)?;
-        Ok(match media_version {
+impl TryFrom<RawObjectProperties<Class>> for ClassProperties {
+    type Error = ResponseError;
+
+    fn try_from(raw: RawObjectProperties<Class>) -> Result<Self, Self::Error> {
+        let properties: RawClassProperties =
+            serde_xml_rs::from_reader(raw.body.as_slice()).map_err(ObjectError::InvalidResponse)?;
+        let properties = ClassPropertiesV4::from_raw(raw.resource, properties, raw.etag)?;
+        Ok(match raw.version {
             ClassPropertiesVersion::V2 => Self::V2(Box::new(properties)),
             ClassPropertiesVersion::V3 => Self::V3(Box::new(properties)),
             ClassPropertiesVersion::V4 => Self::V4(Box::new(properties)),
@@ -107,8 +105,7 @@ pub type ClassPropertiesV3 = ClassPropertiesV4;
 ///
 /// V2 through V4 use the same observed payload shape. V4 additionally supplies
 /// `abap_language_version`, which remains optional for older responses.
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug)]
 pub struct ClassPropertiesV4 {
     /// The class resource that was fetched.
     pub reference: ObjectRef<Class>,
@@ -337,8 +334,7 @@ impl ClassPropertiesV4 {
 }
 
 /// Metadata and relations for one source component in a class manifest.
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug)]
 pub struct ClassSourceProperties {
     /// The recognized secondary component, or `None` for the main or an unknown source type.
     pub component: Option<ClassSourceComponent>,
@@ -457,8 +453,7 @@ impl ClassSourceProperties {
 }
 
 /// An object referenced by a class-properties representation.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClassObjectReference {
     pub uri: Option<AdtUri>,
     pub object_type: Option<String>,
@@ -669,15 +664,15 @@ mod tests {
     const LOCAL_TYPES_XML: &str = include_str!("../../tests/fixtures/class-cx-root-v4.xml");
 
     fn parse(body: &str) -> Result<ClassPropertiesV4, ResponseError> {
-        let properties = ClassProperties::parse(
-            &ObjectRef::<Class>::for_test(
+        let properties = ClassProperties::try_from(RawObjectProperties {
+            resource: ObjectRef::<Class>::for_test(
                 "CL_ADT_URI_MAPPER",
                 AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
             ),
-            ClassPropertiesVersion::V4,
-            body.as_bytes(),
-            Some(EntityTag::from_static("class-etag")),
-        )?;
+            version: ClassPropertiesVersion::V4,
+            body: body.as_bytes().to_vec(),
+            etag: Some(EntityTag::from_static("class-etag")),
+        })?;
         Ok(match properties {
             ClassProperties::V2(properties)
             | ClassProperties::V3(properties)
@@ -724,15 +719,15 @@ mod tests {
 
     #[test]
     fn parses_the_live_local_types_manifest() {
-        let properties = ClassProperties::parse(
-            &ObjectRef::<Class>::for_test(
+        let properties = ClassProperties::try_from(RawObjectProperties {
+            resource: ObjectRef::<Class>::for_test(
                 "CX_ROOT",
                 AdtUri::parse("/sap/bc/adt/oo/classes/cx_root").unwrap(),
             ),
-            ClassPropertiesVersion::V4,
-            LOCAL_TYPES_XML.as_bytes(),
-            None,
-        )
+            version: ClassPropertiesVersion::V4,
+            body: LOCAL_TYPES_XML.as_bytes().to_vec(),
+            etag: None,
+        })
         .unwrap();
         let class = match properties {
             ClassProperties::V4(properties) => *properties,
@@ -756,15 +751,15 @@ mod tests {
     #[test]
     fn accepts_v2_without_the_v4_language_version() {
         let body = CLASS_XML.replace(" adtcore:abapLanguageVersion=\"X\"", "");
-        let properties = ClassProperties::parse(
-            &ObjectRef::<Class>::for_test(
+        let properties = ClassProperties::try_from(RawObjectProperties {
+            resource: ObjectRef::<Class>::for_test(
                 "CL_ADT_URI_MAPPER",
                 AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
             ),
-            ClassPropertiesVersion::V2,
-            body.as_bytes(),
-            None,
-        )
+            version: ClassPropertiesVersion::V2,
+            body: body.into_bytes(),
+            etag: None,
+        })
         .unwrap();
         let class = match properties {
             ClassProperties::V2(properties) => *properties,

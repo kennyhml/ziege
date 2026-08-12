@@ -13,10 +13,10 @@ use zadt_macros::object_type;
         term = "classes",
     ),
     capabilities(
-        Source,
+        HasSource,
         SourceComponents(ClassSourceComponent),
         Run,
-        Properties(
+        ReadProperties(
             media_version = ClassPropertiesVersion,
             model = ClassProperties,
         ),
@@ -51,7 +51,7 @@ impl serde::Serialize for ClassSourceComponent {
 impl ObjectRef<Class> {
     /// Resolves one of the secondary source resources owned by this class.
     pub fn component_source(&self, component: ClassSourceComponent) -> SourceRef {
-        self.source_from_component(&component)
+        self.source_from_path(component.path())
     }
 
     #[cfg(test)]
