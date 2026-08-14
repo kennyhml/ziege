@@ -30,13 +30,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let client = Client::new(transport).discover().await?;
 
     let object = client.object::<DataElement>("ZTFRWTFRT")?;
-    let mut properties = object.query().execute(&client).await?;
-    properties.payload.description = Some("Hi from ZADT!".into());
+    let mut properties = object.erase().query()?.execute(&client).await?;
+    properties.payload["description"] = "Hi from ZADT!".into();
 
     let session = client.create_user_session();
     let lock = object.lock(AccessMode::Modify).execute(&session).await?;
 
-    let res = object.update(&lock, properties)?.execute(&session).await;
+    let res = object
+        .erase()
+        .update(&lock, properties)?
+        .execute(&session)
+        .await;
 
     lock.remove().execute(&session).await?;
     println!("{res:#?}");

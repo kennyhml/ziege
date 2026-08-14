@@ -4,7 +4,6 @@ mod api;
 mod client;
 mod compatibility;
 mod error;
-mod models;
 mod objects;
 mod operation;
 mod protocol;
@@ -15,27 +14,40 @@ mod vocabulary;
 
 pub mod transport;
 
-pub use api::classes::ClassRun;
-pub use api::discovery::{CoreDiscoveryQuery, DiscoveryQuery};
-pub use api::object::{
-    LockRequest, ObjectRun, ObjectSourceQuery, ObjectSourceUpdate, UnlockRequest,
+pub use api::classes::{ClassRun, ClassRunResult};
+pub use api::discovery::{
+    Capabilities, Category, Collection, CoreDiscoveryQuery, DiscoveryQuery, TemplateLink, Workspace,
 };
-pub use api::packages::{PackageSettingsQuery, PackageTreeQuery};
-pub use api::programs::ProgramRun;
+pub use api::object::{
+    AccessMode, LockRequest, ObjectLock, ObjectRun, ObjectRunResult, ObjectSourceQuery,
+    ObjectSourceUpdate, SourceCode, SourceUpdateResult, UnlockRequest,
+};
+pub use api::packages::{
+    PackageInterfaceReference, PackageReference, PackageSettings, PackageSettingsQuery,
+    PackageTree, PackageTreeKind, PackageTreeNode, PackageTreeQuery,
+};
+pub use api::programs::{ProgramRun, ProgramRunResult};
 pub use api::properties::{
     JsonObjectProperties, JsonObjectPropertiesQuery, JsonObjectPropertiesUpdate, ObjectProperties,
     ObjectPropertiesQuery, ObjectPropertiesUpdate,
 };
 pub use api::repository::{
-    RepositoryContentOperation, RepositoryContentQuery, RepositoryContentQueryBuilder,
-    RepositoryContentQueryBuilderError, RepositoryFacetsQuery, RepositoryObjectPropertiesQuery,
+    RepositoryContent, RepositoryContentOperation, RepositoryContentQuery,
+    RepositoryContentQueryBuilder, RepositoryContentQueryBuilderError, RepositoryFacet,
+    RepositoryFacetDefinition, RepositoryFacetValuesLink, RepositoryFacets, RepositoryFacetsQuery,
+    RepositoryObjectEntry, RepositoryObjectProperties, RepositoryObjectPropertiesQuery,
     RepositoryObjectPropertiesQueryBuilder, RepositoryObjectPropertiesQueryBuilderError,
+    RepositoryObjectSummary, RepositoryPreselection, RepositoryPreselectionInfo,
+    RepositoryProperty, RepositoryVirtualFolder,
 };
-pub use api::session::Logon;
+pub use api::session::{Logon, SessionInformation, SessionUri, SystemInformationLink};
 pub use api::transports::{
     QueryTransportKind, TransportCheck, TransportCheckBuilder, TransportCheckBuilderError,
-    TransportCheckLinkUpMode, TransportCheckOperation, TransportCreate, TransportCreateBuilder,
-    TransportCreateBuilderError, TransportPropertiesQuery, TransportsQuery, TransportsQueryBuilder,
+    TransportCheckLinkUpMode, TransportCheckMessage, TransportCheckOperation, TransportCheckResult,
+    TransportCreate, TransportCreateBuilder, TransportCreateBuilderError, TransportCreation,
+    TransportCreationMessage, TransportKind, TransportNumber, TransportObjectKey,
+    TransportObjectLock, TransportProject, TransportPropertiesQuery, TransportRequest,
+    TransportRequests, TransportStatus, TransportTask, TransportsQuery, TransportsQueryBuilder,
     TransportsQueryBuilderError,
 };
 pub use client::{Client, ClientState, Initial, Ready};
@@ -43,30 +55,18 @@ pub use compatibility::CompatibilityError;
 #[cfg(feature = "reqwest")]
 pub use error::ReqwestTransportBuildError;
 pub use error::{
-    CtsError, DiscoveryError, LogonError, ObjectError, OperationError, RepositoryError,
-    ResponseError, TransportError,
-};
-pub use models::{
-    AccessMode, AdtException, AdtExceptionProperty, AdvertisedObjectReference, Capabilities,
-    Category, ClassProperties, ClassPropertiesVersion, ClassRunResult, ClassSourceProperties,
-    Collection, DataElementDefinition, DataElementProperties, DataElementPropertiesVersion,
-    IncludeProperties, IncludePropertyVersion, ObjectLock, ObjectRunResult, PackageAssignment,
-    PackageAttributes, PackageInterfaceReference, PackageProperties, PackagePropertiesVersion,
-    PackageReference, PackageSettings, PackageTransport, PackageTree, PackageTreeKind,
-    PackageTreeNode, PackageUseAccess, ProgramProperties, ProgramPropertiesVersion,
-    ProgramRunResult, RepositoryContent, RepositoryFacet, RepositoryFacetDefinition,
-    RepositoryFacetValuesLink, RepositoryFacets, RepositoryObjectEntry, RepositoryObjectProperties,
-    RepositoryObjectSummary, RepositoryPreselection, RepositoryPreselectionInfo,
-    RepositoryProperty, RepositoryVirtualFolder, SessionInformation, SessionUri, SourceCode,
-    SourceUpdateResult, SyntaxConfiguration, SyntaxLanguage, SystemInformationLink, TemplateLink,
-    TransportCheckMessage, TransportCheckResult, TransportCreation, TransportCreationMessage,
-    TransportKind, TransportNumber, TransportObjectKey, TransportObjectLock, TransportProject,
-    TransportRequest, TransportRequests, TransportStatus, TransportTask, Workspace,
+    AdtException, AdtExceptionProperty, CtsError, DiscoveryError, LogonError, ObjectError,
+    OperationError, RepositoryError, ResponseError, TransportError,
 };
 pub use objects::{
-    Class, ClassSourceComponent, DataElement, Erased, GlobalWorkbenchType, HasSource, Include,
-    InvalidWorkbenchType, ObjectRef, ObjectType, ObjectVersion, Package, Program, PropertyModel,
-    ReadProperties, UpdateProperties,
+    AdvertisedObjectReference, Class, ClassProperties, ClassPropertiesVersion,
+    ClassSourceComponent, ClassSourceProperties, DataElement, DataElementDefinition,
+    DataElementProperties, DataElementPropertiesVersion, Erased, GlobalWorkbenchType, HasSource,
+    Include, IncludeProperties, IncludePropertyVersion, InvalidWorkbenchType, ObjectRef,
+    ObjectType, ObjectVersion, Package, PackageAssignment, PackageAttributes, PackageProperties,
+    PackagePropertiesVersion, PackageTransport, PackageUseAccess, Program, ProgramProperties,
+    ProgramPropertiesVersion, PropertyModel, ReadProperties, SyntaxConfiguration, SyntaxLanguage,
+    UpdateProperties,
 };
 pub use operation::{
     BatchError, BatchKey, BatchOperation, BatchResponses, Batched, Execute, IfNoneMatch, Operation,

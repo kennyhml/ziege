@@ -2,7 +2,6 @@ use super::object::ObjectRun;
 use crate::{
     client::{Client, Ready},
     error::{OperationError, ResponseError},
-    models::ProgramRunResult,
     objects::{ImmediateRun, ObjectRef, Program, RunCapability},
     operation::{Operation, OperationResponse, Stateless},
     protocol::AdtRequest,
@@ -15,6 +14,22 @@ const PROGRAM_RUN_CATEGORY: CategoryId = CategoryId {
     term: "programrun",
 };
 const PROGRAM_RUN_RELATION: &str = "http://www.sap.com/adt/relations/programs/programrun";
+
+/// The plain-text console output produced by running an ABAP program.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProgramRunResult {
+    /// The program that was executed.
+    pub reference: ObjectRef<Program>,
+
+    /// The rendered program output returned by SAP.
+    pub content: String,
+}
+
+impl ProgramRunResult {
+    pub(crate) fn new(reference: ObjectRef<Program>, content: String) -> Self {
+        Self { reference, content }
+    }
+}
 
 /// Runs an executable ABAP program and returns its rendered console output.
 ///
@@ -108,8 +123,8 @@ mod tests {
 
     fn ready_client(xml: &[u8]) -> Client<Ready> {
         Client::new(UnusedTransport).with_capabilities(
-            crate::models::parse_capabilities(xml).unwrap(),
-            crate::models::parse_capabilities(xml).unwrap(),
+            crate::api::discovery::parse_capabilities(xml).unwrap(),
+            crate::api::discovery::parse_capabilities(xml).unwrap(),
         )
     }
 

@@ -2,7 +2,6 @@ use super::object::ObjectRun;
 use crate::{
     AdtRequest, Client, Operation, OperationError, OperationResponse, Ready, ResponseError,
     Stateless,
-    models::ClassRunResult,
     objects::{Class, ImmediateRun, ObjectRef, RunCapability},
     vocabulary::CategoryId,
 };
@@ -13,6 +12,22 @@ const CLASS_RUN_CATEGORY: CategoryId = CategoryId {
     term: "classrun",
 };
 const CLASS_RUN_RELATION: &str = "http://www.sap.com/adt/relations/oo/classrun";
+
+/// The plain-text console output produced by running an ABAP class.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClassRunResult {
+    /// The class that was executed.
+    pub reference: ObjectRef<Class>,
+
+    /// The rendered class-run output returned by SAP.
+    pub content: String,
+}
+
+impl ClassRunResult {
+    pub(crate) fn new(reference: ObjectRef<Class>, content: String) -> Self {
+        Self { reference, content }
+    }
+}
 
 /// Runs an ABAP class and returns its rendered console output.
 #[derive(Debug)]

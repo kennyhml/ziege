@@ -1,8 +1,9 @@
 use std::{fmt, hash::Hash};
 
+use serde::{Deserialize, Serialize};
+
 use crate::{
-    AccessMode, LockRequest, ObjectLock, UnlockRequest,
-    api::object::ObjectRun,
+    api::object::{AccessMode, LockRequest, ObjectLock, ObjectRun, UnlockRequest},
     client::{Client, Ready},
     error::ObjectError,
     resource::SourceRef,
@@ -19,9 +20,46 @@ mod workbench;
 pub use capabilities::{HasSource, PropertyModel, ReadProperties, UpdateProperties};
 pub(crate) use capabilities::{ImmediateRun, RunCapability};
 pub(crate) use descriptors::RuntimeObjectTypeDescriptor;
-pub use families::{Class, ClassSourceComponent, DataElement, Include, Package, Program};
+pub use families::{
+    Class, ClassProperties, ClassPropertiesVersion, ClassSourceComponent, ClassSourceProperties,
+    DataElement, DataElementDefinition, DataElementProperties, DataElementPropertiesVersion,
+    Include, IncludeProperties, IncludePropertyVersion, Package, PackageAssignment,
+    PackageAttributes, PackageProperties, PackagePropertiesVersion, PackageTransport,
+    PackageUseAccess, Program, ProgramProperties, ProgramPropertiesVersion, SyntaxConfiguration,
+    SyntaxLanguage,
+};
 pub use version::ObjectVersion;
 pub use workbench::{GlobalWorkbenchType, InvalidWorkbenchType};
+
+/// An unresolved object reference exactly as advertised in an ADT payload.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AdvertisedObjectReference {
+    /// The referenced object's URI, when advertised.
+    #[serde(rename = "@adtcore:uri", skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+
+    /// The referenced object's global Workbench type, when advertised.
+    #[serde(rename = "@adtcore:type", skip_serializing_if = "Option::is_none")]
+    pub object_type: Option<GlobalWorkbenchType>,
+
+    /// The referenced object's name, when advertised.
+    #[serde(rename = "@adtcore:name", skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
+    /// The referenced object's package name, when advertised.
+    #[serde(
+        rename = "@adtcore:packageName",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub package_name: Option<String>,
+
+    /// The referenced object's description, when advertised.
+    #[serde(
+        rename = "@adtcore:description",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub description: Option<String>,
+}
 
 pub(crate) mod private {
     pub trait Sealed {}
@@ -225,6 +263,26 @@ impl Client<Ready> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn advertised_object_references_preserve_partial_wire_values() {
+        let xml = r#"<adtcore:objectRef adtcore:type="CLAS/OC" adtcore:name="ZCL_TEST" adtcore:packageName="ZPACKAGE" xmlns:adtcore="http://www.sap.com/adt/core" />"#;
+        let reference: AdvertisedObjectReference = serde_xml_rs::from_str(xml).unwrap();
+
+        assert_eq!(reference.object_type.as_ref().unwrap().as_str(), "CLAS/OC");
+        assert_eq!(reference.name.as_deref(), Some("ZCL_TEST"));
+        assert_eq!(reference.package_name.as_deref(), Some("ZPACKAGE"));
+        assert!(reference.uri.is_none());
+
+        let json = serde_json::to_value(&reference).unwrap();
+        assert_eq!(json["@adtcore:type"], "CLAS/OC");
+        assert_eq!(json["@adtcore:packageName"], "ZPACKAGE");
+        assert!(json.get("@adtcore:uri").is_none());
+        assert_eq!(
+            serde_json::from_value::<AdvertisedObjectReference>(json).unwrap(),
+            reference
+        );
+    }
 
     #[test]
     fn erased_reference_recovers_its_registered_type() {

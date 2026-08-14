@@ -594,7 +594,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        Ready, Stateful, Stateless, Transport, TransportError, models::parse_capabilities,
+        Ready, Stateful, Stateless, Transport, TransportError, api::discovery::parse_capabilities,
     };
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
