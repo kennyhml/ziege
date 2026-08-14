@@ -152,9 +152,6 @@ pub enum ObjectError {
         actual: GlobalWorkbenchType,
     },
 
-    #[error("expected object name `{expected}`, but the response advertised `{actual}`")]
-    UnexpectedObjectName { expected: String, actual: String },
-
     #[error("expected repository object type `{expected}`, but RIS advertised `{actual}`")]
     UnexpectedRepositoryObjectType {
         expected: GlobalWorkbenchType,
@@ -193,9 +190,6 @@ pub enum ObjectError {
 
     #[error("lock for `{actual}` cannot be used with object `{expected}`")]
     ObjectLockMismatch { expected: String, actual: String },
-
-    #[error("properties for `{actual}` cannot be used with object `{expected}`")]
-    ObjectPropertiesMismatch { expected: String, actual: String },
 
     #[error("updating an object requires a modification lock")]
     ObjectLockNotModifiable,
@@ -338,6 +332,9 @@ pub enum OperationError {
 
     #[error(transparent)]
     Transport(#[from] TransportError),
+
+    #[error(transparent)]
+    Object(#[from] ObjectError),
 
     #[error(transparent)]
     Response(#[from] ResponseError),

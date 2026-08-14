@@ -3,8 +3,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use http::{HeaderValue, Method, StatusCode, header};
 
 use crate::{
-    AdtRequest, Client, ClientState, LogonError, MediaVersionNegotiation, Operation,
-    OperationError, OperationResponse, ResponseError, SessionInformation, Stateless,
+    AdtRequest, Client, ClientState, LogonError, Operation, OperationError, OperationResponse,
+    ResponseError, SessionInformation, Stateless,
+    compatibility::media_types_match,
     models::parse_session_information,
     target::HTTP_SESSIONS,
     vocabulary::{
@@ -12,21 +13,7 @@ use crate::{
     },
 };
 
-/// Supported versions of the session information presentation
-#[derive(Clone, Debug, Copy, Eq, PartialEq)]
-pub struct SessionMediaVersion(&'static str);
-
-impl SessionMediaVersion {
-    pub const V3: Self = Self("application/vnd.sap.adt.core.http.session.v3+xml");
-}
-
-impl MediaVersionNegotiation for SessionMediaVersion {
-    const SUPPORTED: &'static [Self] = &[Self::V3];
-
-    fn media_type(self) -> &'static str {
-        self.0
-    }
-}
+const SESSION_MEDIA_TYPE: &str = "application/vnd.sap.adt.core.http.session.v3+xml";
 
 /// Establishes an authenticated ADT HTTP security session.
 ///
@@ -42,7 +29,7 @@ impl<S: ClientState> Operation<S> for Logon {
     fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
         let mut request = HTTP_SESSIONS.request(Method::GET);
         request.push_query("_", cache_buster());
-        request.set_accept(SessionMediaVersion::V3.media_type());
+        request.set_accept(SESSION_MEDIA_TYPE);
 
         // TODO: These should probably be statically typed enums
         request
@@ -72,7 +59,7 @@ impl<S: ClientState> Operation<S> for Logon {
             .get(header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .ok_or(LogonError::MissingContentType)?;
-        if SessionMediaVersion::from_media_type(content_type) != Some(SessionMediaVersion::V3) {
+        if !media_types_match(SESSION_MEDIA_TYPE, content_type) {
             return Err(LogonError::UnsupportedContentType {
                 content_type: content_type.to_owned(),
             }

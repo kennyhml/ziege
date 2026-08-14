@@ -16,7 +16,7 @@ mod families;
 mod version;
 mod workbench;
 
-pub use capabilities::{HasSource, ReadProperties, UpdateProperties, WritableProperties};
+pub use capabilities::{HasSource, PropertyModel, ReadProperties, UpdateProperties};
 pub(crate) use capabilities::{ImmediateRun, RunCapability};
 pub(crate) use descriptors::RuntimeObjectTypeDescriptor;
 pub use families::{Class, ClassSourceComponent, DataElement, Include, Package, Program};
@@ -28,15 +28,12 @@ pub(crate) mod private {
 }
 
 /// Statically identified ADT object resource family.
-pub trait ObjectType: private::Sealed + Clone + Send + Sync + Sized + 'static {
+pub trait ObjectType: private::Sealed + Clone + Default + Send + Sync + Sized + 'static {
     /// The object's global Workbench type.
     const WORKBENCH_TYPE: GlobalWorkbenchType;
 
     /// The stable category identifying the canonical object collection.
     const CATEGORY: CategoryId;
-
-    #[doc(hidden)]
-    fn marker() -> Self;
 }
 
 /// Runtime type information retained by a type-erased object reference.
@@ -80,16 +77,12 @@ impl<T> ObjectRef<T> {
 }
 
 impl<T: ObjectType> ObjectRef<T> {
-    fn typed_ref(name: String, uri: AdtUri) -> Self {
+    pub(crate) fn new(name: String, uri: AdtUri) -> Self {
         Self {
             name,
             uri,
-            state: T::marker(),
+            state: T::default(),
         }
-    }
-
-    pub(crate) fn from_parts(name: String, uri: AdtUri) -> Self {
-        Self::typed_ref(name, uri)
     }
 
     /// Returns a runtime-typed copy of this object identity.
@@ -100,10 +93,6 @@ impl<T: ObjectType> ObjectRef<T> {
     /// Returns this reference's statically known Workbench type.
     pub fn object_type(&self) -> GlobalWorkbenchType {
         T::WORKBENCH_TYPE
-    }
-
-    pub(crate) fn source_from_path(&self, path: &[&str]) -> SourceRef {
-        self.erase().source_from_path(path)
     }
 }
 
@@ -125,37 +114,19 @@ impl ObjectRef<Erased> {
         self.state.descriptor
     }
 
-    /// Returns another runtime-typed copy of this object identity.
-    pub fn erase(&self) -> Self {
-        self.clone()
-    }
-
     /// Recovers a typed reference when this object has the requested type.
     pub fn typed<T: ObjectType>(&self) -> Option<ObjectRef<T>> {
         if self.object_type() != &T::WORKBENCH_TYPE {
             return None;
         }
-        Some(ObjectRef::typed_ref(self.name.clone(), self.uri.clone()))
-    }
-
-    /// Resolves the statically known secondary source components for this family.
-    pub fn source_components(&self) -> Vec<SourceRef> {
-        self.descriptor()
-            .map(|descriptor| {
-                descriptor
-                    .source_component_paths()
-                    .iter()
-                    .map(|path| self.source_from_path(path))
-                    .collect()
-            })
-            .unwrap_or_default()
+        Some(ObjectRef::new(self.name.clone(), self.uri.clone()))
     }
 
     /// Resolves the primary source when available.
     pub fn source(&self) -> Option<SourceRef> {
         self.descriptor()
             .and_then(|descriptor| descriptor.source_path())
-            .map(|path| self.source_from_path(path))
+            .map(|path| SourceRef::from_object_path(self.clone(), path))
     }
 
     /// Resolves one named secondary source component when available.
@@ -164,7 +135,7 @@ impl ObjectRef<Erased> {
             .source_component_paths()
             .iter()
             .find(|path| path.last() == Some(&name))
-            .map(|path| self.source_from_path(path))
+            .map(|path| SourceRef::from_object_path(self.clone(), path))
     }
 
     /// Creates an immediate run operation when this object family supports it.
@@ -194,14 +165,6 @@ impl ObjectRef<Erased> {
         }
         Ok(UnlockRequest::new(object_lock))
     }
-
-    pub(crate) fn source_from_path(&self, path: &[&str]) -> SourceRef {
-        let uri = self
-            .uri()
-            .append_segments(path)
-            .expect("static source path forms a valid ADT URI");
-        SourceRef::new(self.clone(), uri)
-    }
 }
 
 impl<T> PartialEq for ObjectRef<T> {
@@ -224,39 +187,6 @@ impl<T> fmt::Display for ObjectRef<T> {
     }
 }
 
-impl<T> serde::Serialize for ObjectRef<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeStruct as _;
-
-        let mut reference = serializer.serialize_struct("ObjectRef", 2)?;
-        reference.serialize_field("name", &self.name)?;
-        reference.serialize_field("uri", &self.uri)?;
-        reference.end()
-    }
-}
-
-impl<'de, T> serde::Deserialize<'de> for ObjectRef<T>
-where
-    T: ObjectType,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(serde::Deserialize)]
-        struct SerializedObjectRef {
-            name: String,
-            uri: AdtUri,
-        }
-
-        let reference = SerializedObjectRef::deserialize(deserializer)?;
-        Ok(Self::typed_ref(reference.name, reference.uri))
-    }
-}
-
 impl Client<Ready> {
     fn object_identity(
         &self,
@@ -273,7 +203,7 @@ impl Client<Ready> {
     /// Resolves a typed object reference from its statically known collection.
     pub fn object<T: ObjectType>(&self, name: &str) -> Result<ObjectRef<T>, ObjectError> {
         self.object_identity(T::CATEGORY, name)
-            .map(|(name, uri)| ObjectRef::typed_ref(name, uri))
+            .map(|(name, uri)| ObjectRef::new(name, uri))
     }
 
     /// Resolves a runtime object reference from its Workbench type and name.
@@ -311,28 +241,19 @@ mod tests {
     }
 
     #[test]
-    fn erased_reference_exposes_source_components_at_runtime() {
+    fn erased_reference_resolves_a_named_source_component() {
         let class = ObjectRef::<Class>::for_test(
             "ZCL_TEST",
             AdtUri::parse("/sap/bc/adt/oo/classes/zcl_test").unwrap(),
         );
-        let object = class.erase();
+
+        let component = class.erase().source_component("definitions").unwrap();
 
         assert_eq!(
-            object
-                .source_components()
-                .iter()
-                .map(|component| component.uri.as_str())
-                .collect::<Vec<_>>(),
-            [
-                "/sap/bc/adt/oo/classes/zcl_test/includes/definitions",
-                "/sap/bc/adt/oo/classes/zcl_test/includes/implementations",
-                "/sap/bc/adt/oo/classes/zcl_test/includes/macros",
-                "/sap/bc/adt/oo/classes/zcl_test/includes/testclasses",
-                "/sap/bc/adt/oo/classes/zcl_test/includes/localtypes",
-            ]
+            component.uri.as_str(),
+            "/sap/bc/adt/oo/classes/zcl_test/includes/definitions"
         );
-        assert_eq!(object.source(), Some(class.source()));
+        assert_eq!(component.object, class.erase());
     }
 
     #[test]

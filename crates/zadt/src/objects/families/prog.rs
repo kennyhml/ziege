@@ -1,7 +1,5 @@
 use super::super::ObjectRef;
-use crate::models::{
-    IncludeProperties, IncludePropertyVersion, ProgramProperties, ProgramPropertiesVersion,
-};
+use crate::models::{IncludeProperties, ProgramProperties};
 use zadt_macros::object_type;
 
 /// The ABAP program object type.
@@ -14,13 +12,10 @@ use zadt_macros::object_type;
     capabilities(
         HasSource,
         Run,
-        ReadProperties(
-            media_version = ProgramPropertiesVersion,
-            model = ProgramProperties,
-        ),
+        ReadProperties(model = ProgramProperties),
     ),
 )]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Program;
 
 /// The standalone ABAP include object type.
@@ -32,25 +27,22 @@ pub struct Program;
     ),
     capabilities(
         HasSource,
-        ReadProperties(
-            media_version = IncludePropertyVersion,
-            model = IncludeProperties,
-        ),
+        ReadProperties(model = IncludeProperties),
     ),
 )]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Include;
 
 impl ObjectRef<Program> {
     #[cfg(test)]
     pub(crate) fn for_test(name: &str, uri: crate::AdtUri) -> Self {
-        Self::from_parts(name.to_ascii_uppercase(), uri)
+        Self::new(name.to_ascii_uppercase(), uri)
     }
 }
 
 impl ObjectRef<Include> {
     #[cfg(test)]
     pub(crate) fn for_test(name: &str, uri: crate::AdtUri) -> Self {
-        Self::from_parts(name.to_ascii_uppercase(), uri)
+        Self::new(name.to_ascii_uppercase(), uri)
     }
 }

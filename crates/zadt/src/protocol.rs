@@ -70,6 +70,13 @@ impl AdtRequest {
             .insert(header::ACCEPT, HeaderValue::from_static(media_type));
     }
 
+    /// Sets all response media types accepted by the caller.
+    pub fn set_accepts(&mut self, media_types: &[&str]) {
+        let value = HeaderValue::from_str(&media_types.join(", "))
+            .expect("supported media types form a valid non-empty Accept header");
+        self.headers.insert(header::ACCEPT, value);
+    }
+
     /// Sets the media type of the request body.
     pub fn set_content_type(&mut self, media_type: &'static str) {
         self.headers
@@ -284,27 +291,6 @@ impl Deref for EntityTag {
 impl fmt::Display for EntityTag {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.as_str())
-    }
-}
-
-impl serde::Serialize for EntityTag {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for EntityTag {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use serde::de::Error as _;
-
-        let value = String::deserialize(deserializer)?;
-        value.parse().map_err(D::Error::custom)
     }
 }
 

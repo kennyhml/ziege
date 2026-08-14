@@ -90,8 +90,8 @@ mod tests {
     use super::*;
     use crate::{
         AdtResponse, AdtUri, CompatibilityError, EntityTag, Include, IncludePropertyVersion,
-        MediaVersionNegotiation, ObjectError, ObjectPropertiesQuery, ObjectType,
-        ProgramPropertiesVersion, Revalidation, vocabulary::query_parameter,
+        ObjectError, ObjectPropertiesQuery, ObjectType, ProgramPropertiesVersion, Revalidation,
+        vocabulary::query_parameter,
     };
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
@@ -173,6 +173,18 @@ mod tests {
     }
 
     #[test]
+    fn program_properties_query_accepts_every_supported_version() {
+        let request = program_properties_query()
+            .request(&ready_client(DISCOVERY_XML))
+            .unwrap();
+
+        assert_eq!(
+            request.headers()[header::ACCEPT],
+            "application/vnd.sap.adt.programs.programs.v3+xml, application/vnd.sap.adt.programs.programs.v2+xml"
+        );
+    }
+
+    #[test]
     fn expands_namespaced_program_run_variables() {
         let client = ready_client(DISCOVERY_XML);
         let request = ObjectRef::<Program>::for_test(
@@ -228,9 +240,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            OperationError::Response(ResponseError::Object(
-                ObjectError::UnsupportedTemplateParameter { parameter }
-            ))
+            OperationError::Object(ObjectError::UnsupportedTemplateParameter { parameter })
                 if parameter == query_parameter::PROFILER_ID
         ));
     }
@@ -283,9 +293,9 @@ mod tests {
 
         assert!(matches!(
             error,
-            OperationError::Response(ResponseError::Object(ObjectError::MissingTemplate {
+            OperationError::Object(ObjectError::MissingTemplate {
                 relation: PROGRAM_RUN_RELATION
-            }))
+            })
         ));
     }
 
@@ -295,7 +305,7 @@ mod tests {
             .decode(program_properties_response(ProgramPropertiesVersion::V2))
             .unwrap();
         assert_eq!(representation.media_version(), ProgramPropertiesVersion::V2);
-        assert_eq!(representation.payload().name, "Z_TEST");
+        assert_eq!(representation.payload.name, "Z_TEST");
     }
 
     #[test]
@@ -304,7 +314,7 @@ mod tests {
             .decode(program_properties_response(ProgramPropertiesVersion::V3))
             .unwrap();
         assert_eq!(representation.media_version(), ProgramPropertiesVersion::V3);
-        assert_eq!(representation.payload().name, "Z_TEST");
+        assert_eq!(representation.payload.name, "Z_TEST");
     }
 
     #[test]
@@ -386,9 +396,9 @@ mod tests {
         let representation = include_properties_query()
             .decode(operation_response(response))
             .unwrap();
-        assert_eq!(representation.payload().name, "ZTEST");
+        assert_eq!(representation.payload.name, "ZTEST");
         assert_eq!(
-            representation.etag().map(EntityTag::as_str),
+            representation.etag.as_ref().map(EntityTag::as_str),
             Some("include-etag")
         );
     }

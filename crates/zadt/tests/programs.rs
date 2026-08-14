@@ -15,6 +15,7 @@ const PROGRAM_XML: &str = include_str!("fixtures/program-z-test.xml");
 const INCLUDE_XML: &str = include_str!("fixtures/include-ztest.xml");
 const SESSION_XML: &str = include_str!("fixtures/http-session-v3.xml");
 const SESSION_MEDIA_TYPE: &str = "application/vnd.sap.adt.core.http.session.v3+xml";
+const PROGRAM_PROPERTIES_ACCEPT: &str = "application/vnd.sap.adt.programs.programs.v3+xml, application/vnd.sap.adt.programs.programs.v2+xml";
 const SOURCE: &str = "REPORT z_ziege_test.\nWRITE / 'updated'.\n";
 const RUN_OUTPUT: &str = "Hello from Z_TEST\n";
 
@@ -152,16 +153,14 @@ async fn include_properties_query_converts_the_live_ztest_properties() {
     let reference = client.object::<Include>("ZTEST").unwrap();
     let response = reference
         .query()
-        .priority([IncludePropertyVersion::V2])
         .version(ObjectVersion::Active)
         .execute(&client)
         .await
         .unwrap();
     assert_eq!(response.media_version(), IncludePropertyVersion::V2);
-    let include = response.payload();
+    let include = &response.payload;
     let source = reference.source().query().execute(&client).await.unwrap();
 
-    assert_eq!(response.object(), &reference);
     assert_eq!(include.name, "ZTEST");
     assert_eq!(include.object_type.to_string(), "PROG/I");
     assert_eq!(include.version, "active");
@@ -169,7 +168,7 @@ async fn include_properties_query_converts_the_live_ztest_properties() {
     assert_eq!(include.package.name.as_deref(), Some("$TMP"));
     assert_eq!(include.links.len(), 7);
     assert_eq!(
-        response.etag().map(EntityTag::as_str),
+        response.etag.as_ref().map(EntityTag::as_str),
         Some("2026012416174900180")
     );
     assert_eq!(source.content, SOURCE);
@@ -197,7 +196,7 @@ async fn program_properties_query_converts_the_live_z_test_v3_properties() {
         .mock_async(|when, then| {
             when.method(GET)
                 .path("/sap/bc/adt/programs/programs/z_test")
-                .header("accept", "application/vnd.sap.adt.programs.programs.v3+xml")
+                .header("accept", PROGRAM_PROPERTIES_ACCEPT)
                 .header("cache-control", "no-cache");
             then.status(200)
                 .header(
@@ -228,10 +227,9 @@ async fn program_properties_query_converts_the_live_z_test_v3_properties() {
     let reference = client.object::<Program>("Z_TEST").unwrap();
     let response = reference.query().execute(&client).await.unwrap();
     assert_eq!(response.media_version(), ProgramPropertiesVersion::V3);
-    let program = response.payload();
+    let program = &response.payload;
     let source = reference.source().query().execute(&client).await.unwrap();
 
-    assert_eq!(response.object(), &reference);
     assert_eq!(program.name, "Z_TEST");
     assert_eq!(program.object_type.to_string(), "PROG/P");
     assert_eq!(program.version, "inactive");
@@ -277,7 +275,7 @@ async fn program_properties_query_converts_the_live_z_test_v3_properties() {
     assert_eq!(program.source_uri, "source/main");
     assert_eq!(program.links[0].href, "source/main/versions");
     assert_eq!(
-        response.etag().map(EntityTag::as_str),
+        response.etag.as_ref().map(EntityTag::as_str),
         Some("202607251959580008")
     );
     assert_eq!(source.content, SOURCE);
@@ -289,7 +287,7 @@ async fn program_properties_query_converts_the_live_z_test_v3_properties() {
 }
 
 #[tokio::test]
-async fn program_properties_query_honors_v2_first_priority() {
+async fn program_properties_query_accepts_server_selected_v2() {
     let server = MockServer::start_async().await;
     let logon = mock_logon(&server).await;
     let _core_discovery = mock_core_discovery(&server).await;
@@ -304,7 +302,7 @@ async fn program_properties_query_honors_v2_first_priority() {
             when.method(GET)
                 .path("/sap/bc/adt/programs/programs/z_test")
                 .query_param("version", "workingArea")
-                .header("accept", "application/vnd.sap.adt.programs.programs.v2+xml");
+                .header("accept", PROGRAM_PROPERTIES_ACCEPT);
             then.status(200)
                 .header(
                     "content-type",
@@ -327,13 +325,12 @@ async fn program_properties_query_honors_v2_first_priority() {
         .object::<Program>("Z_TEST")
         .unwrap()
         .query()
-        .priority([ProgramPropertiesVersion::V2, ProgramPropertiesVersion::V3])
         .version(ObjectVersion::WorkingArea)
         .execute(&client)
         .await
         .unwrap();
     assert_eq!(response.media_version(), ProgramPropertiesVersion::V2);
-    let program = response.payload();
+    let program = &response.payload;
 
     assert_eq!(program.name, "Z_TEST");
     assert_eq!(program.version, "inactive");
@@ -359,7 +356,7 @@ async fn program_properties_query_returns_not_modified_for_a_current_etag() {
             when.method(GET)
                 .path("/sap/bc/adt/programs/programs/z_test")
                 .query_param("version", "inactive")
-                .header("accept", "application/vnd.sap.adt.programs.programs.v3+xml")
+                .header("accept", PROGRAM_PROPERTIES_ACCEPT)
                 .header("if-none-match", "202607251959580008");
             then.status(304).header("etag", "202607251959580008");
         })

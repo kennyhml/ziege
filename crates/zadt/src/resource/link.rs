@@ -55,32 +55,35 @@ impl fmt::Display for AdtLink {
     }
 }
 
-/// A raw, unverified `atom:link` advertised by a resource based on
-/// a HATEOAS API design.
-///
-/// This type is an implementation detail and essentially a stepping
-/// stone for the more meaningful [`AdtLink].
+/// A raw, unverified `atom:link` exactly as advertised by ADT.
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, serde::Serialize)]
-pub(crate) struct AdvertisedLink {
+pub struct AdvertisedLink {
+    /// The target exactly as advertised by ADT.
     #[serde(rename = "@href")]
     pub href: String,
 
-    #[serde(rename = "@rel")]
+    /// The Atom relation URI, when advertised.
+    #[serde(rename = "@rel", skip_serializing_if = "Option::is_none")]
     pub relation: Option<String>,
 
-    #[serde(rename = "@type")]
+    /// The target representation's media type, when advertised.
+    #[serde(rename = "@type", skip_serializing_if = "Option::is_none")]
     pub media_type: Option<String>,
 
-    #[serde(rename = "@hreflang")]
+    /// The target representation's language, when advertised.
+    #[serde(rename = "@hreflang", skip_serializing_if = "Option::is_none")]
     pub hreflang: Option<String>,
 
-    #[serde(rename = "@title")]
+    /// A human-readable title, when advertised.
+    #[serde(rename = "@title", skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
 
-    #[serde(rename = "@length")]
+    /// The target length exactly as advertised by ADT.
+    #[serde(rename = "@length", skip_serializing_if = "Option::is_none")]
     pub length: Option<String>,
 
-    #[serde(rename = "@etag")]
+    /// The target representation's entity tag, when advertised.
+    #[serde(rename = "@etag", skip_serializing_if = "Option::is_none")]
     pub etag: Option<String>,
 }
 
@@ -174,6 +177,28 @@ pub(crate) fn resolve_href(base: &AdtUri, href: &str) -> Result<ResolvedHref, Ad
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn advertised_links_preserve_wire_keys_in_json() {
+        let xml = r#"<atom:link href="source/main" rel="source" type="text/plain" etag="123" xmlns:atom="http://www.w3.org/2005/Atom" />"#;
+        let link: AdvertisedLink = serde_xml_rs::from_str(xml).unwrap();
+
+        assert_eq!(link.href, "source/main");
+        assert_eq!(link.relation.as_deref(), Some("source"));
+        assert_eq!(link.media_type.as_deref(), Some("text/plain"));
+        assert_eq!(link.etag.as_deref(), Some("123"));
+
+        let json = serde_json::to_value(&link).unwrap();
+        assert_eq!(json["@href"], "source/main");
+        assert_eq!(json["@rel"], "source");
+        assert_eq!(json["@type"], "text/plain");
+        assert!(json.get("href").is_none());
+
+        assert_eq!(
+            serde_json::from_value::<AdvertisedLink>(json).unwrap(),
+            link
+        );
+    }
 
     #[test]
     fn resolves_the_relative_link_forms_emitted_by_programs() {

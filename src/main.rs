@@ -31,7 +31,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let object = client.object::<DataElement>("ZTFRWTFRT")?;
     let mut properties = object.query().execute(&client).await?;
-    properties.properties_mut().description = Some("Hi from ZADT!".into());
+    properties.payload.description = Some("Hi from ZADT!".into());
 
     let session = client.create_user_session();
     let lock = object.lock(AccessMode::Modify).execute(&session).await?;

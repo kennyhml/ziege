@@ -1,10 +1,9 @@
 use serde::{Deserialize, Serialize};
 use zadt::{
-    DataElement, DataElementDefinition, DataElementFieldLabel, DataElementProperties,
-    DataElementPropertiesV2, DataElementTypeKind, ObjectRef, ObjectType,
+    DataElementDefinition, DataElementFieldLabel, DataElementProperties, DataElementTypeKind,
 };
 
-use crate::{ObjectFormat, ProjectionError};
+use crate::ProjectionError;
 
 const FORMAT_VERSION: &str = "1";
 const DATA_TYPES: &[&str] = &[
@@ -336,7 +335,7 @@ pub(crate) fn render_data_element_properties(
 }
 
 fn document_from_properties(
-    properties: &DataElementPropertiesV2,
+    properties: &DataElementProperties,
 ) -> Result<AffDataElement, ProjectionError> {
     let definition = &properties.definition;
     let category = AffDataElementCategory::from(definition.type_kind);
@@ -412,37 +411,6 @@ pub(crate) fn merge_data_element_properties(
     }
     properties.definition = definition;
     Ok(merged)
-}
-
-pub(crate) fn validate_data_element_binding(
-    object: &ObjectRef<DataElement>,
-    properties: &DataElementProperties,
-) -> Result<(), ProjectionError> {
-    let properties = properties.properties();
-    if !properties.name.eq_ignore_ascii_case(object.name())
-        || !properties
-            .reference
-            .name()
-            .eq_ignore_ascii_case(object.name())
-    {
-        return Err(ProjectionError::BindingNameMismatch {
-            projected_name: object.name().to_owned(),
-            repository_name: properties.name.clone(),
-        });
-    }
-    if properties.object_type != DataElement::WORKBENCH_TYPE {
-        return Err(ProjectionError::BindingTypeMismatch {
-            projected_type: ObjectFormat::DataElement.object_type(),
-            repository_type: properties.object_type.clone(),
-        });
-    }
-    if properties.reference != *object {
-        return Err(ProjectionError::BindingResourceMismatch {
-            projected_uri: object.uri().to_string(),
-            properties_uri: properties.reference.uri().to_string(),
-        });
-    }
-    Ok(())
 }
 
 impl AffDataElement {
@@ -772,8 +740,8 @@ mod tests {
     use http::{HeaderMap, StatusCode};
     use serde_json::{Value, json};
     use zadt::{
-        AdtResponse, AdtUri, DataElementDocumentationStatus, ObjectPropertiesQuery, Operation,
-        OperationResponse, Ready, RepositoryContentQuery,
+        AdtResponse, AdtUri, DataElement, DataElementDocumentationStatus, ObjectPropertiesQuery,
+        ObjectRef, ObjectType, Operation, OperationResponse, Ready, RepositoryContentQuery,
     };
 
     use super::*;
@@ -1055,21 +1023,6 @@ mod tests {
         let merged = merge_data_element_properties(&original, &content).unwrap();
 
         assert_eq!(merged, original);
-    }
-
-    #[test]
-    fn rejects_properties_for_another_bound_object() {
-        let object = properties().properties().reference.clone();
-        let mut properties = properties();
-        validate_data_element_binding(&object, &properties).unwrap();
-
-        properties.properties_mut().reference =
-            reference("ZTFRWTFRT", "/sap/bc/adt/ddic/dataelements/zother");
-
-        assert!(matches!(
-            validate_data_element_binding(&object, &properties),
-            Err(ProjectionError::BindingResourceMismatch { .. })
-        ));
     }
 
     #[test]

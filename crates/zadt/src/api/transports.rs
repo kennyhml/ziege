@@ -2,10 +2,10 @@ use derive_builder::Builder;
 use http::{Method, StatusCode, header};
 
 use crate::{
-    AdtRequest, AdtUri, CategoryId, Client, CtsError, MediaVersionNegotiation, ObjectError,
-    Operation, OperationError, OperationResponse, PostAction, Ready, ResponseError, Stateless,
-    TransportCheckResult, TransportCreation, TransportKind, TransportNumber, TransportRequest,
-    TransportRequests,
+    AdtRequest, AdtUri, CategoryId, Client, CtsError, ObjectError, Operation, OperationError,
+    OperationResponse, PostAction, Ready, ResponseError, Stateless, TransportCheckResult,
+    TransportCreation, TransportKind, TransportNumber, TransportRequest, TransportRequests,
+    compatibility::media_types_match,
     models::{TransportCheckRequest, TransportCreateRequest},
     target::CollectionTarget,
     vocabulary::query_parameter,
@@ -34,56 +34,12 @@ const TRANSPORT_CREATE_RESULT_MEDIA_TYPE: &str =
 const PLAIN_TEXT_MEDIA_TYPE: &str = "text/plain";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct TransportCheckMediaType;
-
-impl MediaVersionNegotiation for TransportCheckMediaType {
-    const SUPPORTED: &'static [Self] = &[Self];
-
-    fn media_type(self) -> &'static str {
-        TRANSPORT_CHECK_MEDIA_TYPE
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct TransportRequestsMediaType;
-
-impl MediaVersionNegotiation for TransportRequestsMediaType {
-    const SUPPORTED: &'static [Self] = &[Self];
-
-    fn media_type(self) -> &'static str {
-        TRANSPORT_REQUESTS_MEDIA_TYPE
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct TransportRequestMediaType;
-
-impl MediaVersionNegotiation for TransportRequestMediaType {
-    const SUPPORTED: &'static [Self] = &[Self];
-
-    fn media_type(self) -> &'static str {
-        TRANSPORT_REQUEST_MEDIA_TYPE
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct TransportCreationMediaType;
-
-impl MediaVersionNegotiation for TransportCreationMediaType {
-    const SUPPORTED: &'static [Self] = &[Self];
-
-    fn media_type(self) -> &'static str {
-        TRANSPORT_CREATE_RESULT_MEDIA_TYPE
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum TransportCreateMediaVersion {
     V1,
     Legacy,
 }
 
-impl MediaVersionNegotiation for TransportCreateMediaVersion {
+impl TransportCreateMediaVersion {
     const SUPPORTED: &'static [Self] = &[Self::V1, Self::Legacy];
 
     fn media_type(self) -> &'static str {
@@ -92,25 +48,29 @@ impl MediaVersionNegotiation for TransportCreateMediaVersion {
             Self::Legacy => TRANSPORT_CREATE_LEGACY_MEDIA_TYPE,
         }
     }
-}
+    fn from_accepted(accepted: &[String]) -> Result<Self, crate::CompatibilityError> {
+        Self::SUPPORTED
+            .iter()
+            .copied()
+            .find(|version| {
+                accepted
+                    .iter()
+                    .any(|media_type| media_types_match(version.media_type(), media_type))
+            })
+            .ok_or_else(|| crate::CompatibilityError::NoCompatibleMediaType {
+                preferred: Self::SUPPORTED
+                    .iter()
+                    .map(|version| version.media_type().to_owned())
+                    .collect(),
+                accepted: accepted.to_vec(),
+            })
+    }
 
-impl TransportCreateMediaVersion {
     fn response_media_type(self) -> &'static str {
         match self {
             Self::V1 => TRANSPORT_CREATE_RESULT_MEDIA_TYPE,
             Self::Legacy => PLAIN_TEXT_MEDIA_TYPE,
         }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct PlainTextMediaType;
-
-impl MediaVersionNegotiation for PlainTextMediaType {
-    const SUPPORTED: &'static [Self] = &[Self];
-
-    fn media_type(self) -> &'static str {
-        PLAIN_TEXT_MEDIA_TYPE
     }
 }
 
@@ -244,7 +204,7 @@ impl Operation<Ready> for TransportCheck {
             });
         };
 
-        if TransportCheckMediaType::from_media_type(content_type).is_none() {
+        if !media_types_match(TRANSPORT_CHECK_MEDIA_TYPE, content_type) {
             return Err(ResponseError::UnsupportedContentType {
                 category: TRANSPORT_CHECKS_CATEGORY,
                 content_type: content_type.to_owned(),
@@ -353,7 +313,7 @@ impl Operation<Ready> for TransportsQuery {
             });
         };
 
-        if TransportRequestsMediaType::from_media_type(content_type).is_none() {
+        if !media_types_match(TRANSPORT_REQUESTS_MEDIA_TYPE, content_type) {
             return Err(ResponseError::UnsupportedContentType {
                 category: TRANSPORTS_CATEGORY,
                 content_type: content_type.to_owned(),
@@ -402,7 +362,7 @@ impl Operation<Ready> for TransportPropertiesQuery {
         let target = collection
             .target()
             .append_segments([self.transport_number.as_str()])
-            .map_err(|source| ResponseError::Object(ObjectError::InvalidTarget(source)))?;
+            .map_err(ObjectError::InvalidTarget)?;
         let mut request = AdtRequest::new(Method::GET, target);
         request.set_accept(TRANSPORT_REQUEST_MEDIA_TYPE);
         Ok(request)
@@ -426,7 +386,7 @@ impl Operation<Ready> for TransportPropertiesQuery {
             });
         };
 
-        if TransportRequestMediaType::from_media_type(content_type).is_none() {
+        if !media_types_match(TRANSPORT_REQUEST_MEDIA_TYPE, content_type) {
             return Err(ResponseError::UnsupportedContentType {
                 category: TRANSPORTS_CATEGORY,
                 content_type: content_type.to_owned(),
@@ -488,7 +448,8 @@ impl Operation<Ready> for TransportCreate {
 
     fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
         let collection = Self::TARGET.collection(client)?;
-        let media_version = TransportCreateMediaVersion::negotiate(collection)?;
+        let media_version =
+            TransportCreateMediaVersion::from_accepted(collection.accepted_media_types())?;
         let body = TransportCreateRequest::new(
             self.package.as_deref(),
             &self.description,
@@ -524,9 +485,9 @@ impl Operation<Ready> for TransportCreate {
             });
         };
 
-        if TransportCreationMediaType::from_media_type(content_type).is_some() {
+        if media_types_match(TRANSPORT_CREATE_RESULT_MEDIA_TYPE, content_type) {
             TransportCreation::parse(response.body()).map_err(Into::into)
-        } else if PlainTextMediaType::from_media_type(content_type).is_some() {
+        } else if media_types_match(PLAIN_TEXT_MEDIA_TYPE, content_type) {
             TransportCreation::parse_legacy(response.body()).map_err(Into::into)
         } else {
             Err(ResponseError::UnsupportedContentType {

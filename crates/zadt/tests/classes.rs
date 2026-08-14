@@ -12,6 +12,7 @@ const CORE_DISCOVERY_XML: &str = include_str!("fixtures/core-discovery.xml");
 const CLASS_XML: &str = include_str!("fixtures/class-cl-adt-uri-mapper-v4.xml");
 const SESSION_XML: &str = include_str!("fixtures/http-session-v3.xml");
 const SESSION_MEDIA_TYPE: &str = "application/vnd.sap.adt.core.http.session.v3+xml";
+const CLASS_PROPERTIES_ACCEPT: &str = "application/vnd.sap.adt.oo.classes.v4+xml, application/vnd.sap.adt.oo.classes.v3+xml, application/vnd.sap.adt.oo.classes.v2+xml";
 const SOURCE: &str = "CLASS cl_adt_uri_mapper DEFINITION.\nENDCLASS.\n";
 const RUN_OUTPUT: &str = "Hello from IF_OO_ADT_CLASSRUN\n";
 
@@ -83,7 +84,7 @@ async fn repository_object_properties_forward_through_the_typed_query() {
             when.method(GET)
                 .path("/sap/bc/adt/oo/classes/cl_adt_uri_mapper")
                 .query_param("version", "active")
-                .header("accept", "application/vnd.sap.adt.oo.classes.v4+xml")
+                .header("accept", CLASS_PROPERTIES_ACCEPT)
                 .header("cache-control", "no-cache");
             then.status(200)
                 .header(
@@ -109,8 +110,11 @@ async fn repository_object_properties_forward_through_the_typed_query() {
         properties.media_type(),
         "application/vnd.sap.adt.oo.classes.v4+xml"
     );
-    assert_eq!(properties.payload()["name"], "CL_ADT_URI_MAPPER");
-    assert_eq!(properties.etag().map(EntityTag::as_str), Some("class-etag"));
+    assert_eq!(properties.payload["@adtcore:name"], "CL_ADT_URI_MAPPER");
+    assert_eq!(
+        properties.etag.as_ref().map(EntityTag::as_str),
+        Some("class-etag")
+    );
     logon.assert_async().await;
     discovery.assert_async().await;
     metadata.assert_async().await;
@@ -163,7 +167,7 @@ async fn class_properties_query_converts_the_live_v4_manifest() {
             when.method(GET)
                 .path("/sap/bc/adt/oo/classes/cl_adt_uri_mapper")
                 .query_param("version", "active")
-                .header("accept", "application/vnd.sap.adt.oo.classes.v4+xml")
+                .header("accept", CLASS_PROPERTIES_ACCEPT)
                 .header("cache-control", "no-cache");
             then.status(200)
                 .header(
@@ -192,16 +196,16 @@ async fn class_properties_query_converts_the_live_v4_manifest() {
         .await
         .unwrap();
     assert_eq!(response.media_version(), ClassPropertiesVersion::V4);
-    let class = response.payload();
+    let class = &response.payload;
     let source_ref = reference.source();
     let source = source_ref.query().execute(&client).await.unwrap();
 
     assert_eq!(class.name, "CL_ADT_URI_MAPPER");
     assert_eq!(class.version, "active");
-    assert_eq!(class.package.name, "SADT_TOOLS_CORE");
+    assert_eq!(class.package.name.as_deref(), Some("SADT_TOOLS_CORE"));
     assert_eq!(class.sources.len(), 5);
     assert_eq!(
-        response.etag().map(EntityTag::as_str),
+        response.etag.as_ref().map(EntityTag::as_str),
         Some("20210406145501001000181")
     );
     assert_eq!(source.content, SOURCE);
@@ -213,7 +217,7 @@ async fn class_properties_query_converts_the_live_v4_manifest() {
 }
 
 #[tokio::test]
-async fn class_properties_query_honors_v2_and_v3_priority() {
+async fn class_properties_query_accepts_server_selected_v2_and_v3() {
     let server = MockServer::start_async().await;
     let logon = mock_logon(&server).await;
     let _core_discovery = mock_core_discovery(&server).await;
@@ -222,7 +226,8 @@ async fn class_properties_query_honors_v2_and_v3_priority() {
         .mock_async(|when, then| {
             when.method(GET)
                 .path("/sap/bc/adt/oo/classes/cl_adt_uri_mapper")
-                .header("accept", "application/vnd.sap.adt.oo.classes.v2+xml");
+                .query_param("version", "active")
+                .header("accept", CLASS_PROPERTIES_ACCEPT);
             then.status(200)
                 .header(
                     "content-type",
@@ -235,7 +240,8 @@ async fn class_properties_query_honors_v2_and_v3_priority() {
         .mock_async(|when, then| {
             when.method(GET)
                 .path("/sap/bc/adt/oo/classes/cl_adt_uri_mapper")
-                .header("accept", "application/vnd.sap.adt.oo.classes.v3+xml");
+                .query_param("version", "inactive")
+                .header("accept", CLASS_PROPERTIES_ACCEPT);
             then.status(200)
                 .header(
                     "content-type",
@@ -249,14 +255,14 @@ async fn class_properties_query_honors_v2_and_v3_priority() {
     let reference = client.object::<Class>("CL_ADT_URI_MAPPER").unwrap();
     let response = reference
         .query()
-        .priority([ClassPropertiesVersion::V2])
+        .version(ObjectVersion::Active)
         .execute(&client)
         .await
         .unwrap();
     assert_eq!(response.media_version(), ClassPropertiesVersion::V2);
     let response = reference
         .query()
-        .priority([ClassPropertiesVersion::V3])
+        .version(ObjectVersion::Inactive)
         .execute(&client)
         .await
         .unwrap();
@@ -279,7 +285,7 @@ async fn class_properties_query_returns_not_modified_for_a_current_etag() {
             when.method(GET)
                 .path("/sap/bc/adt/oo/classes/cx_root")
                 .query_param("version", "active")
-                .header("accept", "application/vnd.sap.adt.oo.classes.v4+xml")
+                .header("accept", CLASS_PROPERTIES_ACCEPT)
                 .header("if-none-match", "20180326130103001000061");
             then.status(304).header("etag", "20180326130103001000061");
         })

@@ -6,8 +6,8 @@ use uuid::Uuid;
 
 use super::{Execute, Operation, OperationKind, Stateful, Stateless, UserSession};
 use crate::{
-    AdtRequest, AdtResponse, AdtUri, CategoryId, Client, CompatibilityError,
-    MediaVersionNegotiation, OperationError, OperationResponse, Ready, ResponseError,
+    AdtRequest, AdtResponse, AdtUri, CategoryId, Client, CompatibilityError, OperationError,
+    OperationResponse, Ready, ResponseError,
 };
 
 const BATCH_CATEGORY: CategoryId = CategoryId {
@@ -16,23 +16,6 @@ const BATCH_CATEGORY: CategoryId = CategoryId {
 };
 const BATCH_MEDIA_TYPE: &str = "multipart/mixed";
 const APPLICATION_HTTP: &str = "application/http";
-
-/// Unlikely these will ever be a V2 of batching but might as well do
-/// this the proper way, never know.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum BatchMediaVersion {
-    MultipartMixed,
-}
-
-impl MediaVersionNegotiation for BatchMediaVersion {
-    const SUPPORTED: &'static [Self] = &[Self::MultipartMixed];
-
-    fn media_type(self) -> &'static str {
-        match self {
-            Self::MultipartMixed => BATCH_MEDIA_TYPE,
-        }
-    }
-}
 
 /// To be able to have a [`BatchOperation`] stick a bunch of operations
 /// into a collection, we must be able to reference them by some common trait.
@@ -97,7 +80,6 @@ where
     /// Creates an empty batch using the endpoint advertised to a ready client.
     pub(crate) fn new(client: &Client<Ready>) -> Result<Self, CompatibilityError> {
         let collection = client.require_core_collection(BATCH_CATEGORY)?;
-        BatchMediaVersion::negotiate(collection)?;
 
         Ok(Self {
             identity: Arc::new(()),

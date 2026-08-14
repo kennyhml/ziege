@@ -52,19 +52,17 @@ impl Operation<Ready> for ObjectRun {
     fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
         let template = self.run.target.template(client)?;
         if !template.has_variable(self.run.name_variable) {
-            return Err(ResponseError::Object(ObjectError::InvalidTemplate {
+            return Err(ObjectError::InvalidTemplate {
                 template: template.as_str().to_owned(),
                 reason: format!("missing `{}` variable", self.run.name_variable),
-            })
+            }
             .into());
         }
         if self.profiler_id.is_some() && !template.has_variable(query_parameter::PROFILER_ID) {
-            return Err(
-                ResponseError::Object(ObjectError::UnsupportedTemplateParameter {
-                    parameter: query_parameter::PROFILER_ID,
-                })
-                .into(),
-            );
+            return Err(ObjectError::UnsupportedTemplateParameter {
+                parameter: query_parameter::PROFILER_ID,
+            }
+            .into());
         }
 
         let mut variables = HashMap::from([(
@@ -77,7 +75,7 @@ impl Operation<Ready> for ObjectRun {
                 Value::String(profiler_id.clone()),
             );
         }
-        let (target, query) = template.expand(&variables).map_err(ResponseError::Object)?;
+        let (target, query) = template.expand(&variables)?;
         let mut request = AdtRequest::new(Method::POST, target);
         for (name, value) in query {
             request.push_query(name, value);
@@ -160,7 +158,7 @@ impl<T: ObjectType> ObjectRef<T> {
 impl<T: HasSource> ObjectRef<T> {
     /// Returns the objects conventional source resource.
     pub fn source(&self) -> SourceRef {
-        self.source_from_path(T::SOURCE_PATH)
+        SourceRef::from_object_path(self.erase(), T::SOURCE_PATH)
     }
 }
 

@@ -1,9 +1,9 @@
 use super::{
     Class, DataElement, Erased, GlobalWorkbenchType, Include, ObjectRef, ObjectVersion, Package,
-    Program, ReadProperties, RunCapability, UpdateProperties, WritableProperties,
+    Program, PropertyModel, ReadProperties, RunCapability, UpdateProperties,
 };
 use crate::{
-    JsonObjectProperties, MediaVersionNegotiation,
+    JsonObjectProperties,
     client::{Client, Ready},
     error::{ObjectError, OperationError, ResponseError},
     operation::{Operation, OperationResponse},
@@ -38,7 +38,6 @@ pub(crate) trait RuntimeObjectTypeDescriptor: std::fmt::Debug + Sync {
 
     fn properties_to_xml(
         &self,
-        object: &ObjectRef<Erased>,
         media_type: &'static str,
         payload: serde_json::Value,
     ) -> Result<String, ObjectError>;
@@ -61,9 +60,9 @@ pub(crate) fn object_type_descriptor(
         .find(|descriptor| &descriptor.object_type() == object_type)
 }
 
-pub(crate) fn unsupported_update(object: &ObjectRef<Erased>) -> ObjectError {
+pub(crate) fn unsupported_update(object_type: GlobalWorkbenchType) -> ObjectError {
     ObjectError::UnsupportedCapability {
-        object_type: object.object_type().clone(),
+        object_type,
         capability: "object properties update",
     }
 }
@@ -77,10 +76,10 @@ where
     T: ReadProperties,
 {
     let resource = object.typed::<T>().ok_or_else(|| {
-        OperationError::Response(ResponseError::Object(ObjectError::UnexpectedObjectType {
+        OperationError::Object(ObjectError::UnexpectedObjectType {
             expected: T::WORKBENCH_TYPE,
             actual: object.object_type().clone(),
-        }))
+        })
     })?;
     let mut query = resource.query();
     if let Some(version) = version {
@@ -103,33 +102,30 @@ where
             actual: object.object_type().clone(),
         })?;
     let properties = resource.query().decode(response)?;
-    let (_, media_version, etag, payload) = properties.into_parts();
-    Ok(JsonObjectProperties::new(
-        object.clone(),
-        media_version.media_type(),
-        etag,
-        serde_json::to_value(payload)?,
-    ))
+    Ok(JsonObjectProperties {
+        media_type: T::Properties::media_type(properties.media_version),
+        etag: properties.etag,
+        payload: serde_json::to_value(properties.payload)?,
+    })
 }
 
 pub(crate) fn properties_to_xml<T>(
-    object: &ObjectRef<Erased>,
     _media_type: &'static str,
     payload: serde_json::Value,
 ) -> Result<String, ObjectError>
 where
     T: UpdateProperties,
-    T::Properties: serde::de::DeserializeOwned + WritableProperties<T>,
 {
-    let resource = object
-        .typed::<T>()
-        .ok_or_else(|| ObjectError::UnexpectedObjectType {
-            expected: T::WORKBENCH_TYPE,
-            actual: object.object_type().clone(),
-        })?;
     let properties: T::Properties =
         serde_json::from_value(payload).map_err(ObjectError::InvalidPropertiesJson)?;
-    properties.to_xml(&resource)
+    T::Properties::XML_NAMESPACES
+        .iter()
+        .fold(
+            serde_xml_rs::SerdeXml::new(),
+            |serializer, &(prefix, namespace)| serializer.namespace(prefix, namespace),
+        )
+        .to_string(&properties)
+        .map_err(ObjectError::InvalidRequest)
 }
 
 #[cfg(test)]

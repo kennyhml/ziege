@@ -1,39 +1,6 @@
 use thiserror::Error;
 
-use crate::{CategoryId, Collection};
-
-/// Describes media-type versions that can participate in content negotiation.
-///
-/// [`negotiate`] selects between the caller's preferred versions and
-/// the representations advertised by the server.
-pub trait MediaVersionNegotiation: Copy + Eq + Send + Sync + 'static {
-    /// Media-type versions supported by this client.
-    const SUPPORTED: &'static [Self];
-
-    /// Returns the media type identifying this version.
-    fn media_type(self) -> &'static str;
-
-    /// Selects this client's preferred version accepted by a discovered collection.
-    fn negotiate(collection: &Collection) -> Result<Self, CompatibilityError> {
-        negotiate(Self::SUPPORTED, collection.accepted_media_types())
-    }
-
-    /// Finds the supported version identified by a media type.
-    fn from_media_type(media_type: &str) -> Option<Self> {
-        Self::SUPPORTED
-            .iter()
-            .copied()
-            .find(|version| version.matches_media_type(media_type))
-    }
-
-    /// Reports whether a media type identifies this version.
-    ///
-    /// The default compares the essence case-insensitively and every parameter
-    /// except `charset` by name and value, independently of formatting order.
-    fn matches_media_type(self, candidate: &str) -> bool {
-        media_types_match(self.media_type(), candidate)
-    }
-}
+use crate::CategoryId;
 
 struct ParsedMediaType<'a> {
     essence: &'a str,
@@ -62,7 +29,7 @@ fn parse_media_type(value: &str) -> Option<ParsedMediaType<'_>> {
     })
 }
 
-fn media_types_match(expected: &str, candidate: &str) -> bool {
+pub(crate) fn media_types_match(expected: &str, candidate: &str) -> bool {
     let (Some(expected), Some(candidate)) =
         (parse_media_type(expected), parse_media_type(candidate))
     else {
@@ -100,30 +67,6 @@ fn media_types_match(expected: &str, candidate: &str) -> bool {
             })
 }
 
-/// Finds the first preferred media type accepted by the backend.
-pub fn negotiate<V>(preferred: &[V], accepted: &[String]) -> Result<V, CompatibilityError>
-where
-    V: MediaVersionNegotiation,
-{
-    let candidates: Vec<V> = accepted
-        .iter()
-        .map(String::as_str)
-        .filter_map(V::from_media_type)
-        .collect();
-
-    preferred
-        .iter()
-        .copied()
-        .find(|version| candidates.contains(version))
-        .ok_or_else(|| CompatibilityError::NoCompatibleMediaType {
-            preferred: preferred
-                .iter()
-                .map(|version| version.media_type().to_owned())
-                .collect(),
-            accepted: accepted.to_vec(),
-        })
-}
-
 /// An error establishing protocol compatibility with an ADT backend.
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -146,39 +89,13 @@ pub enum CompatibilityError {
 mod tests {
     use super::*;
 
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-    struct Version(&'static str);
-
-    impl Version {
-        const V2: Self = Self("application/vnd.test.v2+xml");
-        const V3: Self = Self("application/vnd.test.v3+xml");
-    }
-
-    impl MediaVersionNegotiation for Version {
-        const SUPPORTED: &'static [Self] = &[Self::V3, Self::V2];
-
-        fn media_type(self) -> &'static str {
-            self.0
-        }
-    }
-
-    #[test]
-    fn selects_the_first_preferred_media_type_accepted_by_the_backend() {
-        let accepted = vec!["application/vnd.test.v2+xml; charset=utf-8".to_owned()];
-
-        let version = negotiate(&[Version::V3, Version::V2], &accepted).unwrap();
-
-        assert_eq!(version, Version::V2);
-    }
-
     #[test]
     fn matches_semantic_parameters_independently_of_charset_and_formatting() {
-        let version = Version(
-            "application/vnd.sap.as+xml; charset=utf-8; \
-             dataname=com.sap.adt.CreateCorrectionRequest.v1",
-        );
+        let expected = "application/vnd.sap.as+xml; charset=utf-8; \
+             dataname=com.sap.adt.CreateCorrectionRequest.v1";
 
-        assert!(version.matches_media_type(
+        assert!(media_types_match(
+            expected,
             "APPLICATION/VND.SAP.AS+XML;dataname=com.sap.adt.CreateCorrectionRequest.v1; \
              charset=UTF-8"
         ));
@@ -186,42 +103,26 @@ mod tests {
 
     #[test]
     fn rejects_different_or_unexpected_semantic_parameters() {
-        let legacy = Version(
-            "application/vnd.sap.as+xml; \
-             dataname=com.sap.adt.CreateCorrectionRequest",
-        );
+        let legacy = "application/vnd.sap.as+xml; \
+             dataname=com.sap.adt.CreateCorrectionRequest";
         let versioned =
             "application/vnd.sap.as+xml; dataname=com.sap.adt.CreateCorrectionRequest.v1";
 
-        assert!(!legacy.matches_media_type(versioned));
-        assert!(!Version("application/vnd.sap.as+xml").matches_media_type(versioned));
+        assert!(!media_types_match(legacy, versioned));
+        assert!(!media_types_match("application/vnd.sap.as+xml", versioned));
     }
 
     #[test]
     fn matches_version_media_type_parameters_exactly() {
-        let quick_fix = Version("application/vnd.sap.adt.quickfixes.evaluation+xml;version=1.0.0");
+        let quick_fix = "application/vnd.sap.adt.quickfixes.evaluation+xml;version=1.0.0";
 
-        assert!(quick_fix.matches_media_type(
+        assert!(media_types_match(
+            quick_fix,
             "application/vnd.sap.adt.quickfixes.evaluation+xml; version=1.0.0"
         ));
-        assert!(!quick_fix.matches_media_type(
+        assert!(!media_types_match(
+            quick_fix,
             "application/vnd.sap.adt.quickfixes.evaluation+xml; version=2.0.0"
-        ));
-    }
-
-    #[test]
-    fn reports_both_sides_when_no_media_type_is_compatible() {
-        let accepted = vec!["application/vnd.test.v1+xml".to_owned()];
-
-        let error = negotiate(&[Version::V3, Version::V2], &accepted).unwrap_err();
-
-        assert!(matches!(
-            error,
-            CompatibilityError::NoCompatibleMediaType {
-                preferred,
-                accepted,
-            } if preferred == [Version::V3.0, Version::V2.0]
-                && accepted == ["application/vnd.test.v1+xml"]
         ));
     }
 }

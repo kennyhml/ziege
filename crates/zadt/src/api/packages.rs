@@ -109,10 +109,10 @@ fn expand_tree_target(
     let template = AdtUriTemplate::new(template);
     for expected in ["packagename", "type"] {
         if !template.has_variable(expected) {
-            return Err(ResponseError::Object(ObjectError::InvalidTemplate {
+            return Err(ObjectError::InvalidTemplate {
                 template: template.as_str().to_owned(),
                 reason: format!("missing `{expected}` query variable"),
-            })
+            }
             .into());
         }
     }
@@ -123,13 +123,13 @@ fn expand_tree_target(
         ),
         ("type".to_owned(), Value::String(kind.as_str().to_owned())),
     ]);
-    let (target, query) = template.expand(&variables).map_err(ResponseError::Object)?;
+    let (target, query) = template.expand(&variables)?;
     for expected in ["packagename", "type"] {
         if !query.iter().any(|(name, _)| name == expected) {
-            return Err(ResponseError::Object(ObjectError::InvalidTemplate {
+            return Err(ObjectError::InvalidTemplate {
                 template: template.as_str().to_owned(),
                 reason: format!("missing `{expected}` query variable"),
-            })
+            }
             .into());
         }
     }
@@ -201,10 +201,10 @@ mod tests {
 
         assert!(matches!(
             error,
-            OperationError::Response(ResponseError::Object(ObjectError::InvalidTemplate {
+            OperationError::Object(ObjectError::InvalidTemplate {
                 reason,
                 ..
-            })) if reason.contains("`type`")
+            }) if reason.contains("`type`")
         ));
     }
 

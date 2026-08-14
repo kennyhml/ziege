@@ -15,6 +15,8 @@ const SUB_TREE_XML: &str = include_str!("fixtures/package-tree-sub.xml");
 const SETTINGS_XML: &str = include_str!("fixtures/package-settings.xml");
 const SESSION_XML: &str = include_str!("fixtures/http-session-v3.xml");
 const SESSION_MEDIA_TYPE: &str = "application/vnd.sap.adt.core.http.session.v3+xml";
+const PACKAGE_PROPERTIES_ACCEPT: &str =
+    "application/vnd.sap.adt.packages.v2+xml, application/vnd.sap.adt.packages.v1+xml";
 
 async fn mock_logon(server: &MockServer) -> Mock<'_> {
     server
@@ -59,7 +61,7 @@ async fn ready_client(server: &MockServer) -> Client<Ready> {
 }
 
 #[tokio::test]
-async fn package_properties_use_the_discovered_v2_contract() {
+async fn package_properties_advertise_all_supported_contracts() {
     let server = MockServer::start_async().await;
     let logon = mock_logon(&server).await;
     let discovery = mock_discovery(&server).await;
@@ -68,7 +70,7 @@ async fn package_properties_use_the_discovered_v2_contract() {
         .mock_async(|when, then| {
             when.method(GET)
                 .path("/sap/bc/adt/packages/sadt_tools_core")
-                .header("accept", "application/vnd.sap.adt.packages.v2+xml")
+                .header("accept", PACKAGE_PROPERTIES_ACCEPT)
                 .header("cache-control", "no-cache");
             then.status(200)
                 .header(
@@ -84,12 +86,11 @@ async fn package_properties_use_the_discovered_v2_contract() {
     let reference = client.object::<Package>("sadt_tools_core").unwrap();
     let response = reference.query().execute(&client).await.unwrap();
     assert_eq!(response.media_version(), PackagePropertiesVersion::V2);
-    let package = response.payload();
+    let package = &response.payload;
 
     assert_eq!(package.name, "SADT_TOOLS_CORE");
-    assert_eq!(response.object(), &reference);
     assert_eq!(
-        response.etag().map(zadt::EntityTag::as_str),
+        response.etag.as_ref().map(zadt::EntityTag::as_str),
         Some("package-etag")
     );
     assert_eq!(

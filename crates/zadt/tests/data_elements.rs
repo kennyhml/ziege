@@ -92,13 +92,12 @@ async fn data_element_properties_use_one_read_write_representation() {
         .unwrap();
 
     assert_eq!(response.media_version(), DataElementPropertiesVersion::V2);
-    assert_eq!(response.object(), &reference);
     assert_eq!(
-        response.etag().map(|etag| etag.as_str()),
+        response.etag.as_ref().map(|etag| etag.as_str()),
         Some("data-element-etag")
     );
     assert_eq!(
-        response.payload().definition.type_name.as_deref(),
+        response.payload.definition.type_name.as_deref(),
         Some("CHAR0008")
     );
 
@@ -205,7 +204,7 @@ async fn runtime_data_element_update_reuses_json_properties_in_the_lock_session(
     let reference = client.object::<DataElement>("ZTFRWTFRT").unwrap();
     let object = reference.erase();
     let mut properties = object.query().unwrap().execute(&client).await.unwrap();
-    properties.payload_mut()["description"] = "Updated description".into();
+    properties.payload["@adtcore:description"] = "Updated description".into();
     let session = client.create_user_session();
     let object_lock = object
         .lock(AccessMode::Modify)
@@ -213,7 +212,7 @@ async fn runtime_data_element_update_reuses_json_properties_in_the_lock_session(
         .await
         .unwrap();
     let result = object
-        .update_properties(&object_lock, properties)
+        .update(&object_lock, properties)
         .unwrap()
         .execute(&session)
         .await
@@ -226,15 +225,13 @@ async fn runtime_data_element_update_reuses_json_properties_in_the_lock_session(
         .unwrap();
     session.close().await.unwrap();
 
-    assert_eq!(result.etag.as_deref(), Some("data-element-etag-2"));
-    let canonical = result.properties.unwrap();
-    assert_eq!(canonical.object(), &object);
+    let canonical = result.unwrap();
     assert_eq!(canonical.media_type(), DATA_ELEMENT_MEDIA_TYPE);
     assert_eq!(
-        canonical.etag().map(|etag| etag.as_str()),
+        canonical.etag.as_ref().map(|etag| etag.as_str()),
         Some("data-element-etag-2")
     );
-    assert_eq!(canonical.payload()["description"], "tfarFAR");
+    assert_eq!(canonical.payload["@adtcore:description"], "tfarFAR");
     logon.assert_async().await;
     discovery.assert_async().await;
     csrf.assert_async().await;

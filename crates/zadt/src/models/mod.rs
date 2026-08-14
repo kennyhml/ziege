@@ -14,27 +14,24 @@ pub(crate) use repository::RepositoryContentRequest;
 pub(crate) use session::parse_session_information;
 pub(crate) use transports::{TransportCheckRequest, TransportCreateRequest};
 
-pub use classes::{
-    ClassObjectReference, ClassProperties, ClassPropertiesV2, ClassPropertiesV3, ClassPropertiesV4,
-    ClassPropertiesVersion, ClassRunResult, ClassSourceProperties,
-};
+pub use classes::{ClassProperties, ClassPropertiesVersion, ClassRunResult, ClassSourceProperties};
 pub use data_elements::{
-    DataElementDefinition, DataElementLink, DataElementObjectReference, DataElementProperties,
-    DataElementPropertiesV2, DataElementPropertiesVersion,
+    DataElementDefinition, DataElementProperties, DataElementPropertiesVersion,
 };
 pub use discovery::{Capabilities, Category, Collection, TemplateLink, Workspace};
 pub use exception::{AdtException, AdtExceptionProperty};
-pub use object::{AccessMode, ObjectLock, ObjectRunResult, SourceCode, SourceUpdateResult};
+pub use object::{
+    AccessMode, AdvertisedObjectReference, ObjectLock, ObjectRunResult, SourceCode,
+    SourceUpdateResult,
+};
 pub use packages::{
     PackageAssignment, PackageAttributes, PackageInterfaceReference, PackageProperties,
-    PackagePropertiesV1, PackagePropertiesV2, PackagePropertiesVersion, PackageReference,
-    PackageSettings, PackageTransport, PackageTree, PackageTreeKind, PackageTreeNode,
-    PackageUseAccess,
+    PackagePropertiesVersion, PackageReference, PackageSettings, PackageTransport, PackageTree,
+    PackageTreeKind, PackageTreeNode, PackageUseAccess,
 };
 pub use programs::{
-    IncludeProperties, IncludePropertiesV2, IncludePropertyVersion, ProgramProperties,
-    ProgramPropertiesV2, ProgramPropertiesV3, ProgramPropertiesVersion, ProgramRunResult,
-    SyntaxConfiguration, SyntaxLanguage,
+    IncludeProperties, IncludePropertyVersion, ProgramProperties, ProgramPropertiesVersion,
+    ProgramRunResult, SyntaxConfiguration, SyntaxLanguage,
 };
 pub use repository::{
     RepositoryContent, RepositoryFacet, RepositoryFacetDefinition, RepositoryFacetValuesLink,

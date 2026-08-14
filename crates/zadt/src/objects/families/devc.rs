@@ -1,5 +1,4 @@
-use super::super::ObjectRef;
-use crate::models::{PackageProperties, PackagePropertiesVersion};
+use crate::models::PackageProperties;
 use zadt_macros::object_type;
 
 /// The package (devclass) object type.
@@ -9,17 +8,7 @@ use zadt_macros::object_type;
         scheme = "http://www.sap.com/wbobj/packages",
         term = "devck",
     ),
-    capabilities(ReadProperties(
-        media_version = PackagePropertiesVersion,
-        model = PackageProperties,
-    )),
+    capabilities(ReadProperties(model = PackageProperties)),
 )]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Package;
-
-impl ObjectRef<Package> {
-    #[cfg(test)]
-    pub(crate) fn for_test(name: &str, uri: crate::AdtUri) -> Self {
-        Self::from_parts(name.to_ascii_uppercase(), uri)
-    }
-}

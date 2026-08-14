@@ -45,7 +45,6 @@ struct Collection {
 }
 
 struct Properties {
-    media_version: Type,
     model: Type,
 }
 
@@ -184,15 +183,10 @@ fn parse_capabilities(
 }
 
 fn parse_properties(input: ParseStream<'_>) -> Result<Properties> {
-    let mut media_version = None;
     let mut model = None;
     while !input.is_empty() {
         let key: Ident = input.parse()?;
         match key.to_string().as_str() {
-            "media_version" => {
-                input.parse::<Token![=]>()?;
-                set_once(&mut media_version, input.parse()?, &key)?;
-            }
             "model" => {
                 input.parse::<Token![=]>()?;
                 set_once(&mut model, input.parse()?, &key)?;
@@ -202,7 +196,6 @@ fn parse_properties(input: ParseStream<'_>) -> Result<Properties> {
         parse_optional_comma(input)?;
     }
     Ok(Properties {
-        media_version: required(media_version, input, "media_version")?,
         model: required(model, input, "model")?,
     })
 }
@@ -255,10 +248,7 @@ fn expand_object_type(
         update_properties,
     } = attributes;
     let Collection { scheme, term } = collection;
-    let Properties {
-        media_version,
-        model,
-    } = read_properties;
+    let Properties { model } = read_properties;
 
     let descriptor = format_ident!("__Zadt{}Descriptor", ident);
     let descriptor_static = format_ident!(
@@ -293,14 +283,13 @@ fn expand_object_type(
     let runtime_to_xml = if update_properties {
         quote! {
             crate::objects::descriptors::properties_to_xml::<#ident>(
-                object,
                 media_type,
                 payload,
             )
         }
     } else {
         quote! {
-            Err(crate::objects::descriptors::unsupported_update(object))
+            Err(crate::objects::descriptors::unsupported_update(self.object_type()))
         }
     };
     Ok(quote! {
@@ -316,15 +305,11 @@ fn expand_object_type(
                 term: #term,
             };
 
-            fn marker() -> Self {
-                Self
-            }
         }
 
         #source_impl
 
         impl crate::objects::ReadProperties for #ident {
-            type MediaVersion = #media_version;
             type Properties = #model;
         }
 
@@ -388,7 +373,6 @@ fn expand_object_type(
 
             fn properties_to_xml(
                 &self,
-                object: &crate::objects::ObjectRef<crate::objects::Erased>,
                 media_type: &'static str,
                 payload: serde_json::Value,
             ) -> Result<String, crate::error::ObjectError> {
@@ -512,21 +496,18 @@ mod tests {
 
     #[test]
     fn parses_update_properties() {
-        let attributes = attributes(
-            "ReadProperties(media_version = PropertiesVersion, model = Properties), UpdateProperties",
-        )
-        .unwrap();
+        let attributes =
+            attributes("ReadProperties(model = Properties), UpdateProperties").unwrap();
 
         assert!(attributes.update_properties);
     }
 
     #[test]
     fn rejects_duplicate_update_properties() {
-        let error = attributes(
-            "ReadProperties(media_version = PropertiesVersion, model = Properties), UpdateProperties, UpdateProperties",
-        )
-        .err()
-        .unwrap();
+        let error =
+            attributes("ReadProperties(model = Properties), UpdateProperties, UpdateProperties")
+                .err()
+                .unwrap();
 
         assert!(
             error

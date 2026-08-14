@@ -24,15 +24,14 @@ pub use api::packages::{PackageSettingsQuery, PackageTreeQuery};
 pub use api::programs::ProgramRun;
 pub use api::properties::{
     JsonObjectProperties, JsonObjectPropertiesQuery, JsonObjectPropertiesUpdate, ObjectProperties,
-    ObjectPropertiesQuery, ObjectPropertiesUpdate, ObjectPropertiesUpdateResult,
-    RawObjectProperties,
+    ObjectPropertiesQuery, ObjectPropertiesUpdate,
 };
 pub use api::repository::{
     RepositoryContentOperation, RepositoryContentQuery, RepositoryContentQueryBuilder,
     RepositoryContentQueryBuilderError, RepositoryFacetsQuery, RepositoryObjectPropertiesQuery,
     RepositoryObjectPropertiesQueryBuilder, RepositoryObjectPropertiesQueryBuilderError,
 };
-pub use api::session::{Logon, SessionMediaVersion};
+pub use api::session::Logon;
 pub use api::transports::{
     QueryTransportKind, TransportCheck, TransportCheckBuilder, TransportCheckBuilderError,
     TransportCheckLinkUpMode, TransportCheckOperation, TransportCreate, TransportCreateBuilder,
@@ -40,7 +39,7 @@ pub use api::transports::{
     TransportsQueryBuilderError,
 };
 pub use client::{Client, ClientState, Initial, Ready};
-pub use compatibility::{CompatibilityError, MediaVersionNegotiation, negotiate};
+pub use compatibility::CompatibilityError;
 #[cfg(feature = "reqwest")]
 pub use error::ReqwestTransportBuildError;
 pub use error::{
@@ -48,29 +47,26 @@ pub use error::{
     ResponseError, TransportError,
 };
 pub use models::{
-    AccessMode, AdtException, AdtExceptionProperty, Capabilities, Category, ClassObjectReference,
-    ClassProperties, ClassPropertiesV2, ClassPropertiesV3, ClassPropertiesV4,
-    ClassPropertiesVersion, ClassRunResult, ClassSourceProperties, Collection,
-    DataElementDefinition, DataElementLink, DataElementObjectReference, DataElementProperties,
-    DataElementPropertiesV2, DataElementPropertiesVersion, IncludeProperties, IncludePropertiesV2,
-    IncludePropertyVersion, ObjectLock, ObjectRunResult, PackageAssignment, PackageAttributes,
-    PackageInterfaceReference, PackageProperties, PackagePropertiesV1, PackagePropertiesV2,
-    PackagePropertiesVersion, PackageReference, PackageSettings, PackageTransport, PackageTree,
-    PackageTreeKind, PackageTreeNode, PackageUseAccess, ProgramProperties, ProgramPropertiesV2,
-    ProgramPropertiesV3, ProgramPropertiesVersion, ProgramRunResult, RepositoryContent,
-    RepositoryFacet, RepositoryFacetDefinition, RepositoryFacetValuesLink, RepositoryFacets,
-    RepositoryObjectEntry, RepositoryObjectProperties, RepositoryObjectSummary,
-    RepositoryPreselection, RepositoryPreselectionInfo, RepositoryProperty,
-    RepositoryVirtualFolder, SessionInformation, SessionUri, SourceCode, SourceUpdateResult,
-    SyntaxConfiguration, SyntaxLanguage, SystemInformationLink, TemplateLink,
+    AccessMode, AdtException, AdtExceptionProperty, AdvertisedObjectReference, Capabilities,
+    Category, ClassProperties, ClassPropertiesVersion, ClassRunResult, ClassSourceProperties,
+    Collection, DataElementDefinition, DataElementProperties, DataElementPropertiesVersion,
+    IncludeProperties, IncludePropertyVersion, ObjectLock, ObjectRunResult, PackageAssignment,
+    PackageAttributes, PackageInterfaceReference, PackageProperties, PackagePropertiesVersion,
+    PackageReference, PackageSettings, PackageTransport, PackageTree, PackageTreeKind,
+    PackageTreeNode, PackageUseAccess, ProgramProperties, ProgramPropertiesVersion,
+    ProgramRunResult, RepositoryContent, RepositoryFacet, RepositoryFacetDefinition,
+    RepositoryFacetValuesLink, RepositoryFacets, RepositoryObjectEntry, RepositoryObjectProperties,
+    RepositoryObjectSummary, RepositoryPreselection, RepositoryPreselectionInfo,
+    RepositoryProperty, RepositoryVirtualFolder, SessionInformation, SessionUri, SourceCode,
+    SourceUpdateResult, SyntaxConfiguration, SyntaxLanguage, SystemInformationLink, TemplateLink,
     TransportCheckMessage, TransportCheckResult, TransportCreation, TransportCreationMessage,
     TransportKind, TransportNumber, TransportObjectKey, TransportObjectLock, TransportProject,
     TransportRequest, TransportRequests, TransportStatus, TransportTask, Workspace,
 };
 pub use objects::{
     Class, ClassSourceComponent, DataElement, Erased, GlobalWorkbenchType, HasSource, Include,
-    InvalidWorkbenchType, ObjectRef, ObjectType, ObjectVersion, Package, Program, ReadProperties,
-    UpdateProperties, WritableProperties,
+    InvalidWorkbenchType, ObjectRef, ObjectType, ObjectVersion, Package, Program, PropertyModel,
+    ReadProperties, UpdateProperties,
 };
 pub use operation::{
     BatchError, BatchKey, BatchOperation, BatchResponses, Batched, Execute, IfNoneMatch, Operation,
@@ -79,7 +75,7 @@ pub use operation::{
 };
 pub use protocol::{AdtRequest, AdtResponse, EntityTag};
 pub use resource::{
-    AdtLink, AdtLinkError, EnhancementImplementationsRef, HtmlSourceRef,
+    AdtLink, AdtLinkError, AdvertisedLink, EnhancementImplementationsRef, HtmlSourceRef,
     ObjectEnhancementOptionsRef, ObjectStateRef, ObjectStructureRef, OwnedResourceRef, ParserRef,
     Relations, SourceEnhancementOptionsRef, SourceRef, SourceVersionsRef, TextElementsRef,
 };

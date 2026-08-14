@@ -233,7 +233,7 @@ impl RepositoryObjectEntry {
             });
         }
 
-        Ok(ObjectRef::from_parts(
+        Ok(ObjectRef::new(
             self.name.clone(),
             self.reference.uri().clone(),
         ))
@@ -444,10 +444,7 @@ impl RepositoryObjectProperties {
                         relation: PACKAGE_RELATION,
                     },
                 )?;
-                Ok(ObjectRef::from_parts(
-                    property.value.clone(),
-                    link.target.clone(),
-                ))
+                Ok(ObjectRef::new(property.value.clone(), link.target.clone()))
             })
             .collect()
     }

@@ -6,8 +6,7 @@ use crate::{AdtUri, ObjectRef};
 ///
 /// The marker identifies the relation represented by the reference. Named
 /// aliases such as [`TextElementsRef`] provide the public relation-specific API.
-#[derive(Clone, Debug, Eq, Hash, PartialEq, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct OwnedResourceRef<T> {
     /// The repository object that owns this related resource.
     pub object: ObjectRef,
@@ -24,8 +23,17 @@ pub struct OwnedResourceRef<T> {
     /// The entity tag advertised for this resource, when present.
     pub etag: Option<String>,
 
-    #[serde(skip)]
     marker: PhantomData<fn() -> T>,
+}
+
+impl OwnedResourceRef<kind::Source> {
+    pub(crate) fn from_object_path(object: ObjectRef, path: &[&str]) -> Self {
+        let uri = object
+            .uri()
+            .append_segments(path)
+            .expect("static source path forms a valid ADT URI");
+        Self::new(object, uri)
+    }
 }
 
 impl<T> OwnedResourceRef<T> {

@@ -262,12 +262,7 @@ impl ProjectedFile {
         properties: &DataElementProperties,
     ) -> Result<String, ProjectionError> {
         match (&self.backing, self.format, self.component) {
-            (
-                FileBacking::Properties(object),
-                ObjectFormat::DataElement,
-                FileComponent::Metadata,
-            ) => {
-                data_element::validate_data_element_binding(object, properties)?;
+            (FileBacking::Properties(_), ObjectFormat::DataElement, FileComponent::Metadata) => {
                 data_element::render_data_element_properties(properties)
             }
             _ => Err(ProjectionError::NotPropertiesFile {
@@ -283,12 +278,7 @@ impl ProjectedFile {
         edited: &str,
     ) -> Result<DataElementProperties, ProjectionError> {
         match (&self.backing, self.format, self.component) {
-            (
-                FileBacking::Properties(object),
-                ObjectFormat::DataElement,
-                FileComponent::Metadata,
-            ) => {
-                data_element::validate_data_element_binding(object, original)?;
+            (FileBacking::Properties(_), ObjectFormat::DataElement, FileComponent::Metadata) => {
                 data_element::merge_data_element_properties(original, edited)
             }
             _ => Err(ProjectionError::NotPropertiesFile {
@@ -661,14 +651,6 @@ pub enum ProjectionError {
     BindingTypeMismatch {
         projected_type: &'static str,
         repository_type: GlobalWorkbenchType,
-    },
-
-    #[error(
-        "projected object resource `{projected_uri}` cannot bind to properties for `{properties_uri}`"
-    )]
-    BindingResourceMismatch {
-        projected_uri: String,
-        properties_uri: String,
     },
 
     #[error("AFF component `{component:?}` is not an ADT source resource")]
