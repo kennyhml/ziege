@@ -3,9 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    AccessMode, Client, EntityTag, Include, IncludeProperties, IncludePropertyVersion, Logon,
-    ObjectType, ObjectVersion, Operation, Package, Program, ProgramProperties,
-    ProgramPropertiesVersion, Ready, ReqwestTransport, Revalidation,
+    AccessMode, Client, EntityTag, Include, IncludePropertyVersion, Logon, ObjectVersion,
+    Operation, Program, ProgramPropertiesVersion, Ready, ReqwestTransport, Revalidation,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -159,20 +158,20 @@ async fn include_properties_query_converts_the_live_ztest_properties() {
         .await
         .unwrap();
     assert_eq!(response.media_version(), IncludePropertyVersion::V2);
-    let include = match response {
-        IncludeProperties::V2(include) => *include,
-        _ => panic!("unexpected include-properties version"),
-    };
-    let source = include.source.query().execute(&client).await.unwrap();
+    let include = response.payload();
+    let source = reference.source().query().execute(&client).await.unwrap();
 
-    assert_eq!(include.reference, reference);
+    assert_eq!(response.object(), &reference);
     assert_eq!(include.name, "ZTEST");
     assert_eq!(include.object_type.to_string(), "PROG/I");
-    assert_eq!(include.version, ObjectVersion::Active);
+    assert_eq!(include.version, "active");
     assert_eq!(include.context_ref_count, 0);
-    assert_eq!(include.package.name(), "$TMP");
-    assert_eq!(include.relations().len(), 7);
-    assert_eq!(include.etag.as_deref(), Some("2026012416174900180"));
+    assert_eq!(include.package.name.as_deref(), Some("$TMP"));
+    assert_eq!(include.links.len(), 7);
+    assert_eq!(
+        response.etag().map(EntityTag::as_str),
+        Some("2026012416174900180")
+    );
     assert_eq!(source.content, SOURCE);
 
     logon.assert_async().await;
@@ -229,37 +228,33 @@ async fn program_properties_query_converts_the_live_z_test_v3_properties() {
     let reference = client.object::<Program>("Z_TEST").unwrap();
     let response = reference.query().execute(&client).await.unwrap();
     assert_eq!(response.media_version(), ProgramPropertiesVersion::V3);
-    let program = match response {
-        ProgramProperties::V3(program) => *program,
-        _ => panic!("unexpected program-properties version"),
-    };
-    let source = program.source.query().execute(&client).await.unwrap();
+    let program = response.payload();
+    let source = reference.source().query().execute(&client).await.unwrap();
 
-    assert_eq!(program.reference, reference);
+    assert_eq!(response.object(), &reference);
     assert_eq!(program.name, "Z_TEST");
     assert_eq!(program.object_type.to_string(), "PROG/P");
-    assert_eq!(program.version, ObjectVersion::Inactive);
+    assert_eq!(program.version, "inactive");
     assert_eq!(program.program_type, "executableProgram");
     assert!(program.fix_point_arithmetic);
     assert!(program.unicode_check_active);
-    assert_eq!(program.package.name(), "$TMP");
-    assert_eq!(Package::WORKBENCH_TYPE.to_string(), "DEVC/K");
+    assert_eq!(program.package.name.as_deref(), Some("$TMP"));
     assert_eq!(
-        program.package.uri().as_str(),
-        "/sap/bc/adt/packages/%24tmp"
+        program.package.object_type.as_ref().unwrap().as_str(),
+        "DEVC/K"
+    );
+    assert_eq!(
+        program.package.uri.as_deref(),
+        Some("/sap/bc/adt/packages/%24tmp")
     );
     assert_eq!(program.syntax_configuration.language.version, "X");
     assert_eq!(
         program.syntax_configuration.language.description,
         "Standard ABAP"
     );
-    assert_eq!(program.relations().len(), 9);
-    let links = program
-        .relations()
-        .iter()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-    let text_elements_link = links
+    assert_eq!(program.links.len(), 9);
+    let text_elements_link = program
+        .links
         .iter()
         .find(|link| {
             link.relation.as_deref()
@@ -268,17 +263,10 @@ async fn program_properties_query_converts_the_live_z_test_v3_properties() {
         .unwrap();
     assert_eq!(text_elements_link.title.as_deref(), Some("Text Elements"));
     assert_eq!(
-        text_elements_link.target.as_str(),
+        text_elements_link.href,
         "/sap/bc/adt/textelements/programs/z_test"
     );
-    let syntax_links = program
-        .syntax_configuration
-        .language
-        .relations()
-        .iter()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-    let parser_link = &syntax_links[0];
+    let parser_link = &program.syntax_configuration.language.links[0];
     assert_eq!(
         parser_link.relation.as_deref(),
         Some("http://www.sap.com/adt/relations/abapsource/parser")
@@ -286,65 +274,11 @@ async fn program_properties_query_converts_the_live_z_test_v3_properties() {
     assert_eq!(parser_link.media_type.as_deref(), Some("text/plain"));
     assert_eq!(parser_link.title.as_deref(), Some("Standard ABAP"));
     assert_eq!(parser_link.etag.as_deref(), Some("757"));
+    assert_eq!(program.source_uri, "source/main");
+    assert_eq!(program.links[0].href, "source/main/versions");
     assert_eq!(
-        program.source.uri.as_str(),
-        "/sap/bc/adt/programs/programs/z_test/source/main"
-    );
-    assert_eq!(program.source.object, reference.erase());
-    assert!(program.source.query.is_empty());
-    assert_eq!(program.source.etag.as_deref(), Some("202607251959580001"));
-    assert_eq!(program.etag.as_deref(), Some("202607251959580008"));
-    let html_source = program.html_source().unwrap().unwrap();
-    assert_eq!(html_source.object, reference.erase());
-    assert_eq!(html_source.uri, program.source.uri);
-    assert_eq!(
-        program.versions().unwrap().unwrap().uri.as_str(),
-        "/sap/bc/adt/programs/programs/z_test/source/main/versions"
-    );
-    assert_eq!(
-        program.object_structure().unwrap().unwrap().uri.as_str(),
-        "/sap/bc/adt/programs/programs/z_test/objectstructure"
-    );
-    assert_eq!(
-        program.text_elements().unwrap().unwrap().uri.as_str(),
-        "/sap/bc/adt/textelements/programs/z_test"
-    );
-    assert_eq!(
-        program
-            .enhancement_implementations()
-            .unwrap()
-            .unwrap()
-            .uri
-            .as_str(),
-        "/sap/bc/adt/programs/programs/z_test/enhancements/implementations"
-    );
-    assert_eq!(
-        program.enhancement_options().unwrap().unwrap().uri.as_str(),
-        "/sap/bc/adt/programs/programs/z_test/enhancements/options"
-    );
-    assert_eq!(
-        program
-            .source_enhancement_options()
-            .unwrap()
-            .unwrap()
-            .uri
-            .as_str(),
-        "/sap/bc/adt/programs/programs/z_test/source/main/enhancements/options"
-    );
-    assert_eq!(
-        program.object_state().unwrap().unwrap().query,
-        [("version".to_owned(), "active".to_owned())]
-    );
-    assert_eq!(
-        program
-            .syntax_configuration
-            .language
-            .parser()
-            .unwrap()
-            .unwrap()
-            .uri
-            .as_str(),
-        "/sap/bc/adt/abapsource/parsers/rnd/grammar"
+        response.etag().map(EntityTag::as_str),
+        Some("202607251959580008")
     );
     assert_eq!(source.content, SOURCE);
 
@@ -399,14 +333,11 @@ async fn program_properties_query_honors_v2_first_priority() {
         .await
         .unwrap();
     assert_eq!(response.media_version(), ProgramPropertiesVersion::V2);
-    let program = match response {
-        ProgramProperties::V2(program) => *program,
-        _ => panic!("unexpected program-properties version"),
-    };
+    let program = response.payload();
 
     assert_eq!(program.name, "Z_TEST");
-    assert_eq!(program.version, ObjectVersion::Inactive);
-    assert_eq!(program.source.etag.as_deref(), Some("202607251959580001"));
+    assert_eq!(program.version, "inactive");
+    assert_eq!(program.source_uri, "source/main");
     logon.assert_async().await;
     discovery.assert_async().await;
     metadata.assert_async().await;

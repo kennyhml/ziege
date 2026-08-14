@@ -148,7 +148,7 @@ async fn runtime_object_types_use_the_registered_descriptor() {
         let object = client.repository_object(&parsed_type, name).unwrap();
 
         assert_eq!(object.object_type().as_str(), object_type);
-        assert_eq!(object.reference().uri().as_str(), expected_uri);
+        assert_eq!(object.uri().as_str(), expected_uri);
         assert!(match object_type {
             "PROG/P" => object.typed::<zadt::Program>().is_some(),
             "PROG/I" => object.typed::<zadt::Include>().is_some(),

@@ -89,10 +89,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        AdtResponse, AdtUri, CompatibilityError, EntityTag, Include, IncludeProperties,
-        IncludePropertyVersion, MediaVersionNegotiation, ObjectError, ObjectPropertiesQuery,
-        ObjectType, ProgramProperties, ProgramPropertiesVersion, Revalidation,
-        vocabulary::query_parameter,
+        AdtResponse, AdtUri, CompatibilityError, EntityTag, Include, IncludePropertyVersion,
+        MediaVersionNegotiation, ObjectError, ObjectPropertiesQuery, ObjectType,
+        ProgramPropertiesVersion, Revalidation, vocabulary::query_parameter,
     };
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
@@ -295,7 +294,8 @@ mod tests {
         let representation = program_properties_query()
             .decode(program_properties_response(ProgramPropertiesVersion::V2))
             .unwrap();
-        assert!(matches!(representation, ProgramProperties::V2(_)));
+        assert_eq!(representation.media_version(), ProgramPropertiesVersion::V2);
+        assert_eq!(representation.payload().name, "Z_TEST");
     }
 
     #[test]
@@ -303,7 +303,8 @@ mod tests {
         let representation = program_properties_query()
             .decode(program_properties_response(ProgramPropertiesVersion::V3))
             .unwrap();
-        assert!(matches!(representation, ProgramProperties::V3(_)));
+        assert_eq!(representation.media_version(), ProgramPropertiesVersion::V3);
+        assert_eq!(representation.payload().name, "Z_TEST");
     }
 
     #[test]
@@ -359,10 +360,7 @@ mod tests {
             .decode(program_properties_response(ProgramPropertiesVersion::V3))
             .unwrap();
 
-        assert!(matches!(
-            response,
-            Revalidation::Modified(ProgramProperties::V3(_))
-        ));
+        assert!(matches!(response, Revalidation::Modified(_)));
     }
 
     #[test]
@@ -388,8 +386,11 @@ mod tests {
         let representation = include_properties_query()
             .decode(operation_response(response))
             .unwrap();
-        assert!(matches!(representation, IncludeProperties::V2(_)));
-        assert_eq!(representation.etag(), Some("include-etag"));
+        assert_eq!(representation.payload().name, "ZTEST");
+        assert_eq!(
+            representation.etag().map(EntityTag::as_str),
+            Some("include-etag")
+        );
     }
 
     #[test]

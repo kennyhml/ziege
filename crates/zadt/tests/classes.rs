@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Class, ClassProperties, ClassPropertiesVersion, ClassSourceComponent, Client, EntityTag, Logon,
-    ObjectVersion, Operation, Ready, ReqwestTransport, Revalidation,
+    Class, ClassPropertiesVersion, Client, EntityTag, Logon, ObjectVersion, Operation, Ready,
+    ReqwestTransport, Revalidation,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -70,6 +70,50 @@ async fn class_run_uses_the_advertised_plain_text_contract() {
     discovery.assert_async().await;
     csrf.assert_async().await;
     run.assert_async().await;
+}
+
+#[tokio::test]
+async fn repository_object_properties_forward_through_the_typed_query() {
+    let server = MockServer::start_async().await;
+    let logon = mock_logon(&server).await;
+    let _core_discovery = mock_core_discovery(&server).await;
+    let discovery = mock_discovery(&server).await;
+    let metadata = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/sap/bc/adt/oo/classes/cl_adt_uri_mapper")
+                .query_param("version", "active")
+                .header("accept", "application/vnd.sap.adt.oo.classes.v4+xml")
+                .header("cache-control", "no-cache");
+            then.status(200)
+                .header(
+                    "content-type",
+                    "application/vnd.sap.adt.oo.classes.v4+xml; charset=utf-8",
+                )
+                .header("etag", "class-etag")
+                .body(CLASS_XML);
+        })
+        .await;
+
+    let client = ready_client(transport(&server)).await;
+    let object = client.object::<Class>("CL_ADT_URI_MAPPER").unwrap().erase();
+    let properties = object
+        .query()
+        .unwrap()
+        .version(ObjectVersion::Active)
+        .execute(&client)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        properties.media_type(),
+        "application/vnd.sap.adt.oo.classes.v4+xml"
+    );
+    assert_eq!(properties.payload()["name"], "CL_ADT_URI_MAPPER");
+    assert_eq!(properties.etag().map(EntityTag::as_str), Some("class-etag"));
+    logon.assert_async().await;
+    discovery.assert_async().await;
+    metadata.assert_async().await;
 }
 
 async fn mock_core_discovery(server: &MockServer) -> Mock<'_> {
@@ -148,32 +192,17 @@ async fn class_properties_query_converts_the_live_v4_manifest() {
         .await
         .unwrap();
     assert_eq!(response.media_version(), ClassPropertiesVersion::V4);
-    let class = match response {
-        ClassProperties::V4(class) => *class,
-        _ => panic!("unexpected class-properties version"),
-    };
-    let source = class
-        .main_source()
-        .source
-        .query()
-        .execute(&client)
-        .await
-        .unwrap();
+    let class = response.payload();
+    let source_ref = reference.source();
+    let source = source_ref.query().execute(&client).await.unwrap();
 
-    assert_eq!(class.reference, reference);
     assert_eq!(class.name, "CL_ADT_URI_MAPPER");
-    assert_eq!(class.version, ObjectVersion::Active);
-    assert_eq!(class.package.name(), "SADT_TOOLS_CORE");
-    assert_eq!(class.source_components.len(), 4);
-    assert_eq!(class.etag.as_deref(), Some("20210406145501001000181"));
+    assert_eq!(class.version, "active");
+    assert_eq!(class.package.name, "SADT_TOOLS_CORE");
+    assert_eq!(class.sources.len(), 5);
     assert_eq!(
-        class
-            .source(ClassSourceComponent::Definitions)
-            .unwrap()
-            .source
-            .etag
-            .as_deref(),
-        Some("201701161841300011")
+        response.etag().map(EntityTag::as_str),
+        Some("20210406145501001000181")
     );
     assert_eq!(source.content, SOURCE);
 
@@ -224,14 +253,14 @@ async fn class_properties_query_honors_v2_and_v3_priority() {
         .execute(&client)
         .await
         .unwrap();
-    assert!(matches!(response, ClassProperties::V2(_)));
+    assert_eq!(response.media_version(), ClassPropertiesVersion::V2);
     let response = reference
         .query()
         .priority([ClassPropertiesVersion::V3])
         .execute(&client)
         .await
         .unwrap();
-    assert!(matches!(response, ClassProperties::V3(_)));
+    assert_eq!(response.media_version(), ClassPropertiesVersion::V3);
 
     logon.assert_async().await;
     discovery.assert_async().await;

@@ -1,19 +1,14 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
-    AdtUri, EnhancementImplementationsRef, EntityTag, GlobalWorkbenchType, HtmlSourceRef, Include,
-    MediaVersionNegotiation, ObjectEnhancementOptionsRef, ObjectError, ObjectRef, ObjectStateRef,
-    ObjectStructureRef, ObjectType, ObjectVersion, ParserRef, Program, RawObjectProperties,
-    ResponseError, SourceEnhancementOptionsRef, SourceRef, SourceVersionsRef, TextElementsRef,
-    objects::Package,
-    resource::{AdtLinkError, AdvertisedLink, Relations, resolve_href},
+    GlobalWorkbenchType, Include, MediaVersionNegotiation, ObjectError, ObjectRef, ObjectType,
+    Program, RawObjectProperties, ResponseError,
 };
 
 /// The SAP media-type version used to decode program properties.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct ProgramPropertiesVersion {
     media_type: &'static str,
-    kind: ProgramPropertiesVersionKind,
 }
 
 impl MediaVersionNegotiation for ProgramPropertiesVersion {
@@ -27,62 +22,11 @@ impl MediaVersionNegotiation for ProgramPropertiesVersion {
 impl ProgramPropertiesVersion {
     pub const V2: Self = Self {
         media_type: "application/vnd.sap.adt.programs.programs.v2+xml",
-        kind: ProgramPropertiesVersionKind::V2,
     };
 
     pub const V3: Self = Self {
         media_type: "application/vnd.sap.adt.programs.programs.v3+xml",
-        kind: ProgramPropertiesVersionKind::V3,
     };
-}
-
-/// Local helper to ensure exhaustive matching
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-enum ProgramPropertiesVersionKind {
-    V2,
-    V3,
-}
-
-/// Properties of a program.
-///
-/// Multiple media type versions exist. They do, however, appear to be
-/// identical under regular circumstances - to be clarified.
-#[derive(Clone, Debug)]
-#[non_exhaustive]
-pub enum ProgramProperties {
-    V2(Box<ProgramPropertiesV2>),
-    V3(Box<ProgramPropertiesV3>),
-}
-
-impl ProgramProperties {
-    /// Returns the response media-type version.
-    pub fn media_version(&self) -> ProgramPropertiesVersion {
-        match self {
-            Self::V2(_) => ProgramPropertiesVersion::V2,
-            Self::V3(_) => ProgramPropertiesVersion::V3,
-        }
-    }
-
-    /// Returns the response entity tag, when present.
-    pub fn etag(&self) -> Option<&EntityTag> {
-        match self {
-            Self::V2(program) | Self::V3(program) => program.etag.as_ref(),
-        }
-    }
-}
-
-impl TryFrom<RawObjectProperties<Program>> for ProgramProperties {
-    type Error = ResponseError;
-
-    fn try_from(raw: RawObjectProperties<Program>) -> Result<Self, Self::Error> {
-        let properties: RawProgramProperties =
-            serde_xml_rs::from_reader(raw.body.as_slice()).map_err(ObjectError::InvalidResponse)?;
-        let properties = ProgramPropertiesV3::from_raw(raw.resource, properties, raw.etag)?;
-        Ok(match raw.version.kind {
-            ProgramPropertiesVersionKind::V2 => Self::V2(Box::new(properties)),
-            ProgramPropertiesVersionKind::V3 => Self::V3(Box::new(properties)),
-        })
-    }
 }
 
 /// The SAP media-type version used to decode include properties.
@@ -98,42 +42,6 @@ impl MediaVersionNegotiation for IncludePropertyVersion {
         match self {
             Self::V2 => "application/vnd.sap.adt.programs.includes.v2+xml",
         }
-    }
-}
-
-/// Include properties tagged with the media-type version returned by ADT.
-#[derive(Clone, Debug)]
-#[non_exhaustive]
-pub enum IncludeProperties {
-    V2(Box<IncludePropertiesV2>),
-}
-
-impl IncludeProperties {
-    /// Returns the response media-type version.
-    pub fn media_version(&self) -> IncludePropertyVersion {
-        match self {
-            Self::V2(_) => IncludePropertyVersion::V2,
-        }
-    }
-
-    /// Returns the response entity tag, when present.
-    pub fn etag(&self) -> Option<&str> {
-        match self {
-            Self::V2(include) => include.etag.as_deref(),
-        }
-    }
-}
-
-impl TryFrom<RawObjectProperties<Include>> for IncludeProperties {
-    type Error = ResponseError;
-
-    fn try_from(raw: RawObjectProperties<Include>) -> Result<Self, Self::Error> {
-        let properties: RawIncludeProperties =
-            serde_xml_rs::from_reader(raw.body.as_slice()).map_err(ObjectError::InvalidResponse)?;
-        let properties = IncludePropertiesV2::from_raw(raw.resource, properties, raw.etag)?;
-        Ok(match raw.version {
-            IncludePropertyVersion::V2 => Self::V2(Box::new(properties)),
-        })
     }
 }
 
@@ -153,576 +61,366 @@ impl ProgramRunResult {
     }
 }
 
-/// The V2 program-properties representation uses the V3 payload schema.
-pub type ProgramPropertiesV2 = ProgramPropertiesV3;
+/// An unmodified object reference embedded in a properties payload.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all(serialize = "camelCase"))]
+pub struct PropertyObjectReference {
+    /// The URI exactly as supplied by ADT.
+    #[serde(rename(deserialize = "@adtcore:uri"), alias = "uri")]
+    pub uri: Option<String>,
 
-/// The ABAP program-properties payload shared by the V2 and V3 media types.
-#[derive(Clone, Debug)]
-pub struct ProgramPropertiesV3 {
-    /// The program resource that was fetched.
-    pub reference: ObjectRef<Program>,
+    /// The global Workbench type supplied by ADT.
+    #[serde(rename(deserialize = "@adtcore:type"), alias = "objectType")]
+    pub object_type: Option<GlobalWorkbenchType>,
 
-    /// The program name supplied by SAP.
-    pub name: String,
+    /// The referenced object's name.
+    #[serde(rename(deserialize = "@adtcore:name"), alias = "name")]
+    pub name: Option<String>,
 
-    /// The repository object type, normally `PROG/P`.
-    pub object_type: GlobalWorkbenchType,
-
-    /// The timestamp at which the program was last changed.
-    pub last_changed: String,
-
-    /// The object state, such as `active` or `inactive`.
-    pub version: ObjectVersion,
-
-    /// The timestamp at which the program was created.
-    pub created_at: String,
-
-    /// The user who last changed the program.
-    pub changed_by: String,
-
-    /// The program description.
-    pub description: String,
-
-    /// The maximum length of the program description.
-    pub description_text_limit: u32,
-
-    /// The program's logon language.
-    pub language: String,
-
-    /// Whether this program is locked by the current editor.
-    pub locked_by_editor: bool,
-
-    /// The semantic program type, such as `executableProgram`.
-    pub program_type: String,
-
-    /// Whether fixed-point arithmetic is enabled.
-    pub fix_point_arithmetic: bool,
-
-    /// Whether the active Unicode check is enabled.
-    pub unicode_check_active: bool,
-
-    /// The user responsible for the program.
-    pub responsible: String,
-
-    /// The program's master language.
-    pub master_language: String,
-
-    /// The program's master system.
-    pub master_system: String,
-
-    /// The configured ABAP language version.
-    pub abap_language_version: String,
-
-    /// The package containing the program.
-    pub package: ObjectRef<Package>,
-
-    /// The syntax configuration and parser advertised for the source.
-    pub syntax_configuration: SyntaxConfiguration,
-
-    /// The advertised plain-text source representation.
-    pub source: SourceRef,
-
-    /// The entity tag of these program properties, when present.
-    pub etag: Option<EntityTag>,
-
-    relations: Relations,
+    /// The referenced object's description, when advertised.
+    #[serde(rename(deserialize = "@adtcore:description"), alias = "description")]
+    pub description: Option<String>,
 }
 
-impl ProgramPropertiesV3 {
-    /// Returns the program's advertised links without resolving them eagerly.
-    pub fn relations(&self) -> &Relations {
-        &self.relations
-    }
+/// An unmodified Atom link embedded in a properties payload.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all(serialize = "camelCase"))]
+pub struct PropertyLink {
+    /// The target exactly as advertised by ADT.
+    #[serde(rename(deserialize = "@href"), alias = "href")]
+    pub href: String,
 
-    /// Resolves the advertised rendered HTML source, when present.
-    pub fn html_source(&self) -> Result<Option<HtmlSourceRef>, AdtLinkError> {
-        self.relations.get()
-    }
+    /// The Atom relation URI, when advertised.
+    #[serde(rename(deserialize = "@rel"), alias = "relation")]
+    pub relation: Option<String>,
 
-    /// Resolves the advertised source version-history resource, when present.
-    pub fn versions(&self) -> Result<Option<SourceVersionsRef>, AdtLinkError> {
-        self.relations.get()
-    }
+    /// The target representation's media type, when advertised.
+    #[serde(rename(deserialize = "@type"), alias = "mediaType")]
+    pub media_type: Option<String>,
 
-    /// Resolves the advertised object-structure resource, when present.
-    pub fn object_structure(&self) -> Result<Option<ObjectStructureRef>, AdtLinkError> {
-        self.relations.get()
-    }
+    /// The target representation's language, when advertised.
+    #[serde(rename(deserialize = "@hreflang"), alias = "hreflang")]
+    pub hreflang: Option<String>,
 
-    /// Resolves the advertised text-elements resource, when present.
-    pub fn text_elements(&self) -> Result<Option<TextElementsRef>, AdtLinkError> {
-        self.relations.get()
-    }
+    /// The link title, when advertised.
+    #[serde(rename(deserialize = "@title"), alias = "title")]
+    pub title: Option<String>,
 
-    /// Resolves the advertised enhancement implementations, when present.
-    pub fn enhancement_implementations(
-        &self,
-    ) -> Result<Option<EnhancementImplementationsRef>, AdtLinkError> {
-        self.relations.get()
-    }
+    /// The target length exactly as advertised by ADT.
+    #[serde(rename(deserialize = "@length"), alias = "length")]
+    pub length: Option<String>,
 
-    /// Resolves the advertised object enhancement options, when present.
-    pub fn enhancement_options(&self) -> Result<Option<ObjectEnhancementOptionsRef>, AdtLinkError> {
-        self.relations.get()
-    }
-
-    /// Resolves the advertised source enhancement options, when present.
-    pub fn source_enhancement_options(
-        &self,
-    ) -> Result<Option<SourceEnhancementOptionsRef>, AdtLinkError> {
-        self.relations.get()
-    }
-
-    /// Resolves the link to the program's other active or inactive state.
-    pub fn object_state(&self) -> Result<Option<ObjectStateRef>, AdtLinkError> {
-        self.relations.get()
-    }
-
-    fn from_raw(
-        reference: ObjectRef<Program>,
-        raw: RawProgramProperties,
-        etag: Option<EntityTag>,
-    ) -> Result<Self, ObjectError> {
-        if raw.object_type != Program::WORKBENCH_TYPE {
-            return Err(ObjectError::UnexpectedObjectType {
-                expected: Program::WORKBENCH_TYPE,
-                actual: raw.object_type,
-            });
-        }
-        let package = package_reference(raw.package)?;
-
-        let version = ObjectVersion::parse(&raw.version).ok_or_else(|| {
-            ObjectError::UnsupportedObjectVersion {
-                version: raw.version.clone(),
-            }
-        })?;
-        let relations = Relations::new(reference.erase(), raw.links);
-        let source: SourceRef = relations.get()?.ok_or(ObjectError::MissingRelation {
-            relation: "plain-text source",
-        })?;
-        let declared_source = resolve_href(reference.uri(), &raw.source_uri).map_err(|source| {
-            ObjectError::InvalidLink {
-                href: raw.source_uri.clone(),
-                source,
-            }
-        })?;
-        if declared_source.target != source.uri {
-            return Err(ObjectError::RelationMismatch {
-                relation: "source",
-                declared: declared_source.target.to_string(),
-                advertised: source.uri.to_string(),
-            });
-        }
-
-        let syntax_relations =
-            Relations::new(reference.erase(), raw.syntax_configuration.language.links);
-
-        Ok(Self {
-            reference,
-            name: raw.name,
-            object_type: raw.object_type,
-            last_changed: raw.last_changed,
-            version,
-            created_at: raw.created_at,
-            changed_by: raw.changed_by,
-            description: raw.description,
-            description_text_limit: raw.description_text_limit,
-            language: raw.language,
-            locked_by_editor: raw.locked_by_editor,
-            program_type: raw.program_type,
-            fix_point_arithmetic: raw.fix_point_arithmetic,
-            unicode_check_active: raw.unicode_check_active,
-            responsible: raw.responsible,
-            master_language: raw.master_language,
-            master_system: raw.master_system,
-            abap_language_version: raw.abap_language_version,
-            package,
-            syntax_configuration: SyntaxConfiguration {
-                language: SyntaxLanguage {
-                    version: raw.syntax_configuration.language.version,
-                    description: raw.syntax_configuration.language.description,
-                    relations: syntax_relations,
-                },
-            },
-            source,
-            etag,
-            relations,
-        })
-    }
-}
-
-/// The V2 standalone ABAP include-properties payload.
-#[derive(Clone, Debug)]
-pub struct IncludePropertiesV2 {
-    /// The include resource that was fetched.
-    pub reference: ObjectRef<Include>,
-
-    /// The include name supplied by SAP.
-    pub name: String,
-
-    /// The repository object type, normally `PROG/I`.
-    pub object_type: GlobalWorkbenchType,
-
-    /// The timestamp at which the include was last changed.
-    pub last_changed: String,
-
-    /// The object state, such as `active` or `inactive`.
-    pub version: ObjectVersion,
-
-    /// The timestamp at which the include was created.
-    pub created_at: String,
-
-    /// The user who last changed the include.
-    pub changed_by: String,
-
-    /// The include description.
-    pub description: String,
-
-    /// The maximum length of the include description.
-    pub description_text_limit: u32,
-
-    /// The include's logon language.
-    pub language: String,
-
-    /// Number of objects reported as using this include.
-    pub context_ref_count: u32,
-
-    /// The using object when SAP reports exactly one context.
-    pub context_ref: Option<ObjectRef>,
-
-    /// Whether fixed-point arithmetic is enabled.
-    pub fix_point_arithmetic: bool,
-
-    /// Whether the active Unicode check is enabled.
-    pub unicode_check_active: bool,
-
-    /// The user responsible for the include.
-    pub responsible: String,
-
-    /// The include's master language.
-    pub master_language: String,
-
-    /// The include's master system.
-    pub master_system: String,
-
-    /// The package containing the include.
-    pub package: ObjectRef<Package>,
-
-    /// The advertised plain-text source representation.
-    pub source: SourceRef,
-
-    /// The entity tag of these include properties, when present.
-    pub etag: Option<EntityTag>,
-
-    relations: Relations,
-}
-
-impl IncludePropertiesV2 {
-    /// Returns the include's advertised links without resolving them eagerly.
-    pub fn relations(&self) -> &Relations {
-        &self.relations
-    }
-
-    /// Resolves the advertised rendered HTML source, when present.
-    pub fn html_source(&self) -> Result<Option<HtmlSourceRef>, AdtLinkError> {
-        self.relations.get()
-    }
-
-    /// Resolves the advertised source version-history resource, when present.
-    pub fn versions(&self) -> Result<Option<SourceVersionsRef>, AdtLinkError> {
-        self.relations.get()
-    }
-
-    /// Resolves the advertised text-elements resource, when present.
-    pub fn text_elements(&self) -> Result<Option<TextElementsRef>, AdtLinkError> {
-        self.relations.get()
-    }
-
-    /// Resolves the advertised enhancement implementations, when present.
-    pub fn enhancement_implementations(
-        &self,
-    ) -> Result<Option<EnhancementImplementationsRef>, AdtLinkError> {
-        self.relations.get()
-    }
-
-    /// Resolves the advertised object enhancement options, when present.
-    pub fn enhancement_options(&self) -> Result<Option<ObjectEnhancementOptionsRef>, AdtLinkError> {
-        self.relations.get()
-    }
-
-    /// Resolves the advertised source enhancement options, when present.
-    pub fn source_enhancement_options(
-        &self,
-    ) -> Result<Option<SourceEnhancementOptionsRef>, AdtLinkError> {
-        self.relations.get()
-    }
-
-    fn from_raw(
-        reference: ObjectRef<Include>,
-        raw: RawIncludeProperties,
-        etag: Option<EntityTag>,
-    ) -> Result<Self, ObjectError> {
-        if raw.object_type != Include::WORKBENCH_TYPE {
-            return Err(ObjectError::UnexpectedObjectType {
-                expected: Include::WORKBENCH_TYPE,
-                actual: raw.object_type,
-            });
-        }
-        let package = package_reference(raw.package)?;
-
-        let version = ObjectVersion::parse(&raw.version).ok_or_else(|| {
-            ObjectError::UnsupportedObjectVersion {
-                version: raw.version.clone(),
-            }
-        })?;
-        let relations = Relations::new(reference.erase(), raw.links);
-        let source: SourceRef = relations.get()?.ok_or(ObjectError::MissingRelation {
-            relation: "plain-text source",
-        })?;
-        let declared_source = resolve_href(reference.uri(), &raw.source_uri).map_err(|source| {
-            ObjectError::InvalidLink {
-                href: raw.source_uri.clone(),
-                source,
-            }
-        })?;
-        if declared_source.target != source.uri {
-            return Err(ObjectError::RelationMismatch {
-                relation: "source",
-                declared: declared_source.target.to_string(),
-                advertised: source.uri.to_string(),
-            });
-        }
-
-        let context_ref = raw
-            .context_ref
-            .map(|context| {
-                resolve_href(reference.uri(), &context.uri)
-                    .map(|resolved| ObjectRef::new(resolved.target))
-                    .map_err(|source| ObjectError::InvalidLink {
-                        href: context.uri,
-                        source,
-                    })
-            })
-            .transpose()?;
-        Ok(Self {
-            reference,
-            name: raw.name,
-            object_type: raw.object_type,
-            last_changed: raw.last_changed,
-            version,
-            created_at: raw.created_at,
-            changed_by: raw.changed_by,
-            description: raw.description,
-            description_text_limit: raw.description_text_limit,
-            language: raw.language,
-            context_ref_count: raw.context_ref_count,
-            context_ref,
-            fix_point_arithmetic: raw.fix_point_arithmetic,
-            unicode_check_active: raw.unicode_check_active,
-            responsible: raw.responsible,
-            master_language: raw.master_language,
-            master_system: raw.master_system,
-            package,
-            source,
-            etag,
-            relations,
-        })
-    }
+    /// The target representation's entity tag, when advertised.
+    #[serde(rename(deserialize = "@etag"), alias = "etag")]
+    pub etag: Option<String>,
 }
 
 /// The source parser configuration advertised by a program.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all(serialize = "camelCase"))]
 pub struct SyntaxConfiguration {
     /// The configured ABAP language.
+    #[serde(rename(deserialize = "abapsource:language"), alias = "language")]
     pub language: SyntaxLanguage,
 }
 
-impl SyntaxConfiguration {
-    pub(crate) fn new(
-        owner: ObjectRef,
-        version: String,
-        description: String,
-        links: Vec<AdvertisedLink>,
-    ) -> Self {
-        Self {
-            language: SyntaxLanguage {
-                version,
-                description,
-                relations: Relations::new(owner, links),
-            },
-        }
-    }
-}
-
-/// An ABAP language version, description, and optional parser grammar.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// An ABAP language version, description, and its advertised parser links.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all(serialize = "camelCase"))]
 pub struct SyntaxLanguage {
     /// The language version identifier, such as `X`.
+    #[serde(rename(deserialize = "abapsource:version"), alias = "version")]
     pub version: String,
 
     /// The server-provided language description.
+    #[serde(rename(deserialize = "abapsource:description"), alias = "description")]
     pub description: String,
 
-    relations: Relations,
+    /// Atom links nested in the language element.
+    #[serde(rename(deserialize = "atom:link"), alias = "links", default)]
+    pub links: Vec<PropertyLink>,
 }
 
-impl SyntaxLanguage {
-    /// Returns the syntax language's advertised links without resolving them eagerly.
-    pub fn relations(&self) -> &Relations {
-        &self.relations
+/// The complete ABAP program-properties payload shared by V2 and V3.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(
+    rename(deserialize = "program:abapProgram"),
+    rename_all(serialize = "camelCase")
+)]
+pub struct ProgramProperties {
+    /// The program name supplied by ADT.
+    #[serde(rename(deserialize = "@adtcore:name"), alias = "name")]
+    pub name: String,
+
+    /// The root repository object type, normally `PROG/P`.
+    #[serde(rename(deserialize = "@adtcore:type"), alias = "objectType")]
+    pub object_type: GlobalWorkbenchType,
+
+    /// The timestamp at which the program was last changed.
+    #[serde(rename(deserialize = "@adtcore:changedAt"), alias = "lastChanged")]
+    pub last_changed: String,
+
+    /// The object version exactly as supplied by ADT.
+    #[serde(rename(deserialize = "@adtcore:version"), alias = "version")]
+    pub version: String,
+
+    /// The timestamp at which the program was created.
+    #[serde(rename(deserialize = "@adtcore:createdAt"), alias = "createdAt")]
+    pub created_at: String,
+
+    /// The user who last changed the program.
+    #[serde(rename(deserialize = "@adtcore:changedBy"), alias = "changedBy")]
+    pub changed_by: String,
+
+    /// The program description.
+    #[serde(rename(deserialize = "@adtcore:description"), alias = "description")]
+    pub description: String,
+
+    /// The maximum length of the program description.
+    #[serde(
+        rename(deserialize = "@adtcore:descriptionTextLimit"),
+        alias = "descriptionTextLimit"
+    )]
+    pub description_text_limit: u32,
+
+    /// The program's logon language.
+    #[serde(rename(deserialize = "@adtcore:language"), alias = "language")]
+    pub language: String,
+
+    /// Whether this program is locked by the current editor.
+    #[serde(
+        rename(deserialize = "@program:lockedByEditor"),
+        alias = "lockedByEditor"
+    )]
+    pub locked_by_editor: bool,
+
+    /// The semantic program type, such as `executableProgram`.
+    #[serde(rename(deserialize = "@program:programType"), alias = "programType")]
+    pub program_type: String,
+
+    /// The source URI exactly as supplied by ADT.
+    #[serde(rename(deserialize = "@abapsource:sourceUri"), alias = "sourceUri")]
+    pub source_uri: String,
+
+    /// Whether fixed-point arithmetic is enabled.
+    #[serde(
+        rename(deserialize = "@abapsource:fixPointArithmetic"),
+        alias = "fixPointArithmetic"
+    )]
+    pub fix_point_arithmetic: bool,
+
+    /// Whether the active Unicode check is enabled.
+    #[serde(
+        rename(deserialize = "@abapsource:activeUnicodeCheck"),
+        alias = "unicodeCheckActive"
+    )]
+    pub unicode_check_active: bool,
+
+    /// The user responsible for the program.
+    #[serde(rename(deserialize = "@adtcore:responsible"), alias = "responsible")]
+    pub responsible: String,
+
+    /// The program's master language.
+    #[serde(
+        rename(deserialize = "@adtcore:masterLanguage"),
+        alias = "masterLanguage"
+    )]
+    pub master_language: String,
+
+    /// The program's master system.
+    #[serde(rename(deserialize = "@adtcore:masterSystem"), alias = "masterSystem")]
+    pub master_system: String,
+
+    /// The configured ABAP language version.
+    #[serde(
+        rename(deserialize = "@adtcore:abapLanguageVersion"),
+        alias = "abapLanguageVersion"
+    )]
+    pub abap_language_version: String,
+
+    /// The package reference exactly as embedded in the payload.
+    #[serde(rename(deserialize = "adtcore:packageRef"), alias = "package")]
+    pub package: PropertyObjectReference,
+
+    /// The source syntax configuration embedded in the payload.
+    #[serde(
+        rename(deserialize = "abapsource:syntaxConfiguration"),
+        alias = "syntaxConfiguration"
+    )]
+    pub syntax_configuration: SyntaxConfiguration,
+
+    /// Atom links embedded at the payload root.
+    #[serde(rename(deserialize = "atom:link"), alias = "links", default)]
+    pub links: Vec<PropertyLink>,
+}
+
+/// The V2 program-properties media type uses the shared payload.
+pub type ProgramPropertiesV2 = ProgramProperties;
+
+/// The V3 program-properties media type uses the shared payload.
+pub type ProgramPropertiesV3 = ProgramProperties;
+
+impl TryFrom<RawObjectProperties<Program>> for ProgramProperties {
+    type Error = ResponseError;
+
+    fn try_from(raw: RawObjectProperties<Program>) -> Result<Self, Self::Error> {
+        let properties: Self =
+            serde_xml_rs::from_reader(raw.body.as_slice()).map_err(ObjectError::InvalidResponse)?;
+        if properties.object_type != Program::WORKBENCH_TYPE {
+            return Err(ObjectError::UnexpectedObjectType {
+                expected: Program::WORKBENCH_TYPE,
+                actual: properties.object_type,
+            }
+            .into());
+        }
+        if !properties.name.eq_ignore_ascii_case(raw.resource.name()) {
+            return Err(ObjectError::UnexpectedObjectName {
+                expected: raw.resource.name().to_owned(),
+                actual: properties.name,
+            }
+            .into());
+        }
+        Ok(properties)
     }
+}
 
-    /// Resolves the advertised parser grammar, when present.
-    pub fn parser(&self) -> Result<Option<ParserRef>, AdtLinkError> {
-        self.relations.get()
+/// The complete standalone ABAP include-properties payload.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(
+    rename(deserialize = "include:abapInclude"),
+    rename_all(serialize = "camelCase")
+)]
+pub struct IncludeProperties {
+    /// The include name supplied by ADT.
+    #[serde(rename(deserialize = "@adtcore:name"), alias = "name")]
+    pub name: String,
+
+    /// The root repository object type, normally `PROG/I`.
+    #[serde(rename(deserialize = "@adtcore:type"), alias = "objectType")]
+    pub object_type: GlobalWorkbenchType,
+
+    /// The timestamp at which the include was last changed.
+    #[serde(rename(deserialize = "@adtcore:changedAt"), alias = "lastChanged")]
+    pub last_changed: String,
+
+    /// The object version exactly as supplied by ADT.
+    #[serde(rename(deserialize = "@adtcore:version"), alias = "version")]
+    pub version: String,
+
+    /// The timestamp at which the include was created.
+    #[serde(rename(deserialize = "@adtcore:createdAt"), alias = "createdAt")]
+    pub created_at: String,
+
+    /// The user who last changed the include.
+    #[serde(rename(deserialize = "@adtcore:changedBy"), alias = "changedBy")]
+    pub changed_by: String,
+
+    /// The include description.
+    #[serde(rename(deserialize = "@adtcore:description"), alias = "description")]
+    pub description: String,
+
+    /// The maximum length of the include description.
+    #[serde(
+        rename(deserialize = "@adtcore:descriptionTextLimit"),
+        alias = "descriptionTextLimit"
+    )]
+    pub description_text_limit: u32,
+
+    /// The include's logon language.
+    #[serde(rename(deserialize = "@adtcore:language"), alias = "language")]
+    pub language: String,
+
+    /// Number of objects reported as using this include.
+    #[serde(
+        rename(deserialize = "@include:contextRefCount"),
+        alias = "contextRefCount",
+        default
+    )]
+    pub context_ref_count: u32,
+
+    /// The source URI exactly as supplied by ADT.
+    #[serde(rename(deserialize = "@abapsource:sourceUri"), alias = "sourceUri")]
+    pub source_uri: String,
+
+    /// Whether fixed-point arithmetic is enabled.
+    #[serde(
+        rename(deserialize = "@abapsource:fixPointArithmetic"),
+        alias = "fixPointArithmetic"
+    )]
+    pub fix_point_arithmetic: bool,
+
+    /// Whether the active Unicode check is enabled.
+    #[serde(
+        rename(deserialize = "@abapsource:activeUnicodeCheck"),
+        alias = "unicodeCheckActive"
+    )]
+    pub unicode_check_active: bool,
+
+    /// The user responsible for the include.
+    #[serde(rename(deserialize = "@adtcore:responsible"), alias = "responsible")]
+    pub responsible: String,
+
+    /// The include's master language.
+    #[serde(
+        rename(deserialize = "@adtcore:masterLanguage"),
+        alias = "masterLanguage"
+    )]
+    pub master_language: String,
+
+    /// The include's master system.
+    #[serde(rename(deserialize = "@adtcore:masterSystem"), alias = "masterSystem")]
+    pub master_system: String,
+
+    /// The package reference exactly as embedded in the payload.
+    #[serde(rename(deserialize = "adtcore:packageRef"), alias = "package")]
+    pub package: PropertyObjectReference,
+
+    /// The using object exactly as embedded in the payload.
+    #[serde(rename(deserialize = "include:contextRef"), alias = "contextRef")]
+    pub context_ref: Option<PropertyObjectReference>,
+
+    /// Atom links embedded at the payload root.
+    #[serde(rename(deserialize = "atom:link"), alias = "links", default)]
+    pub links: Vec<PropertyLink>,
+}
+
+/// The V2 include-properties media type uses the shared payload.
+pub type IncludePropertiesV2 = IncludeProperties;
+
+impl TryFrom<RawObjectProperties<Include>> for IncludeProperties {
+    type Error = ResponseError;
+
+    fn try_from(raw: RawObjectProperties<Include>) -> Result<Self, Self::Error> {
+        let properties: Self =
+            serde_xml_rs::from_reader(raw.body.as_slice()).map_err(ObjectError::InvalidResponse)?;
+        if properties.object_type != Include::WORKBENCH_TYPE {
+            return Err(ObjectError::UnexpectedObjectType {
+                expected: Include::WORKBENCH_TYPE,
+                actual: properties.object_type,
+            }
+            .into());
+        }
+        if !properties.name.eq_ignore_ascii_case(raw.resource.name()) {
+            return Err(ObjectError::UnexpectedObjectName {
+                expected: raw.resource.name().to_owned(),
+                actual: properties.name,
+            }
+            .into());
+        }
+        Ok(properties)
     }
-}
-
-#[derive(Deserialize)]
-#[serde(rename = "program:abapProgram")]
-struct RawProgramProperties {
-    #[serde(rename = "@adtcore:name")]
-    name: String,
-    #[serde(rename = "@adtcore:type")]
-    object_type: GlobalWorkbenchType,
-    #[serde(rename = "@adtcore:changedAt")]
-    last_changed: String,
-    #[serde(rename = "@adtcore:version")]
-    version: String,
-    #[serde(rename = "@adtcore:createdAt")]
-    created_at: String,
-    #[serde(rename = "@adtcore:changedBy")]
-    changed_by: String,
-    #[serde(rename = "@adtcore:description")]
-    description: String,
-    #[serde(rename = "@adtcore:descriptionTextLimit")]
-    description_text_limit: u32,
-    #[serde(rename = "@adtcore:language")]
-    language: String,
-    #[serde(rename = "@program:lockedByEditor")]
-    locked_by_editor: bool,
-    #[serde(rename = "@program:programType")]
-    program_type: String,
-    #[serde(rename = "@abapsource:sourceUri")]
-    source_uri: String,
-    #[serde(rename = "@abapsource:fixPointArithmetic")]
-    fix_point_arithmetic: bool,
-    #[serde(rename = "@abapsource:activeUnicodeCheck")]
-    unicode_check_active: bool,
-    #[serde(rename = "@adtcore:responsible")]
-    responsible: String,
-    #[serde(rename = "@adtcore:masterLanguage")]
-    master_language: String,
-    #[serde(rename = "@adtcore:masterSystem")]
-    master_system: String,
-    #[serde(rename = "@adtcore:abapLanguageVersion")]
-    abap_language_version: String,
-    #[serde(rename = "adtcore:packageRef")]
-    package: RawPackage,
-    #[serde(rename = "abapsource:syntaxConfiguration")]
-    syntax_configuration: RawSyntaxConfiguration,
-    #[serde(rename = "atom:link", default)]
-    links: Vec<AdvertisedLink>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename = "include:abapInclude")]
-struct RawIncludeProperties {
-    #[serde(rename = "@adtcore:name")]
-    name: String,
-    #[serde(rename = "@adtcore:type")]
-    object_type: GlobalWorkbenchType,
-    #[serde(rename = "@adtcore:changedAt")]
-    last_changed: String,
-    #[serde(rename = "@adtcore:version")]
-    version: String,
-    #[serde(rename = "@adtcore:createdAt")]
-    created_at: String,
-    #[serde(rename = "@adtcore:changedBy")]
-    changed_by: String,
-    #[serde(rename = "@adtcore:description")]
-    description: String,
-    #[serde(rename = "@adtcore:descriptionTextLimit")]
-    description_text_limit: u32,
-    #[serde(rename = "@adtcore:language")]
-    language: String,
-    #[serde(rename = "@include:contextRefCount", default)]
-    context_ref_count: u32,
-    #[serde(rename = "@abapsource:sourceUri")]
-    source_uri: String,
-    #[serde(rename = "@abapsource:fixPointArithmetic")]
-    fix_point_arithmetic: bool,
-    #[serde(rename = "@abapsource:activeUnicodeCheck")]
-    unicode_check_active: bool,
-    #[serde(rename = "@adtcore:responsible")]
-    responsible: String,
-    #[serde(rename = "@adtcore:masterLanguage")]
-    master_language: String,
-    #[serde(rename = "@adtcore:masterSystem")]
-    master_system: String,
-    #[serde(rename = "adtcore:packageRef")]
-    package: RawPackage,
-    #[serde(rename = "include:contextRef")]
-    context_ref: Option<RawObjectReference>,
-    #[serde(rename = "atom:link", default)]
-    links: Vec<AdvertisedLink>,
-}
-
-#[derive(Deserialize)]
-struct RawObjectReference {
-    #[serde(rename = "@adtcore:uri")]
-    uri: String,
-}
-
-#[derive(Deserialize)]
-struct RawPackage {
-    #[serde(rename = "@adtcore:name")]
-    name: String,
-    #[serde(rename = "@adtcore:uri")]
-    uri: String,
-    #[serde(rename = "@adtcore:type")]
-    object_type: GlobalWorkbenchType,
-}
-
-fn package_reference(raw: RawPackage) -> Result<ObjectRef<Package>, ObjectError> {
-    if raw.object_type != Package::WORKBENCH_TYPE {
-        return Err(ObjectError::UnexpectedObjectType {
-            expected: Package::WORKBENCH_TYPE,
-            actual: raw.object_type,
-        });
-    }
-    let uri = AdtUri::parse(&raw.uri).map_err(|source| ObjectError::InvalidLink {
-        href: raw.uri.clone(),
-        source,
-    })?;
-    Ok(ObjectRef::from_parts(raw.name, uri))
-}
-
-#[derive(Deserialize)]
-struct RawSyntaxConfiguration {
-    #[serde(rename = "abapsource:language")]
-    language: RawSyntaxLanguage,
-}
-
-#[derive(Deserialize)]
-struct RawSyntaxLanguage {
-    #[serde(rename = "abapsource:version")]
-    version: String,
-    #[serde(rename = "abapsource:description")]
-    description: String,
-    #[serde(rename = "atom:link", default)]
-    links: Vec<AdvertisedLink>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::EntityTag;
 
     const PROGRAM_XML: &str = include_str!("../../tests/fixtures/program-z-test.xml");
     const INCLUDE_XML: &str = include_str!("../../tests/fixtures/include-ztest.xml");
 
-    fn parse(body: &str) -> Result<ProgramPropertiesV3, ResponseError> {
-        let properties = ProgramProperties::try_from(RawObjectProperties {
+    fn parse_program(body: &str) -> Result<ProgramProperties, ResponseError> {
+        ProgramProperties::try_from(RawObjectProperties {
             resource: ObjectRef::<Program>::for_test(
                 "Z_TEST",
                 crate::AdtUri::parse("/sap/bc/adt/programs/programs/Z_TEST").unwrap(),
@@ -730,30 +428,33 @@ mod tests {
             version: ProgramPropertiesVersion::V3,
             body: body.as_bytes().to_vec(),
             etag: Some(EntityTag::from_static("program-etag")),
-        })?;
-        Ok(match properties {
-            ProgramProperties::V2(properties) | ProgramProperties::V3(properties) => *properties,
         })
     }
 
-    fn assert_program(program: &ProgramPropertiesV3) {
+    fn parse_include(body: &str) -> Result<IncludeProperties, ResponseError> {
+        IncludeProperties::try_from(RawObjectProperties {
+            resource: ObjectRef::<Include>::for_test(
+                "ZTEST",
+                crate::AdtUri::parse("/sap/bc/adt/programs/includes/ZTEST").unwrap(),
+            ),
+            version: IncludePropertyVersion::V2,
+            body: body.as_bytes().to_vec(),
+            etag: Some(EntityTag::from_static("include-etag")),
+        })
+    }
+
+    #[test]
+    fn parses_complete_program_wire_payload() {
+        let program = parse_program(PROGRAM_XML).unwrap();
+
         assert_eq!(program.name, "Z_TEST");
-        assert_eq!(program.version, ObjectVersion::Inactive);
-        assert_eq!(program.etag.as_deref(), Some("program-etag"));
+        assert_eq!(program.version, "inactive");
+        assert_eq!(program.source_uri, "source/main");
+        assert_eq!(program.package.name.as_deref(), Some("$TMP"));
+        assert_eq!(program.links.len(), 9);
+        assert_eq!(program.syntax_configuration.language.links.len(), 1);
         assert_eq!(
-            program.source.uri.as_str(),
-            "/sap/bc/adt/programs/programs/Z_TEST/source/main"
-        );
-        assert_eq!(program.source.etag.as_deref(), Some("202607251959580001"));
-        assert_eq!(program.relations().len(), 9);
-        assert_eq!(program.syntax_configuration.language.relations().len(), 1);
-        assert_eq!(
-            program
-                .syntax_configuration
-                .language
-                .parser()
-                .unwrap()
-                .unwrap()
+            program.syntax_configuration.language.links[0]
                 .etag
                 .as_deref(),
             Some("757")
@@ -761,70 +462,102 @@ mod tests {
     }
 
     #[test]
-    fn parses_include_properties() {
-        let reference = ObjectRef::<Include>::for_test(
-            "ZTEST",
-            crate::AdtUri::parse("/sap/bc/adt/programs/includes/ZTEST").unwrap(),
-        );
-        let properties = IncludeProperties::try_from(RawObjectProperties {
-            resource: reference.clone(),
-            version: IncludePropertyVersion::V2,
-            body: INCLUDE_XML.as_bytes().to_vec(),
-            etag: Some(EntityTag::from_static("include-etag")),
-        })
-        .unwrap();
-        let IncludeProperties::V2(include) = properties;
-        let include = *include;
+    fn parses_complete_include_wire_payload() {
+        let include = parse_include(INCLUDE_XML).unwrap();
 
-        assert_eq!(include.reference, reference);
         assert_eq!(include.name, "ZTEST");
-        assert_eq!(include.object_type.to_string(), "PROG/I");
-        assert_eq!(include.version, ObjectVersion::Active);
+        assert_eq!(include.version, "active");
+        assert_eq!(include.source_uri, "source/main");
         assert_eq!(include.context_ref_count, 0);
         assert!(include.context_ref.is_none());
-        assert_eq!(include.package.name(), "$TMP");
-        assert_eq!(include.relations().len(), 7);
-        assert_eq!(
-            include.source.uri.as_str(),
-            "/sap/bc/adt/programs/includes/ZTEST/source/main"
-        );
-        assert_eq!(include.source.etag.as_deref(), Some("202601241617490011"));
-        assert_eq!(include.etag.as_deref(), Some("include-etag"));
+        assert_eq!(include.package.name.as_deref(), Some("$TMP"));
+        assert_eq!(include.links.len(), 7);
     }
 
     #[test]
-    fn parses_program_properties() {
-        assert_program(&parse(PROGRAM_XML).unwrap());
+    fn program_json_uses_friendly_keys_and_round_trips() {
+        let program = parse_program(PROGRAM_XML).unwrap();
+        let value = serde_json::to_value(&program).unwrap();
+
+        assert_eq!(value["name"], "Z_TEST");
+        assert_eq!(value["objectType"], "PROG/P");
+        assert_eq!(value["version"], "inactive");
+        assert_eq!(value["sourceUri"], "source/main");
+        assert!(value.get("@adtcore:name").is_none());
+        let round_tripped: ProgramProperties = serde_json::from_value(value).unwrap();
+        assert_eq!(round_tripped.name, program.name);
+        assert_eq!(round_tripped.links.len(), program.links.len());
+        assert_eq!(round_tripped.package.uri, program.package.uri);
+    }
+
+    #[test]
+    fn include_json_with_context_reference_round_trips() {
+        let mut value = serde_json::to_value(parse_include(INCLUDE_XML).unwrap()).unwrap();
+        value["contextRef"] = serde_json::json!({
+            "uri": "/sap/bc/adt/programs/programs/Z_CONTEXT",
+            "objectType": "PROG/P",
+            "name": "Z_CONTEXT",
+            "description": "Context program"
+        });
+
+        let include: IncludeProperties = serde_json::from_value(value).unwrap();
+        let context = include.context_ref.as_ref().unwrap();
+        assert_eq!(
+            context.uri.as_deref(),
+            Some("/sap/bc/adt/programs/programs/Z_CONTEXT")
+        );
+        assert_eq!(context.object_type.as_ref(), Some(&Program::WORKBENCH_TYPE));
+        assert_eq!(context.name.as_deref(), Some("Z_CONTEXT"));
+        assert_eq!(context.description.as_deref(), Some("Context program"));
+        let round_tripped: IncludeProperties =
+            serde_json::from_value(serde_json::to_value(&include).unwrap()).unwrap();
+        let context = round_tripped.context_ref.unwrap();
+        assert_eq!(
+            context.uri.as_deref(),
+            Some("/sap/bc/adt/programs/programs/Z_CONTEXT")
+        );
+        assert_eq!(context.description.as_deref(), Some("Context program"));
+    }
+
+    #[test]
+    fn preserves_unparsed_object_version_and_unresolved_links() {
+        let invalid_href = "https://attacker.example/source";
+        let body = PROGRAM_XML
+            .replace("adtcore:version=\"inactive\"", "adtcore:version=\"dirty\"")
+            .replace("adtcore:type=\"DEVC/K\"", "adtcore:type=\"FUTURE/PACKAGE\"")
+            .replace(
+                "adtcore:uri=\"/sap/bc/adt/packages/%24tmp\"",
+                "adtcore:uri=\"https://example.test/package\"",
+            )
+            .replace("source/main/versions", invalid_href);
+        let program = parse_program(&body).unwrap();
+
+        assert_eq!(program.version, "dirty");
+        assert_eq!(
+            program.package.object_type.unwrap().as_str(),
+            "FUTURE/PACKAGE"
+        );
+        assert_eq!(
+            program.package.uri.as_deref(),
+            Some("https://example.test/package")
+        );
+        assert_eq!(program.links[0].href, invalid_href);
     }
 
     #[test]
     fn rejects_malformed_program_xml() {
-        let error = parse("<program:abapProgram>").unwrap_err();
-
         assert!(matches!(
-            error,
-            ResponseError::Object(ObjectError::InvalidResponse(_))
+            parse_program("<program:abapProgram>"),
+            Err(ResponseError::Object(ObjectError::InvalidResponse(_)))
         ));
     }
 
     #[test]
-    fn rejects_unsupported_program_object_version() {
-        let body = PROGRAM_XML.replace("adtcore:version=\"inactive\"", "adtcore:version=\"dirty\"");
-        let error = parse(&body).unwrap_err();
-
-        assert!(matches!(
-            error,
-            ResponseError::Object(ObjectError::UnsupportedObjectVersion { version })
-                if version == "dirty"
-        ));
-    }
-
-    #[test]
-    fn rejects_unexpected_program_object_type() {
+    fn rejects_unexpected_root_object_type() {
         let body = PROGRAM_XML.replace("adtcore:type=\"PROG/P\"", "adtcore:type=\"PROG/I\"");
 
         assert!(matches!(
-            parse(&body),
+            parse_program(&body),
             Err(ResponseError::Object(ObjectError::UnexpectedObjectType {
                 expected,
                 actual,
@@ -833,112 +566,15 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unexpected_include_object_type() {
-        let body = INCLUDE_XML.replace("adtcore:type=\"PROG/I\"", "adtcore:type=\"PROG/P\"");
-        let reference = ObjectRef::<Include>::for_test(
-            "ZTEST",
-            crate::AdtUri::parse("/sap/bc/adt/programs/includes/ZTEST").unwrap(),
-        );
+    fn rejects_unexpected_root_object_name() {
+        let body = INCLUDE_XML.replace("adtcore:name=\"ZTEST\"", "adtcore:name=\"ZOTHER\"");
 
         assert!(matches!(
-            IncludeProperties::try_from(RawObjectProperties {
-                resource: reference,
-                version: IncludePropertyVersion::V2,
-                body: body.into_bytes(),
-                etag: None,
-            }),
-            Err(ResponseError::Object(ObjectError::UnexpectedObjectType {
+            parse_include(&body),
+            Err(ResponseError::Object(ObjectError::UnexpectedObjectName {
                 expected,
                 actual,
-            })) if expected == Include::WORKBENCH_TYPE && actual == Program::WORKBENCH_TYPE
+            })) if expected == "ZTEST" && actual == "ZOTHER"
         ));
-    }
-
-    #[test]
-    fn rejects_program_without_plain_text_source_link() {
-        let body = PROGRAM_XML.replacen(
-            "type=\"text/plain\"",
-            "type=\"application/octet-stream\"",
-            1,
-        );
-        let error = parse(&body).unwrap_err();
-
-        assert!(matches!(
-            error,
-            ResponseError::Object(ObjectError::MissingRelation {
-                relation: "plain-text source"
-            })
-        ));
-    }
-
-    #[test]
-    fn rejects_disagreement_between_source_attribute_and_link() {
-        let body = PROGRAM_XML.replace(
-            "abapsource:sourceUri=\"source/main\"",
-            "abapsource:sourceUri=\"source/other\"",
-        );
-        let error = parse(&body).unwrap_err();
-
-        assert!(matches!(
-            error,
-            ResponseError::Object(ObjectError::RelationMismatch {
-                relation: "source",
-                declared,
-                advertised,
-            })
-                if declared.ends_with("/source/other")
-                    && advertised.ends_with("/source/main")
-        ));
-    }
-
-    #[test]
-    fn defers_invalid_optional_links_until_accessed() {
-        let invalid_href = "https://attacker.example/sap/bc/adt/textelements/programs/Z_TEST";
-        let body = PROGRAM_XML.replace("/sap/bc/adt/textelements/programs/z_test", invalid_href);
-
-        let program = parse(&body).unwrap();
-        let error = program.text_elements().unwrap_err();
-
-        assert_eq!(error.href(), invalid_href);
-    }
-
-    #[test]
-    fn retains_unknown_link_relations_and_representation_metadata() {
-        let relations = Relations::new(
-            ObjectRef::<Program>::for_test(
-                "ZDEMO",
-                crate::AdtUri::parse("/sap/bc/adt/programs/programs/ZDEMO").unwrap(),
-            )
-            .erase(),
-            vec![AdvertisedLink {
-                href: "related/resource?version=active#section".to_owned(),
-                relation: Some("https://example.test/relations/future".to_owned()),
-                media_type: Some("application/example+xml".to_owned()),
-                hreflang: Some("en".to_owned()),
-                title: Some("Future relation".to_owned()),
-                length: Some("42".to_owned()),
-                etag: Some("future-etag".to_owned()),
-            }],
-        );
-
-        let link = relations.iter().next().unwrap().unwrap();
-        assert_eq!(link.href, "related/resource?version=active#section");
-        assert_eq!(
-            link.target.as_str(),
-            "/sap/bc/adt/programs/programs/ZDEMO/related/resource"
-        );
-        assert_eq!(link.query, [("version".to_owned(), "active".to_owned())]);
-        assert_eq!(link.fragment.as_deref(), Some("section"));
-        assert_eq!(
-            link.relation.as_deref(),
-            Some("https://example.test/relations/future")
-        );
-        assert_eq!(link.media_type.as_deref(), Some("application/example+xml"));
-        assert_eq!(link.hreflang.as_deref(), Some("en"));
-        assert_eq!(link.title.as_deref(), Some("Future relation"));
-        assert_eq!(link.length.as_deref(), Some("42"));
-        assert_eq!(link.etag.as_deref(), Some("future-etag"));
-        let parser: Option<ParserRef> = relations.get().unwrap();
-        assert!(parser.is_none());
     }
 }

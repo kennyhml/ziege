@@ -60,6 +60,7 @@ pub trait ReadProperties: ObjectType {
     type MediaVersion: MediaVersionNegotiation;
     type Properties: std::fmt::Debug
         + TryFrom<RawObjectProperties<Self>, Error = ResponseError>
+        + serde::Serialize
         + Send
         + Sync;
 }

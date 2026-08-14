@@ -363,7 +363,10 @@ mod tests {
         assert_eq!(content.object_count, 3);
         assert_eq!(content.folders.len(), 1);
         assert_eq!(content.objects.len(), 1);
-        assert_eq!(content.objects[0].object_type.to_string(), "CLAS/OC");
+        assert_eq!(
+            content.objects[0].reference.object_type().as_str(),
+            "CLAS/OC"
+        );
         assert_eq!(content.objects[0].relations().len(), 1);
     }
 

@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Client, Logon, Operation, Package, PackageProperties, PackagePropertiesVersion,
-    PackageSettingsQuery, Ready, ReqwestTransport,
+    Client, Logon, Operation, Package, PackagePropertiesVersion, PackageSettingsQuery, Ready,
+    ReqwestTransport,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -84,15 +84,24 @@ async fn package_properties_use_the_discovered_v2_contract() {
     let reference = client.object::<Package>("sadt_tools_core").unwrap();
     let response = reference.query().execute(&client).await.unwrap();
     assert_eq!(response.media_version(), PackagePropertiesVersion::V2);
-    let PackageProperties::V2(package) = response else {
-        panic!("unexpected package-properties version");
-    };
+    let package = response.payload();
 
-    assert_eq!(package.reference, reference);
     assert_eq!(package.name, "SADT_TOOLS_CORE");
-    assert_eq!(package.etag.as_deref(), Some("package-etag"));
-    assert_eq!(package.package_interfaces.len(), 1);
-    assert_eq!(package.use_accesses.len(), 1);
+    assert_eq!(response.object(), &reference);
+    assert_eq!(
+        response.etag().map(zadt::EntityTag::as_str),
+        Some("package-etag")
+    );
+    assert_eq!(
+        package
+            .package_interfaces
+            .as_ref()
+            .unwrap()
+            .package_interface_ref
+            .len(),
+        1
+    );
+    assert_eq!(package.use_accesses.as_ref().unwrap().use_access.len(), 1);
 
     logon.assert_async().await;
     discovery.assert_async().await;

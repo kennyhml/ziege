@@ -287,6 +287,27 @@ impl fmt::Display for EntityTag {
     }
 }
 
+impl serde::Serialize for EntityTag {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for EntityTag {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+
+        let value = String::deserialize(deserializer)?;
+        value.parse().map_err(D::Error::custom)
+    }
+}
+
 impl PartialEq<str> for EntityTag {
     fn eq(&self, other: &str) -> bool {
         self.as_str() == other

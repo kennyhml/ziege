@@ -20,8 +20,8 @@ use zadt_macros::object_type;
         ),
     ),
 )]
-#[derive(Debug)]
-pub enum Program {}
+#[derive(Clone, Copy, Debug)]
+pub struct Program;
 
 /// The standalone ABAP include object type.
 #[object_type(
@@ -38,19 +38,19 @@ pub enum Program {}
         ),
     ),
 )]
-#[derive(Debug)]
-pub enum Include {}
+#[derive(Clone, Copy, Debug)]
+pub struct Include;
 
 impl ObjectRef<Program> {
     #[cfg(test)]
     pub(crate) fn for_test(name: &str, uri: crate::AdtUri) -> Self {
-        Self::typed(name.to_ascii_uppercase(), uri)
+        Self::from_parts(name.to_ascii_uppercase(), uri)
     }
 }
 
 impl ObjectRef<Include> {
     #[cfg(test)]
     pub(crate) fn for_test(name: &str, uri: crate::AdtUri) -> Self {
-        Self::typed(name.to_ascii_uppercase(), uri)
+        Self::from_parts(name.to_ascii_uppercase(), uri)
     }
 }

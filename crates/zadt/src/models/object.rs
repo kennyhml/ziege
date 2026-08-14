@@ -57,16 +57,6 @@ impl SourceUpdateResult {
     }
 }
 
-/// The canonical properties returned after an object-properties update.
-#[derive(Debug)]
-pub struct ObjectPropertiesUpdateResult<P> {
-    /// Server-confirmed properties when SAP returned a representation body.
-    pub properties: Option<P>,
-
-    /// The updated entity tag supplied by SAP, when present.
-    pub etag: Option<EntityTag>,
-}
-
 /// Plain-text output produced by running a type-erased repository object.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ObjectRunResult {
@@ -309,7 +299,11 @@ mod tests {
 
     #[test]
     fn parses_object_lock_and_transport_metadata() {
-        let object = ObjectRef::new(AdtUri::parse("/sap/bc/adt/programs/programs/ztest").unwrap());
+        let object = ObjectRef::erased(
+            "ZTEST".to_owned(),
+            AdtUri::parse("/sap/bc/adt/programs/programs/ztest").unwrap(),
+            "PROG/P".parse().unwrap(),
+        );
         let lock = ObjectLock::parse(
             object,
             AccessMode::Modify,
@@ -340,7 +334,11 @@ mod tests {
                 "<LINK_UP_MODE />",
                 "<LINK_UP_MODE>MultipleRequests</LINK_UP_MODE>",
             );
-        let object = ObjectRef::new(AdtUri::parse("/sap/bc/adt/oo/classes/zcl_test").unwrap());
+        let object = ObjectRef::erased(
+            "ZCL_TEST".to_owned(),
+            AdtUri::parse("/sap/bc/adt/oo/classes/zcl_test").unwrap(),
+            "CLAS/OC".parse().unwrap(),
+        );
         let lock = ObjectLock::parse(
             object,
             AccessMode::Modify,

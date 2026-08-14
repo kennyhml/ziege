@@ -14,12 +14,12 @@ use zadt_macros::object_type;
         model = PackageProperties,
     )),
 )]
-#[derive(Debug)]
-pub enum Package {}
+#[derive(Clone, Copy, Debug)]
+pub struct Package;
 
 impl ObjectRef<Package> {
     #[cfg(test)]
     pub(crate) fn for_test(name: &str, uri: crate::AdtUri) -> Self {
-        Self::typed(name.to_ascii_uppercase(), uri)
+        Self::from_parts(name.to_ascii_uppercase(), uri)
     }
 }

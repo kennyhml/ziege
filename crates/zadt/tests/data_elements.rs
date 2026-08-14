@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    AccessMode, Client, DataElement, DataElementProperties, DataElementPropertiesVersion, Logon,
-    ObjectVersion, Operation, Ready, ReqwestTransport,
+    AccessMode, Client, DataElement, DataElementPropertiesVersion, Logon, ObjectVersion, Operation,
+    Ready, ReqwestTransport,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -92,13 +92,13 @@ async fn data_element_properties_use_one_read_write_representation() {
         .unwrap();
 
     assert_eq!(response.media_version(), DataElementPropertiesVersion::V2);
-    assert_eq!(response.properties().reference, reference);
+    assert_eq!(response.object(), &reference);
     assert_eq!(
         response.etag().map(|etag| etag.as_str()),
         Some("data-element-etag")
     );
     assert_eq!(
-        response.properties().definition.type_name.as_deref(),
+        response.payload().definition.type_name.as_deref(),
         Some("CHAR0008")
     );
 
@@ -108,7 +108,7 @@ async fn data_element_properties_use_one_read_write_representation() {
 }
 
 #[tokio::test]
-async fn data_element_update_reuses_the_properties_in_the_lock_session() {
+async fn runtime_data_element_update_reuses_json_properties_in_the_lock_session() {
     let server = MockServer::start_async().await;
     let logon = mock_logon(&server).await;
     let discovery = mock_discovery(&server).await;
@@ -203,24 +203,22 @@ async fn data_element_update_reuses_the_properties_in_the_lock_session() {
 
     let client = ready_client(&server).await;
     let reference = client.object::<DataElement>("ZTFRWTFRT").unwrap();
-    let mut properties = reference.query().execute(&client).await.unwrap();
-    properties.properties_mut().description = Some("Updated description".to_owned());
-    let mut expected = properties.clone();
-    expected.properties_mut().description = Some("tfarFAR".to_owned());
-    expected.properties_mut().etag = Some("data-element-etag-2".parse().unwrap());
+    let object = reference.erase();
+    let mut properties = object.query().unwrap().execute(&client).await.unwrap();
+    properties.payload_mut()["description"] = "Updated description".into();
     let session = client.create_user_session();
-    let object_lock = reference
+    let object_lock = object
         .lock(AccessMode::Modify)
         .execute(&session)
         .await
         .unwrap();
-    let result = reference
-        .update(&object_lock, properties)
+    let result = object
+        .update_properties(&object_lock, properties)
         .unwrap()
         .execute(&session)
         .await
         .unwrap();
-    reference
+    object
         .unlock(object_lock)
         .unwrap()
         .execute(&session)
@@ -230,8 +228,13 @@ async fn data_element_update_reuses_the_properties_in_the_lock_session() {
 
     assert_eq!(result.etag.as_deref(), Some("data-element-etag-2"));
     let canonical = result.properties.unwrap();
-    assert_eq!(canonical, expected);
-    assert!(matches!(canonical, DataElementProperties::V2(_)));
+    assert_eq!(canonical.object(), &object);
+    assert_eq!(canonical.media_type(), DATA_ELEMENT_MEDIA_TYPE);
+    assert_eq!(
+        canonical.etag().map(|etag| etag.as_str()),
+        Some("data-element-etag-2")
+    );
+    assert_eq!(canonical.payload()["description"], "tfarFAR");
     logon.assert_async().await;
     discovery.assert_async().await;
     csrf.assert_async().await;

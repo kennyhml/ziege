@@ -1,6 +1,7 @@
-use crate::ObjectRef;
+use crate::{AdtUri, ObjectRef};
+use serde::Serialize;
 
-use super::{AdtLink, AdtLinkError, AdvertisedLink, OwnedResourceRef, refs::FromAdtLink};
+use super::{AdtLink, AdtLinkError, AdvertisedLink};
 
 /// Maps relations of an object reference and enables lazy evaluation
 /// of possible references. While the underlying [`ObjectRef`] could
@@ -11,20 +12,76 @@ use super::{AdtLink, AdtLinkError, AdvertisedLink, OwnedResourceRef, refs::FromA
 /// supported statically.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Relations {
-    owner: ObjectRef,
+    base: AdtUri,
     links: Box<[AdvertisedLink]>,
+}
+
+impl Serialize for Relations {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.links
+            .iter()
+            .map(|link| SerializedRelation::new(link, &self.base))
+            .collect::<Vec<_>>()
+            .serialize(serializer)
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SerializedRelation {
+    href: String,
+    target: Option<AdtUri>,
+    query: Vec<(String, String)>,
+    fragment: Option<String>,
+    relation: Option<String>,
+    media_type: Option<String>,
+    hreflang: Option<String>,
+    title: Option<String>,
+    length: Option<String>,
+    etag: Option<String>,
+    resolved: bool,
+    resolution_error: Option<String>,
+}
+
+impl SerializedRelation {
+    fn new(link: &AdvertisedLink, base: &AdtUri) -> Self {
+        let (target, query, fragment, resolution_error) = match link.resolve(base) {
+            Ok(link) => (Some(link.target), link.query, link.fragment, None),
+            Err(error) => (None, Vec::new(), None, Some(error.to_string())),
+        };
+        Self {
+            href: link.href.clone(),
+            target,
+            query,
+            fragment,
+            relation: link.relation.clone(),
+            media_type: link.media_type.clone(),
+            hreflang: link.hreflang.clone(),
+            title: link.title.clone(),
+            length: link.length.clone(),
+            etag: link.etag.clone(),
+            resolved: resolution_error.is_none(),
+            resolution_error,
+        }
+    }
 }
 
 impl Relations {
     pub(crate) fn new(owner: ObjectRef, links: Vec<AdvertisedLink>) -> Self {
         Self {
-            owner,
+            base: owner.uri().clone(),
             links: links.into_boxed_slice(),
         }
     }
 
-    pub(crate) fn advertised(&self) -> &[AdvertisedLink] {
-        &self.links
+    pub(crate) fn for_base(base: AdtUri, links: Vec<AdvertisedLink>) -> Self {
+        Self {
+            base,
+            links: links.into_boxed_slice(),
+        }
     }
 
     /// Returns the number of advertised links without resolving them.
@@ -39,32 +96,14 @@ impl Relations {
 
     /// Resolves advertised links in document order.
     pub fn iter<'a>(&'a self) -> impl ExactSizeIterator<Item = Result<AdtLink, AdtLinkError>> + 'a {
-        self.links.iter().map(|link| link.resolve(self.owner.uri()))
-    }
-
-    /// Resolves and converts the relation associated to `R`.
-    ///
-    /// The link is resolved against the owner of the relation as the base,
-    /// enforcing a valid resource reference.
-    pub(crate) fn get<R>(&self) -> Result<Option<OwnedResourceRef<R>>, AdtLinkError>
-    where
-        R: FromAdtLink,
-    {
-        self.links
-            .iter()
-            .find(|link| link.matches(R::RELATION, R::MEDIA_TYPE))
-            .map(|link| {
-                link.resolve(self.owner.uri())
-                    .map(|link| R::from_adt_link(&self.owner, &link))
-            })
-            .transpose()
+        self.links.iter().map(|link| link.resolve(&self.base))
     }
 
     pub(crate) fn find(&self, relation: &str) -> Result<Option<AdtLink>, AdtLinkError> {
         self.links
             .iter()
             .find(|link| link.relation.as_deref() == Some(relation))
-            .map(|link| link.resolve(self.owner.uri()))
+            .map(|link| link.resolve(&self.base))
             .transpose()
     }
 }

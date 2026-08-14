@@ -9,7 +9,7 @@ use crate::{
     models::{
         AccessMode, ObjectLock, ObjectRunResult, SourceCode, SourceUpdateResult, TransportNumber,
     },
-    objects::{GlobalWorkbenchType, HasSource, ImmediateRun, ObjectRef, ObjectType, RunCapability},
+    objects::{HasSource, ImmediateRun, ObjectRef, ObjectType, RunCapability},
     operation::{Operation, OperationResponse, Stateful, Stateless},
     protocol::{AdtRequest, AdtResponse},
     resource::SourceRef,
@@ -20,27 +20,21 @@ use crate::{
 #[derive(Debug)]
 pub struct ObjectRun {
     reference: ObjectRef,
-    object_type: GlobalWorkbenchType,
     run: RunCapability,
     profiler_id: Option<String>,
 }
 
 impl ObjectRun {
-    pub(crate) fn new(
-        reference: ObjectRef,
-        object_type: GlobalWorkbenchType,
-        run: RunCapability,
-    ) -> Self {
+    pub(crate) fn new(reference: ObjectRef, run: RunCapability) -> Self {
         Self {
             reference,
-            object_type,
             run,
             profiler_id: None,
         }
     }
 
     pub(crate) fn typed<T: ImmediateRun>(reference: &ObjectRef<T>) -> Self {
-        Self::new(reference.erase(), T::WORKBENCH_TYPE, T::RUN)
+        Self::new(reference.erase(), T::RUN)
     }
 
     /// Runs the object with the supplied ABAP profiler trace identifier.
@@ -100,7 +94,7 @@ impl Operation<Ready> for ObjectRun {
             .map_err(ObjectError::InvalidResponseEncoding)?;
         Ok(ObjectRunResult::new(
             self.reference.clone(),
-            self.object_type.clone(),
+            self.reference.object_type().clone(),
             content,
         ))
     }
@@ -370,9 +364,7 @@ mod tests {
     use async_trait::async_trait;
     use http::{HeaderMap, HeaderValue, header};
 
-    use crate::{
-        Class, ClassSourceComponent, Initial, ObjectRef, Program, RepositoryObject, Transport,
-    };
+    use crate::{Class, ClassSourceComponent, Initial, ObjectRef, Program, Transport};
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
 
@@ -416,7 +408,7 @@ mod tests {
 
         let client = ready_client();
         let program = program();
-        let program_run = RepositoryObject::from(program.clone()).run().unwrap();
+        let program_run = program.erase().run().unwrap();
         let program_request = program_run.request(&client).unwrap();
         assert_eq!(
             program_request.target().as_str(),
@@ -437,7 +429,8 @@ mod tests {
             "ZCL_EXAMPLE",
             crate::AdtUri::parse("/sap/bc/adt/oo/classes/zcl_example").unwrap(),
         );
-        let class_request = RepositoryObject::from(class)
+        let class_request = class
+            .erase()
             .run()
             .unwrap()
             .profiler_id("TRACE ID")

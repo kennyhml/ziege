@@ -22,8 +22,8 @@ use zadt_macros::object_type;
         ),
     ),
 )]
-#[derive(Debug)]
-pub enum Class {}
+#[derive(Clone, Copy, Debug)]
+pub struct Class;
 
 /// A secondary source component owned and locked by an ABAP class.
 ///
@@ -56,6 +56,6 @@ impl ObjectRef<Class> {
 
     #[cfg(test)]
     pub(crate) fn for_test(name: &str, uri: crate::AdtUri) -> Self {
-        Self::typed(name.to_ascii_uppercase(), uri)
+        Self::from_parts(name.to_ascii_uppercase(), uri)
     }
 }

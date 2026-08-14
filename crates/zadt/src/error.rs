@@ -107,6 +107,9 @@ pub enum ObjectError {
     #[error("could not serialize object update request: {0}")]
     InvalidRequest(#[source] serde_xml_rs::Error),
 
+    #[error("invalid object properties JSON: {0}")]
+    InvalidPropertiesJson(#[source] serde_json::Error),
+
     #[error("object link `{href}` could not be resolved: {source}")]
     InvalidLink { href: String, source: AdtUriError },
 
@@ -300,6 +303,9 @@ pub enum ResponseError {
 
     #[error(transparent)]
     Cts(#[from] CtsError),
+
+    #[error("could not serialize object properties as JSON: {0}")]
+    JsonSerialization(#[from] serde_json::Error),
 }
 
 impl ResponseError {

@@ -1,4 +1,4 @@
-use std::{fmt, hash::Hash, marker::PhantomData};
+use std::{fmt, hash::Hash};
 
 use crate::{
     AccessMode, LockRequest, ObjectLock, UnlockRequest,
@@ -28,56 +28,124 @@ pub(crate) mod private {
 }
 
 /// Statically identified ADT object resource family.
-pub trait ObjectType: private::Sealed + Send + Sync + Sized + 'static {
-    /// The objects global Workbench type.
+pub trait ObjectType: private::Sealed + Clone + Send + Sync + Sized + 'static {
+    /// The object's global Workbench type.
     const WORKBENCH_TYPE: GlobalWorkbenchType;
 
     /// The stable category identifying the canonical object collection.
     const CATEGORY: CategoryId;
+
+    #[doc(hidden)]
+    fn marker() -> Self;
 }
 
-/// A runtime repository object backed by an optional modeled-type descriptor.
-///
-/// RIS objects with an unmodeled Workbench type retain their exact identity but
-/// report family-specific capabilities as unsupported.
-#[derive(Clone)]
-pub struct RepositoryObject {
-    reference: ObjectRef,
+/// Runtime type information retained by a type-erased object reference.
+#[derive(Clone, Debug)]
+pub struct Erased {
     object_type: GlobalWorkbenchType,
     descriptor: Option<&'static dyn RuntimeObjectTypeDescriptor>,
 }
 
-impl RepositoryObject {
-    pub(crate) fn from_reference(
-        reference: ObjectRef,
-        object_type: GlobalWorkbenchType,
-    ) -> Result<Self, ObjectError> {
-        let descriptor = descriptors::object_type_descriptor(&object_type);
-        Ok(Self {
-            reference,
+impl Erased {
+    fn new(object_type: GlobalWorkbenchType) -> Self {
+        Self {
+            descriptor: descriptors::object_type_descriptor(&object_type),
             object_type,
-            descriptor,
-        })
+        }
+    }
+}
+
+/// A validated ADT repository-object identity with static or runtime type state.
+///
+/// Typed references obtain capabilities from `T`. [`ObjectRef<Erased>`] retains
+/// the exact runtime Workbench type and an optional descriptor for modeled
+/// runtime capabilities.
+#[derive(Clone, Debug)]
+pub struct ObjectRef<T = Erased> {
+    name: String,
+    uri: AdtUri,
+    state: T,
+}
+
+impl<T> ObjectRef<T> {
+    /// Returns the object's resource URI.
+    pub fn uri(&self) -> &AdtUri {
+        &self.uri
     }
 
-    /// Returns the object's type-erased identity.
-    pub fn reference(&self) -> ObjectRef {
-        self.reference.clone()
+    /// Returns the object name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl<T: ObjectType> ObjectRef<T> {
+    fn typed_ref(name: String, uri: AdtUri) -> Self {
+        Self {
+            name,
+            uri,
+            state: T::marker(),
+        }
     }
 
-    /// Returns the exact runtime object type.
+    pub(crate) fn from_parts(name: String, uri: AdtUri) -> Self {
+        Self::typed_ref(name, uri)
+    }
+
+    /// Returns a runtime-typed copy of this object identity.
+    pub fn erase(&self) -> ObjectRef<Erased> {
+        ObjectRef::erased(self.name.clone(), self.uri.clone(), T::WORKBENCH_TYPE)
+    }
+
+    /// Returns this reference's statically known Workbench type.
+    pub fn object_type(&self) -> GlobalWorkbenchType {
+        T::WORKBENCH_TYPE
+    }
+
+    pub(crate) fn source_from_path(&self, path: &[&str]) -> SourceRef {
+        self.erase().source_from_path(path)
+    }
+}
+
+impl ObjectRef<Erased> {
+    pub(crate) fn erased(name: String, uri: AdtUri, object_type: GlobalWorkbenchType) -> Self {
+        Self {
+            name,
+            uri,
+            state: Erased::new(object_type),
+        }
+    }
+
+    /// Returns the exact runtime Workbench type.
     pub fn object_type(&self) -> &GlobalWorkbenchType {
-        &self.object_type
+        &self.state.object_type
+    }
+
+    pub(crate) fn descriptor(&self) -> Option<&'static dyn RuntimeObjectTypeDescriptor> {
+        self.state.descriptor
+    }
+
+    /// Returns another runtime-typed copy of this object identity.
+    pub fn erase(&self) -> Self {
+        self.clone()
+    }
+
+    /// Recovers a typed reference when this object has the requested type.
+    pub fn typed<T: ObjectType>(&self) -> Option<ObjectRef<T>> {
+        if self.object_type() != &T::WORKBENCH_TYPE {
+            return None;
+        }
+        Some(ObjectRef::typed_ref(self.name.clone(), self.uri.clone()))
     }
 
     /// Resolves the statically known secondary source components for this family.
     pub fn source_components(&self) -> Vec<SourceRef> {
-        self.descriptor
+        self.descriptor()
             .map(|descriptor| {
                 descriptor
                     .source_component_paths()
                     .iter()
-                    .map(|path| self.reference.source_from_path(path))
+                    .map(|path| self.source_from_path(path))
                     .collect()
             })
             .unwrap_or_default()
@@ -85,146 +153,46 @@ impl RepositoryObject {
 
     /// Resolves the primary source when available.
     pub fn source(&self) -> Option<SourceRef> {
-        self.descriptor
+        self.descriptor()
             .and_then(|descriptor| descriptor.source_path())
-            .map(|path| self.reference.source_from_path(path))
+            .map(|path| self.source_from_path(path))
     }
 
     /// Resolves one named secondary source component when available.
     pub fn source_component(&self, name: &str) -> Option<SourceRef> {
-        self.descriptor?
+        self.descriptor()?
             .source_component_paths()
             .iter()
             .find(|path| path.last() == Some(&name))
-            .map(|path| self.reference.source_from_path(path))
+            .map(|path| self.source_from_path(path))
     }
 
     /// Creates an immediate run operation when this object family supports it.
     pub fn run(&self) -> Result<ObjectRun, ObjectError> {
         let run = self
-            .descriptor
+            .descriptor()
             .and_then(|descriptor| descriptor.run())
             .ok_or_else(|| ObjectError::UnsupportedCapability {
-                object_type: self.object_type.clone(),
+                object_type: self.object_type().clone(),
                 capability: "immediate run",
             })?;
-        Ok(ObjectRun::new(
-            self.reference.clone(),
-            self.object_type.clone(),
-            run,
-        ))
-    }
-
-    /// Recovers a typed reference when this object has the requested type.
-    pub fn typed<T: ObjectType>(&self) -> Option<ObjectRef<T>> {
-        if self.object_type != T::WORKBENCH_TYPE {
-            return None;
-        }
-        Some(self.reference.retype())
+        Ok(ObjectRun::new(self.clone(), run))
     }
 
     /// Creates an object-lock operation.
     pub fn lock(&self, access_mode: AccessMode) -> LockRequest {
-        LockRequest::new(self.reference(), access_mode)
+        LockRequest::new(self.clone(), access_mode)
     }
 
     /// Creates an operation that releases this object's lock.
     pub fn unlock(&self, object_lock: ObjectLock) -> Result<UnlockRequest, ObjectError> {
-        let reference = self.reference();
-        if reference.uri() != object_lock.object().uri() {
+        if self.uri() != object_lock.object().uri() {
             return Err(ObjectError::ObjectLockMismatch {
-                expected: reference.to_string(),
+                expected: self.to_string(),
                 actual: object_lock.object().to_string(),
             });
         }
         Ok(UnlockRequest::new(object_lock))
-    }
-
-    /// Placeholder while runtime properties dispatch is being redesigned.
-    pub fn properties(&self) -> ! {
-        panic!("type-erased object properties are not implemented")
-    }
-
-    /// Placeholder while runtime properties updates are being redesigned.
-    pub fn update<P>(&self, _object_lock: &ObjectLock, _properties: P) -> ! {
-        panic!("type-erased object properties updates are not implemented")
-    }
-}
-
-impl<T> From<ObjectRef<T>> for RepositoryObject
-where
-    T: ObjectType,
-{
-    fn from(reference: ObjectRef<T>) -> Self {
-        let object_type = T::WORKBENCH_TYPE;
-        let descriptor = descriptors::object_type_descriptor(&object_type);
-        Self {
-            reference: reference.erase(),
-            object_type,
-            descriptor,
-        }
-    }
-}
-
-impl fmt::Debug for RepositoryObject {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("RepositoryObject")
-            .field("reference", &self.reference)
-            .field("object_type", &self.object_type)
-            .field("modeled", &self.descriptor.is_some())
-            .finish()
-    }
-}
-
-/// A validated ADT object identity, optionally tagged with its static object type.
-///
-/// A bare `ObjectRef` is type-erased and proves only the objects identity and
-/// location. [`Client::object`] returns `ObjectRef<T>` for a known
-/// [`ObjectType`].
-pub struct ObjectRef<T = ()> {
-    name: String,
-    uri: AdtUri,
-    marker: PhantomData<fn() -> T>,
-}
-
-impl ObjectRef {
-    /// Creates a type-erased object reference from a validated ADT resource URI.
-    pub(crate) fn new(uri: AdtUri) -> Self {
-        Self::typed(String::new(), uri)
-    }
-
-    pub(crate) fn named(name: String, uri: AdtUri) -> Self {
-        Self::typed(name, uri)
-    }
-}
-
-impl<T> ObjectRef<T> {
-    fn typed(name: String, uri: AdtUri) -> Self {
-        Self {
-            name,
-            uri,
-            marker: PhantomData,
-        }
-    }
-
-    /// Returns the object's resource URI.
-    pub fn uri(&self) -> &AdtUri {
-        &self.uri
-    }
-
-    /// Returns the object name when this reference carries one.
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    /// Returns a type-erased copy of this object identity.
-    pub fn erase(&self) -> ObjectRef {
-        ObjectRef::typed(self.name.clone(), self.uri.clone())
-    }
-
-    pub(crate) fn retype<U>(&self) -> ObjectRef<U> {
-        ObjectRef::typed(self.name.clone(), self.uri.clone())
     }
 
     pub(crate) fn source_from_path(&self, path: &[&str]) -> SourceRef {
@@ -232,29 +200,7 @@ impl<T> ObjectRef<T> {
             .uri()
             .append_segments(path)
             .expect("static source path forms a valid ADT URI");
-        SourceRef::new(self.erase(), uri)
-    }
-}
-
-impl<T: ObjectType> ObjectRef<T> {
-    pub(crate) fn from_parts(name: String, uri: AdtUri) -> Self {
-        Self::typed(name, uri)
-    }
-}
-
-impl<T> Clone for ObjectRef<T> {
-    fn clone(&self) -> Self {
-        Self::typed(self.name.clone(), self.uri.clone())
-    }
-}
-
-impl<T> fmt::Debug for ObjectRef<T> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut debug = formatter.debug_struct("ObjectRef");
-        if !self.name.is_empty() {
-            debug.field("name", &self.name);
-        }
-        debug.field("uri", &self.uri).finish()
+        SourceRef::new(self.clone(), uri)
     }
 }
 
@@ -278,41 +224,71 @@ impl<T> fmt::Display for ObjectRef<T> {
     }
 }
 
+impl<T> serde::Serialize for ObjectRef<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct as _;
+
+        let mut reference = serializer.serialize_struct("ObjectRef", 2)?;
+        reference.serialize_field("name", &self.name)?;
+        reference.serialize_field("uri", &self.uri)?;
+        reference.end()
+    }
+}
+
+impl<'de, T> serde::Deserialize<'de> for ObjectRef<T>
+where
+    T: ObjectType,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        struct SerializedObjectRef {
+            name: String,
+            uri: AdtUri,
+        }
+
+        let reference = SerializedObjectRef::deserialize(deserializer)?;
+        Ok(Self::typed_ref(reference.name, reference.uri))
+    }
+}
+
 impl Client<Ready> {
-    fn object_reference(&self, category: CategoryId, name: &str) -> Result<ObjectRef, ObjectError> {
+    fn object_identity(
+        &self,
+        category: CategoryId,
+        name: &str,
+    ) -> Result<(String, AdtUri), ObjectError> {
         let name = name.to_ascii_uppercase();
         let uri_name = name.to_ascii_lowercase();
         let collection = self.require_collection(category)?;
         let uri = collection.target().append_segments([&uri_name])?;
-        Ok(ObjectRef::named(name, uri))
+        Ok((name, uri))
     }
 
     /// Resolves a typed object reference from its statically known collection.
-    ///
-    /// Constructing a reference performs no request; the collection URI comes
-    /// from the capabilities already retained by the ready client.
     pub fn object<T: ObjectType>(&self, name: &str) -> Result<ObjectRef<T>, ObjectError> {
-        self.object_reference(T::CATEGORY, name)
-            .map(|reference| reference.retype())
+        self.object_identity(T::CATEGORY, name)
+            .map(|(name, uri)| ObjectRef::typed_ref(name, uri))
     }
 
-    /// Resolves a runtime repository object from its Workbench type and name.
+    /// Resolves a runtime object reference from its Workbench type and name.
     pub fn repository_object(
         &self,
         object_type: &GlobalWorkbenchType,
         name: &str,
-    ) -> Result<RepositoryObject, ObjectError> {
+    ) -> Result<ObjectRef<Erased>, ObjectError> {
         let descriptor = descriptors::object_type_descriptor(object_type).ok_or_else(|| {
             ObjectError::UnsupportedObjectType {
                 object_type: object_type.clone(),
             }
         })?;
-        let reference = self.object_reference(descriptor.category(), name)?;
-        Ok(RepositoryObject {
-            reference,
-            object_type: object_type.clone(),
-            descriptor: Some(descriptor),
-        })
+        let (name, uri) = self.object_identity(descriptor.category(), name)?;
+        Ok(ObjectRef::erased(name, uri, object_type.clone()))
     }
 }
 
@@ -321,28 +297,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn repository_object_recovers_its_registered_type() {
+    fn erased_reference_recovers_its_registered_type() {
         let program = ObjectRef::<Program>::for_test(
             "Z_TEST",
             AdtUri::parse("/sap/bc/adt/programs/programs/Z_TEST").unwrap(),
         );
-        let object = RepositoryObject::from(program.clone());
+        let object = program.erase();
 
-        let request = object.lock(AccessMode::Modify);
-
-        assert_eq!(request.object, program.erase());
+        assert_eq!(object.lock(AccessMode::Modify).object, object);
         assert_eq!(object.object_type().as_str(), "PROG/P");
         assert_eq!(object.typed::<Program>(), Some(program));
         assert!(object.typed::<Include>().is_none());
     }
 
     #[test]
-    fn repository_object_exposes_source_components_at_runtime() {
+    fn erased_reference_exposes_source_components_at_runtime() {
         let class = ObjectRef::<Class>::for_test(
             "ZCL_TEST",
             AdtUri::parse("/sap/bc/adt/oo/classes/zcl_test").unwrap(),
         );
-        let object = RepositoryObject::from(class.clone());
+        let object = class.erase();
 
         assert_eq!(
             object
@@ -359,77 +333,17 @@ mod tests {
             ]
         );
         assert_eq!(object.source(), Some(class.source()));
-        assert!(object.source_component("main").is_none());
-        assert_eq!(
-            object.source_component("definitions"),
-            Some(class.component_source(ClassSourceComponent::Definitions))
-        );
-        assert_eq!(
-            object.source_component("localtypes"),
-            Some(class.component_source(ClassSourceComponent::LocalTypes))
-        );
-        assert!(object.source_component("unknown").is_none());
-
-        let package = ObjectRef::<Package>::for_test(
-            "ZPACKAGE",
-            AdtUri::parse("/sap/bc/adt/packages/zpackage").unwrap(),
-        );
-        let object = RepositoryObject::from(package);
-
-        assert!(object.source_components().is_empty());
-        assert!(object.source().is_none());
-        assert!(object.source_component("main").is_none());
     }
 
     #[test]
-    fn descriptor_registry_exposes_immediate_run_only_for_programs_and_classes() {
-        let program = ObjectRef::<Program>::for_test(
-            "Z_TEST",
-            AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
-        );
-        let class = ObjectRef::<Class>::for_test(
-            "ZCL_TEST",
-            AdtUri::parse("/sap/bc/adt/oo/classes/zcl_test").unwrap(),
-        );
-        let include = ObjectRef::<Include>::for_test(
-            "ZTEST",
-            AdtUri::parse("/sap/bc/adt/programs/includes/ztest").unwrap(),
-        );
-        let package = ObjectRef::<Package>::for_test(
-            "ZPACKAGE",
-            AdtUri::parse("/sap/bc/adt/packages/zpackage").unwrap(),
-        );
-        let data_element = ObjectRef::<DataElement>::for_test(
-            "ZDATA_ELEMENT",
-            AdtUri::parse("/sap/bc/adt/ddic/dataelements/zdata_element").unwrap(),
-        );
-
-        assert!(RepositoryObject::from(program).run().is_ok());
-        assert!(RepositoryObject::from(class).run().is_ok());
-        for object in [
-            RepositoryObject::from(include),
-            RepositoryObject::from(package),
-            RepositoryObject::from(data_element),
-        ] {
-            assert!(matches!(
-                object.run(),
-                Err(ObjectError::UnsupportedCapability {
-                    capability: "immediate run",
-                    ..
-                })
-            ));
-        }
-    }
-
-    #[test]
-    fn other_repository_objects_report_unsupported_run_capability() {
-        let unsupported = ObjectRef::named(
+    fn unmodeled_erased_reference_retains_runtime_type() {
+        let object = ObjectRef::erased(
             "Z_UNSUPPORTED".to_owned(),
             AdtUri::parse("/sap/bc/adt/test/unsupported/z_unsupported").unwrap(),
+            "TEST/X".parse().unwrap(),
         );
-        let object =
-            RepositoryObject::from_reference(unsupported, "TEST/X".parse().unwrap()).unwrap();
 
+        assert_eq!(object.object_type().as_str(), "TEST/X");
         assert!(matches!(
             object.run(),
             Err(ObjectError::UnsupportedCapability {

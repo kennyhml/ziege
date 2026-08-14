@@ -6,7 +6,8 @@
 /// # References
 /// - `IF_ADT_URI_QUERY_PARAMETERS` defines `CO_VERSION` and its external values
 /// - `CL_ADT_UTILITY->GET_WB_VERSION` maps it to Workbench `R3STATE` values
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum ObjectVersion {
     /// The persistent active object (R3STATE `A`).
     Active,
@@ -36,6 +37,7 @@ impl ObjectVersion {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn parse(value: &str) -> Option<Self> {
         match value {
             "active" => Some(Self::Active),

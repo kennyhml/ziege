@@ -17,12 +17,12 @@ use zadt_macros::object_type;
         UpdateProperties,
     ),
 )]
-#[derive(Debug)]
-pub enum DataElement {}
+#[derive(Clone, Copy, Debug)]
+pub struct DataElement;
 
 impl ObjectRef<DataElement> {
     #[cfg(test)]
     pub(crate) fn for_test(name: &str, uri: crate::AdtUri) -> Self {
-        Self::typed(name.to_ascii_uppercase(), uri)
+        Self::from_parts(name.to_ascii_uppercase(), uri)
     }
 }

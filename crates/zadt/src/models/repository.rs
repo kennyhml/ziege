@@ -3,8 +3,8 @@ use std::{borrow::Cow, fmt};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
-    AdtUri, GlobalWorkbenchType, ObjectError, ObjectRef, ObjectType, Package, RepositoryError,
-    RepositoryObject,
+    AdtUri, Erased, GlobalWorkbenchType, ObjectError, ObjectRef, ObjectType, Package,
+    RepositoryError,
     resource::{AdvertisedLink, Relations},
 };
 
@@ -205,9 +205,8 @@ pub struct RepositoryObjectEntry {
     /// The object version when the query requested version information.
     pub version: Option<String>,
     pub package: String,
-    pub object_type: GlobalWorkbenchType,
     /// A validated, type-erased reference to the ADT object resource.
-    pub reference: ObjectRef,
+    pub reference: ObjectRef<Erased>,
     /// The corresponding virtual Workbench URI, when supplied by SAP.
     pub virtual_workbench_uri: Option<String>,
     pub expandable: bool,
@@ -227,10 +226,10 @@ impl RepositoryObjectEntry {
     /// The conversion verifies the exact Workbench type and preserves the URI
     /// advertised by RIS rather than reconstructing it through discovery.
     pub fn typed_reference<T: ObjectType>(&self) -> Result<ObjectRef<T>, ObjectError> {
-        if self.object_type != T::WORKBENCH_TYPE {
+        if self.reference.object_type() != &T::WORKBENCH_TYPE {
             return Err(ObjectError::UnexpectedRepositoryObjectType {
                 expected: T::WORKBENCH_TYPE,
-                actual: self.object_type.clone(),
+                actual: self.reference.object_type().clone(),
             });
         }
 
@@ -249,18 +248,10 @@ impl<T: ObjectType> TryFrom<&RepositoryObjectEntry> for ObjectRef<T> {
     }
 }
 
-impl TryFrom<&RepositoryObjectEntry> for RepositoryObject {
-    type Error = ObjectError;
-
-    fn try_from(entry: &RepositoryObjectEntry) -> Result<Self, Self::Error> {
-        RepositoryObject::from_reference(entry.reference.clone(), entry.object_type.clone())
-    }
-}
-
 impl RepositoryObjectEntry {
-    /// Converts this RIS entry into a runtime repository object.
-    pub fn repository_object(&self) -> Result<RepositoryObject, ObjectError> {
-        self.try_into()
+    /// Returns the runtime-typed object reference advertised by RIS.
+    pub fn repository_object(&self) -> ObjectRef<Erased> {
+        self.reference.clone()
     }
 }
 
@@ -278,7 +269,7 @@ impl RepositoryContent {
     pub(crate) fn parse(body: &[u8], request_uri: &AdtUri) -> Result<Self, RepositoryError> {
         let raw: RawRepositoryContent =
             serde_xml_rs::from_reader(body).map_err(RepositoryError::InvalidResponse)?;
-        let query_reference = ObjectRef::new(request_uri.clone());
+        let query_base = request_uri.clone();
         let folders = raw
             .folders
             .into_iter()
@@ -301,7 +292,7 @@ impl RepositoryContent {
                     object_count: folder.object_count,
                     text: folder.text,
                     has_children_of_same_facet: folder.has_children_of_same_facet,
-                    relations: Relations::new(query_reference.clone(), folder.links),
+                    relations: Relations::for_base(query_base.clone(), folder.links),
                 })
             })
             .collect::<Result<_, RepositoryError>>()?;
@@ -321,7 +312,7 @@ impl RepositoryContent {
                 }),
             folders,
             objects,
-            relations: Relations::new(query_reference, raw.links),
+            relations: Relations::for_base(query_base, raw.links),
         })
     }
 
@@ -464,7 +455,11 @@ impl RepositoryObjectProperties {
     pub(crate) fn parse(body: &[u8], object_uri: &AdtUri) -> Result<Self, RepositoryError> {
         let raw: RawRepositoryObjectProperties =
             serde_xml_rs::from_reader(body).map_err(RepositoryError::InvalidResponse)?;
-        let reference = ObjectRef::new(object_uri.clone());
+        let reference = ObjectRef::erased(
+            raw.object.name.clone(),
+            object_uri.clone(),
+            raw.object.object_type.clone(),
+        );
         let properties = raw
             .properties
             .into_iter()
@@ -500,12 +495,11 @@ impl TryFrom<RawRepositoryObjectEntry> for RepositoryObjectEntry {
             uri: raw.uri,
             source,
         })?;
-        let reference = ObjectRef::named(raw.name.clone(), uri);
+        let reference = ObjectRef::erased(raw.name.clone(), uri, raw.object_type);
         Ok(Self {
             name: raw.name,
             version: raw.version,
             package: raw.package,
-            object_type: raw.object_type,
             virtual_workbench_uri: raw.virtual_workbench_uri,
             expandable: raw.expandable,
             description: raw.description,
@@ -762,7 +756,10 @@ mod tests {
             ["SOURCE_LIBRARY"]
         );
         assert_eq!(content.objects[0].name, "ZCL_DEMO");
-        assert_eq!(content.objects[0].object_type.to_string(), "CLAS/OC");
+        assert_eq!(
+            content.objects[0].reference.object_type().as_str(),
+            "CLAS/OC"
+        );
         assert_eq!(
             content.objects[0].reference.uri().as_str(),
             "/sap/bc/adt/oo/classes/zcl_demo"
@@ -810,7 +807,7 @@ mod tests {
                 .unwrap()
                 .replace("type=\"CLAS/OC\"", &format!("type=\"{object_type}\""));
             let content = RepositoryContent::parse(xml.as_bytes(), &base).unwrap();
-            let object = content.objects[0].repository_object().unwrap();
+            let object = content.objects[0].repository_object();
 
             assert_eq!(object.object_type().as_str(), object_type);
             assert!(match object_type {
@@ -827,7 +824,7 @@ mod tests {
             .unwrap()
             .replace("type=\"CLAS/OC\"", "type=\"DDLS/DF\"");
         let content = RepositoryContent::parse(unknown_xml.as_bytes(), &base).unwrap();
-        let object = content.objects[0].repository_object().unwrap();
+        let object = content.objects[0].repository_object();
 
         assert_eq!(object.object_type().as_str(), "DDLS/DF");
         assert!(object.typed::<Class>().is_none());
@@ -840,9 +837,9 @@ mod tests {
                 .unwrap();
         let content = RepositoryContent::parse(CONTENT_XML, &base).unwrap();
         let entry = &content.objects[0];
-        let object = entry.repository_object().unwrap();
+        let object = entry.repository_object();
 
-        assert_eq!(object.reference(), entry.reference);
+        assert_eq!(object, entry.reference);
         assert_eq!(object.typed::<Class>().unwrap().name(), entry.name);
         assert_eq!(
             object.source().unwrap().uri.as_str(),
@@ -933,7 +930,10 @@ mod tests {
         let content = RepositoryContent::parse(xml.as_bytes(), &base).unwrap();
 
         assert_eq!(content.folders[0].facet.as_str(), "FUTURE");
-        assert_eq!(content.objects[0].object_type.as_str(), "ZZZZ/X");
+        assert_eq!(
+            content.objects[0].reference.object_type().as_str(),
+            "ZZZZ/X"
+        );
     }
 
     #[test]
@@ -948,9 +948,12 @@ mod tests {
                 .replace("type=\"CLAS/OC\"", &format!("type=\"{object_type}\""));
             let content = RepositoryContent::parse(xml.as_bytes(), &base).unwrap();
 
-            assert_eq!(content.objects[0].object_type.as_str(), object_type);
+            assert_eq!(
+                content.objects[0].reference.object_type().as_str(),
+                object_type
+            );
             assert!(content.objects[0].typed_reference::<Class>().is_err());
-            let object = content.objects[0].repository_object().unwrap();
+            let object = content.objects[0].repository_object();
             assert_eq!(object.object_type().as_str(), object_type);
         }
     }

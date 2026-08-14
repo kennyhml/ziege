@@ -3,15 +3,14 @@ use std::fmt;
 use serde::Deserialize;
 use url::Url;
 
-use crate::{AdtUri, AdtUriError, vocabulary::Relation};
+use crate::{AdtUri, AdtUriError};
 
 const LINK_RESOLUTION_ORIGIN: &str = "https://adt.invalid";
 
 /// A resolved link that points to another resource.
 ///
 /// The original Atom metadata is retained alongside a resolved, validated
-/// target. Known relations can also be converted into typed resource
-/// references.
+/// target.
 ///
 /// For example, an advertised URI may be relative `href=source/main`,
 /// an absolute path `href=sap/bc/adt/textelements/programs/zprog`, or
@@ -103,18 +102,6 @@ impl AdvertisedLink {
             length: self.length.clone(),
             etag: self.etag.clone(),
         })
-    }
-
-    pub(super) fn matches(&self, relation: Relation, media_type: Option<&str>) -> bool {
-        self.relation.as_deref().and_then(Relation::from_uri) == Some(relation)
-            && media_type.is_none_or(|expected| {
-                self.media_type.as_deref().is_some_and(|actual| {
-                    actual
-                        .split(';')
-                        .next()
-                        .is_some_and(|value| value.trim().eq_ignore_ascii_case(expected))
-                })
-            })
     }
 }
 

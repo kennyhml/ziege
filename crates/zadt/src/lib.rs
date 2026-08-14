@@ -22,7 +22,11 @@ pub use api::object::{
 };
 pub use api::packages::{PackageSettingsQuery, PackageTreeQuery};
 pub use api::programs::ProgramRun;
-pub use api::properties::{ObjectPropertiesQuery, ObjectPropertiesUpdate, RawObjectProperties};
+pub use api::properties::{
+    JsonObjectProperties, JsonObjectPropertiesQuery, JsonObjectPropertiesUpdate, ObjectProperties,
+    ObjectPropertiesQuery, ObjectPropertiesUpdate, ObjectPropertiesUpdateResult,
+    RawObjectProperties,
+};
 pub use api::repository::{
     RepositoryContentOperation, RepositoryContentQuery, RepositoryContentQueryBuilder,
     RepositoryContentQueryBuilderError, RepositoryFacetsQuery, RepositoryObjectPropertiesQuery,
@@ -47,27 +51,26 @@ pub use models::{
     AccessMode, AdtException, AdtExceptionProperty, Capabilities, Category, ClassObjectReference,
     ClassProperties, ClassPropertiesV2, ClassPropertiesV3, ClassPropertiesV4,
     ClassPropertiesVersion, ClassRunResult, ClassSourceProperties, Collection,
-    DataElementDefinition, DataElementDocumentationStatus, DataElementFieldLabel,
-    DataElementProperties, DataElementPropertiesV2, DataElementPropertiesVersion,
-    DataElementTypeKind, IncludeProperties, IncludePropertiesV2, IncludePropertyVersion,
-    ObjectLock, ObjectPropertiesUpdateResult, ObjectRunResult, PackageAssignment,
-    PackageAttributes, PackageInterfaceReference, PackageProperties, PackagePropertiesV1,
-    PackagePropertiesV2, PackagePropertiesVersion, PackageReference, PackageSettings,
-    PackageTransport, PackageTree, PackageTreeKind, PackageTreeNode, PackageUseAccess,
-    ProgramProperties, ProgramPropertiesV2, ProgramPropertiesV3, ProgramPropertiesVersion,
-    ProgramRunResult, RepositoryContent, RepositoryFacet, RepositoryFacetDefinition,
-    RepositoryFacetValuesLink, RepositoryFacets, RepositoryObjectEntry, RepositoryObjectProperties,
-    RepositoryObjectSummary, RepositoryPreselection, RepositoryPreselectionInfo,
-    RepositoryProperty, RepositoryVirtualFolder, SessionInformation, SessionUri, SourceCode,
-    SourceUpdateResult, SyntaxConfiguration, SyntaxLanguage, SystemInformationLink, TemplateLink,
+    DataElementDefinition, DataElementLink, DataElementObjectReference, DataElementProperties,
+    DataElementPropertiesV2, DataElementPropertiesVersion, IncludeProperties, IncludePropertiesV2,
+    IncludePropertyVersion, ObjectLock, ObjectRunResult, PackageAssignment, PackageAttributes,
+    PackageInterfaceReference, PackageProperties, PackagePropertiesV1, PackagePropertiesV2,
+    PackagePropertiesVersion, PackageReference, PackageSettings, PackageTransport, PackageTree,
+    PackageTreeKind, PackageTreeNode, PackageUseAccess, ProgramProperties, ProgramPropertiesV2,
+    ProgramPropertiesV3, ProgramPropertiesVersion, ProgramRunResult, RepositoryContent,
+    RepositoryFacet, RepositoryFacetDefinition, RepositoryFacetValuesLink, RepositoryFacets,
+    RepositoryObjectEntry, RepositoryObjectProperties, RepositoryObjectSummary,
+    RepositoryPreselection, RepositoryPreselectionInfo, RepositoryProperty,
+    RepositoryVirtualFolder, SessionInformation, SessionUri, SourceCode, SourceUpdateResult,
+    SyntaxConfiguration, SyntaxLanguage, SystemInformationLink, TemplateLink,
     TransportCheckMessage, TransportCheckResult, TransportCreation, TransportCreationMessage,
     TransportKind, TransportNumber, TransportObjectKey, TransportObjectLock, TransportProject,
     TransportRequest, TransportRequests, TransportStatus, TransportTask, Workspace,
 };
 pub use objects::{
-    Class, ClassSourceComponent, DataElement, GlobalWorkbenchType, HasSource, Include,
+    Class, ClassSourceComponent, DataElement, Erased, GlobalWorkbenchType, HasSource, Include,
     InvalidWorkbenchType, ObjectRef, ObjectType, ObjectVersion, Package, Program, ReadProperties,
-    RepositoryObject, UpdateProperties, WritableProperties,
+    UpdateProperties, WritableProperties,
 };
 pub use operation::{
     BatchError, BatchKey, BatchOperation, BatchResponses, Batched, Execute, IfNoneMatch, Operation,

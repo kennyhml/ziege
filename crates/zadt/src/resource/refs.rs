@@ -1,26 +1,13 @@
 use std::{fmt, marker::PhantomData};
 
-use crate::{
-    AdtUri, ObjectRef,
-    vocabulary::{Relation, media_type},
-};
-
-use super::AdtLink;
-
-pub(crate) trait FromAdtLink: Sized {
-    const RELATION: Relation;
-    const MEDIA_TYPE: Option<&'static str> = None;
-
-    fn from_adt_link(owner: &ObjectRef, link: &AdtLink) -> OwnedResourceRef<Self> {
-        OwnedResourceRef::from_link(owner.clone(), link)
-    }
-}
+use crate::{AdtUri, ObjectRef};
 
 /// A typed related-resource location and the object that advertised it.
 ///
 /// The marker identifies the relation represented by the reference. Named
 /// aliases such as [`TextElementsRef`] provide the public relation-specific API.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OwnedResourceRef<T> {
     /// The repository object that owns this related resource.
     pub object: ObjectRef,
@@ -37,6 +24,7 @@ pub struct OwnedResourceRef<T> {
     /// The entity tag advertised for this resource, when present.
     pub etag: Option<String>,
 
+    #[serde(skip)]
     marker: PhantomData<fn() -> T>,
 }
 
@@ -51,15 +39,6 @@ impl<T> OwnedResourceRef<T> {
             marker: PhantomData,
         }
     }
-
-    fn from_link(object: ObjectRef, link: &AdtLink) -> Self {
-        Self {
-            query: link.query.clone(),
-            fragment: link.fragment.clone(),
-            etag: link.etag.clone(),
-            ..Self::new(object, link.target.clone())
-        }
-    }
 }
 
 impl<T> fmt::Display for OwnedResourceRef<T> {
@@ -69,79 +48,35 @@ impl<T> fmt::Display for OwnedResourceRef<T> {
 }
 
 mod kind {
-    use super::{FromAdtLink, Relation, media_type};
-
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
     pub struct HtmlSource;
-
-    impl FromAdtLink for HtmlSource {
-        const RELATION: Relation = Relation::Source;
-        const MEDIA_TYPE: Option<&'static str> = Some(media_type::HTML);
-    }
 
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
     pub struct SourceVersions;
 
-    impl FromAdtLink for SourceVersions {
-        const RELATION: Relation = Relation::Versions;
-    }
-
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
     pub struct ObjectStructure;
-
-    impl FromAdtLink for ObjectStructure {
-        const RELATION: Relation = Relation::ObjectStructure;
-    }
 
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
     pub struct TextElements;
 
-    impl FromAdtLink for TextElements {
-        const RELATION: Relation = Relation::TextElements;
-    }
-
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
     pub struct EnhancementImplementations;
-
-    impl FromAdtLink for EnhancementImplementations {
-        const RELATION: Relation = Relation::EnhancementImplementations;
-    }
 
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
     pub struct ObjectEnhancementOptions;
 
-    impl FromAdtLink for ObjectEnhancementOptions {
-        const RELATION: Relation = Relation::ObjectEnhancementOptions;
-    }
-
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
     pub struct SourceEnhancementOptions;
-
-    impl FromAdtLink for SourceEnhancementOptions {
-        const RELATION: Relation = Relation::SourceEnhancementOptions;
-    }
 
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
     pub struct ObjectState;
 
-    impl FromAdtLink for ObjectState {
-        const RELATION: Relation = Relation::ObjectStates;
-    }
-
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
     pub struct Parser;
 
-    impl FromAdtLink for Parser {
-        const RELATION: Relation = Relation::Parser;
-    }
-
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
     pub struct Source;
-
-    impl FromAdtLink for Source {
-        const RELATION: Relation = Relation::Source;
-        const MEDIA_TYPE: Option<&'static str> = Some(media_type::SOURCE);
-    }
 }
 
 /// The rendered HTML representation of an object's source.

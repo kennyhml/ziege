@@ -19,16 +19,12 @@ pub use classes::{
     ClassPropertiesVersion, ClassRunResult, ClassSourceProperties,
 };
 pub use data_elements::{
-    DataElementDefinition, DataElementDocumentationStatus, DataElementFieldLabel,
-    DataElementProperties, DataElementPropertiesV2, DataElementPropertiesVersion,
-    DataElementTypeKind,
+    DataElementDefinition, DataElementLink, DataElementObjectReference, DataElementProperties,
+    DataElementPropertiesV2, DataElementPropertiesVersion,
 };
 pub use discovery::{Capabilities, Category, Collection, TemplateLink, Workspace};
 pub use exception::{AdtException, AdtExceptionProperty};
-pub use object::{
-    AccessMode, ObjectLock, ObjectPropertiesUpdateResult, ObjectRunResult, SourceCode,
-    SourceUpdateResult,
-};
+pub use object::{AccessMode, ObjectLock, ObjectRunResult, SourceCode, SourceUpdateResult};
 pub use packages::{
     PackageAssignment, PackageAttributes, PackageInterfaceReference, PackageProperties,
     PackagePropertiesV1, PackagePropertiesV2, PackagePropertiesVersion, PackageReference,

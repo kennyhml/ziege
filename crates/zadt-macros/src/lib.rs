@@ -290,6 +290,19 @@ fn expand_object_type(
             impl crate::objects::UpdateProperties for #ident {}
         }
     });
+    let runtime_to_xml = if update_properties {
+        quote! {
+            crate::objects::descriptors::properties_to_xml::<#ident>(
+                object,
+                media_type,
+                payload,
+            )
+        }
+    } else {
+        quote! {
+            Err(crate::objects::descriptors::unsupported_update(object))
+        }
+    };
     Ok(quote! {
         #item
 
@@ -302,6 +315,10 @@ fn expand_object_type(
                 scheme: #scheme,
                 term: #term,
             };
+
+            fn marker() -> Self {
+                Self
+            }
         }
 
         #source_impl
@@ -314,6 +331,7 @@ fn expand_object_type(
         #update_properties_impl
 
         #[doc(hidden)]
+        #[derive(Debug)]
         struct #descriptor;
 
         #[doc(hidden)]
@@ -345,6 +363,36 @@ fn expand_object_type(
 
             fn run(&self) -> Option<crate::objects::RunCapability> {
                 #runtime_run
+            }
+
+            fn properties_request(
+                &self,
+                object: &crate::objects::ObjectRef<crate::objects::Erased>,
+                version: Option<crate::objects::ObjectVersion>,
+                client: &crate::client::Client<crate::client::Ready>,
+            ) -> Result<crate::protocol::AdtRequest, crate::error::OperationError> {
+                crate::objects::descriptors::properties_request::<#ident>(
+                    object,
+                    version,
+                    client,
+                )
+            }
+
+            fn properties_to_json(
+                &self,
+                object: &crate::objects::ObjectRef<crate::objects::Erased>,
+                response: crate::operation::OperationResponse,
+            ) -> Result<crate::JsonObjectProperties, crate::error::ResponseError> {
+                crate::objects::descriptors::properties_to_json::<#ident>(object, response)
+            }
+
+            fn properties_to_xml(
+                &self,
+                object: &crate::objects::ObjectRef<crate::objects::Erased>,
+                media_type: &'static str,
+                payload: serde_json::Value,
+            ) -> Result<String, crate::error::ObjectError> {
+                #runtime_to_xml
             }
         }
     })

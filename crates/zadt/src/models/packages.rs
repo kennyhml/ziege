@@ -1,9 +1,8 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
-    AdtUri, EntityTag, GlobalWorkbenchType, MediaVersionNegotiation, ObjectError, ObjectRef,
-    ObjectType, ObjectVersion, Package, RawObjectProperties, ResponseError,
-    resource::{AdvertisedLink, Relations, resolve_href},
+    AdtUri, GlobalWorkbenchType, MediaVersionNegotiation, ObjectError, ObjectRef, ObjectType,
+    Package, RawObjectProperties, ResponseError, resource::resolve_href,
 };
 
 const PACKAGE_TYPE_KEY: &str = "DEVCK";
@@ -31,243 +30,391 @@ impl MediaVersionNegotiation for PackagePropertiesVersion {
     }
 }
 
-/// Package properties tagged with the media-type version returned by ADT.
-#[derive(Clone, Debug)]
-#[non_exhaustive]
-pub enum PackageProperties {
-    /// A V1 package-properties response.
-    V1(Box<PackagePropertiesV1>),
-
-    /// A V2 package-properties response.
-    V2(Box<PackagePropertiesV2>),
-}
-
-impl PackageProperties {
-    /// Returns the response media-type version.
-    pub fn media_version(&self) -> PackagePropertiesVersion {
-        match self {
-            Self::V1(_) => PackagePropertiesVersion::V1,
-            Self::V2(_) => PackagePropertiesVersion::V2,
-        }
-    }
-
-    /// Returns the response entity tag, when present.
-    pub fn etag(&self) -> Option<&EntityTag> {
-        match self {
-            Self::V1(package) | Self::V2(package) => package.etag.as_ref(),
-        }
-    }
-}
-
 impl TryFrom<RawObjectProperties<Package>> for PackageProperties {
     type Error = ResponseError;
 
     fn try_from(raw: RawObjectProperties<Package>) -> Result<Self, Self::Error> {
-        let properties: RawPackageProperties =
+        let properties: Self =
             serde_xml_rs::from_reader(raw.body.as_slice()).map_err(ObjectError::InvalidResponse)?;
-        let properties = PackagePropertiesV2::from_raw(raw.resource, properties, raw.etag)?;
-        Ok(match raw.version {
-            PackagePropertiesVersion::V1 => Self::V1(Box::new(properties)),
-            PackagePropertiesVersion::V2 => Self::V2(Box::new(properties)),
-        })
-    }
-}
-
-/// The V1 package-properties representation uses the V2 payload schema.
-pub type PackagePropertiesV1 = PackagePropertiesV2;
-
-/// Properties of an ABAP package.
-#[derive(Clone, Debug)]
-pub struct PackagePropertiesV2 {
-    /// The package resource that was fetched.
-    pub reference: ObjectRef<Package>,
-    /// The package name supplied by SAP.
-    pub name: String,
-    /// The repository object type, normally `DEVC/K`.
-    pub object_type: GlobalWorkbenchType,
-    /// The timestamp at which the package was last changed.
-    pub last_changed: String,
-    /// The active or inactive object version.
-    pub version: ObjectVersion,
-    /// The timestamp at which the package was created.
-    pub created_at: String,
-    /// The user who last changed the package.
-    pub changed_by: String,
-    /// The user who created the package.
-    pub created_by: String,
-    /// The package description.
-    pub description: String,
-    /// The maximum package-description length.
-    pub description_text_limit: u32,
-    /// The package's logon language.
-    pub language: String,
-    /// The user responsible for the package.
-    pub responsible: String,
-    /// The package's master language.
-    pub master_language: String,
-    /// The package's master system, when advertised.
-    pub master_system: Option<String>,
-    /// Package behavior and editor capability flags.
-    pub attributes: PackageAttributes,
-    /// The parent package, when this is not a root package.
-    pub super_package: Option<PackageReference>,
-    /// The assigned application component.
-    pub application_component: PackageAssignment,
-    /// Software-component and transport-layer assignments.
-    pub transport: PackageTransport,
-    /// Whether use accesses are shown by the package editor.
-    pub use_accesses_visible: bool,
-    /// Package-interface use accesses.
-    pub use_accesses: Vec<PackageUseAccess>,
-    /// Whether package interfaces are shown by the package editor.
-    pub package_interfaces_visible: bool,
-    /// Interfaces defined by this package.
-    pub package_interfaces: Vec<PackageInterfaceReference>,
-    /// Direct subpackages included in the properties representation.
-    pub sub_packages: Vec<PackageReference>,
-    /// The entity tag of these properties, when present.
-    pub etag: Option<EntityTag>,
-    relations: Relations,
-}
-
-impl PackagePropertiesV2 {
-    /// Returns the package's advertised links without resolving them eagerly.
-    pub fn relations(&self) -> &Relations {
-        &self.relations
-    }
-
-    fn from_raw(
-        reference: ObjectRef<Package>,
-        raw: RawPackageProperties,
-        etag: Option<EntityTag>,
-    ) -> Result<Self, ObjectError> {
-        if raw.object_type != Package::WORKBENCH_TYPE {
+        if properties.object_type != Package::WORKBENCH_TYPE {
             return Err(ObjectError::UnexpectedObjectType {
                 expected: Package::WORKBENCH_TYPE,
-                actual: raw.object_type,
-            });
-        }
-        let version = ObjectVersion::parse(&raw.version).ok_or_else(|| {
-            ObjectError::UnsupportedObjectVersion {
-                version: raw.version.clone(),
+                actual: properties.object_type,
             }
-        })?;
-        let base = reference.uri();
-        let super_package = package_reference(raw.super_package, base, false)?;
-        let use_accesses = raw
-            .use_accesses
-            .items
-            .into_iter()
-            .map(|access| {
-                Ok(PackageUseAccess {
-                    severity: access.severity,
-                    package_interface: package_interface_reference(access.package_interface, base)?,
-                    package: package_reference(access.package, base, false)?,
-                })
-            })
-            .collect::<Result<Vec<_>, ObjectError>>()?;
-        let package_interfaces = raw
-            .package_interfaces
-            .items
-            .into_iter()
-            .map(|item| package_interface_reference(item, base))
-            .collect::<Result<Vec<_>, _>>()?;
-        let sub_packages = raw
-            .sub_packages
-            .items
-            .into_iter()
-            .map(|item| package_reference(item, base, false))
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .flatten()
-            .collect();
-        let relations = Relations::new(reference.erase(), raw.links);
-
-        Ok(Self {
-            reference,
-            name: raw.name,
-            object_type: raw.object_type,
-            last_changed: raw.last_changed,
-            version,
-            created_at: raw.created_at,
-            changed_by: raw.changed_by,
-            created_by: raw.created_by,
-            description: raw.description,
-            description_text_limit: raw.description_text_limit,
-            language: raw.language,
-            responsible: raw.responsible,
-            master_language: raw.master_language,
-            master_system: raw.master_system,
-            attributes: raw.attributes.into(),
-            super_package,
-            application_component: raw.application_component.into(),
-            transport: raw.transport.into(),
-            use_accesses_visible: raw.use_accesses.visible,
-            use_accesses,
-            package_interfaces_visible: raw.package_interfaces.visible,
-            package_interfaces,
-            sub_packages,
-            etag,
-            relations,
-        })
+            .into());
+        }
+        if !properties.name.eq_ignore_ascii_case(raw.resource.name()) {
+            return Err(ObjectError::UnexpectedObjectName {
+                expected: raw.resource.name().to_owned(),
+                actual: properties.name,
+            }
+            .into());
+        }
+        Ok(properties)
     }
+}
+
+/// The package-properties payload shared by the V1 and V2 media types.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(
+    rename(deserialize = "pak:package"),
+    rename_all(serialize = "camelCase")
+)]
+pub struct PackageProperties {
+    /// The package name supplied by SAP.
+    #[serde(rename(deserialize = "@adtcore:name"), alias = "name")]
+    pub name: String,
+    /// The repository object type, normally `DEVC/K`.
+    #[serde(rename(deserialize = "@adtcore:type"), alias = "objectType")]
+    pub object_type: GlobalWorkbenchType,
+    /// The timestamp at which the package was last changed.
+    #[serde(rename(deserialize = "@adtcore:changedAt"), alias = "lastChanged")]
+    pub last_changed: String,
+    /// The object version exactly as advertised by SAP.
+    #[serde(rename(deserialize = "@adtcore:version"), alias = "version")]
+    pub version: String,
+    /// The timestamp at which the package was created.
+    #[serde(rename(deserialize = "@adtcore:createdAt"), alias = "createdAt")]
+    pub created_at: String,
+    /// The user who last changed the package.
+    #[serde(rename(deserialize = "@adtcore:changedBy"), alias = "changedBy")]
+    pub changed_by: String,
+    /// The user who created the package.
+    #[serde(rename(deserialize = "@adtcore:createdBy"), alias = "createdBy")]
+    pub created_by: String,
+    /// The package description.
+    #[serde(rename(deserialize = "@adtcore:description"), alias = "description")]
+    pub description: String,
+    /// The maximum package-description length.
+    #[serde(
+        rename(deserialize = "@adtcore:descriptionTextLimit"),
+        alias = "descriptionTextLimit"
+    )]
+    pub description_text_limit: u32,
+    /// The package's logon language.
+    #[serde(rename(deserialize = "@adtcore:language"), alias = "language")]
+    pub language: String,
+    /// The user responsible for the package.
+    #[serde(rename(deserialize = "@adtcore:responsible"), alias = "responsible")]
+    pub responsible: String,
+    /// The package's master language.
+    #[serde(
+        rename(deserialize = "@adtcore:masterLanguage"),
+        alias = "masterLanguage"
+    )]
+    pub master_language: String,
+    /// The package's master system, when advertised.
+    #[serde(rename(deserialize = "@adtcore:masterSystem"), alias = "masterSystem")]
+    pub master_system: Option<String>,
+    /// Atom links exactly as advertised by the package representation.
+    #[serde(rename(deserialize = "atom:link"), alias = "links", default)]
+    pub links: Vec<PackageLink>,
+    /// Package behavior and editor capability flags.
+    #[serde(rename(deserialize = "pak:attributes"), alias = "attributes")]
+    pub attributes: PackageAttributes,
+    /// The parent package, when this is not a root package.
+    #[serde(rename(deserialize = "pak:superPackage"), alias = "superPackage")]
+    pub super_package: Option<PackageObjectReference>,
+    /// The assigned application component.
+    #[serde(
+        rename(deserialize = "pak:applicationComponent"),
+        alias = "applicationComponent"
+    )]
+    pub application_component: PackageAssignment,
+    /// Software-component and transport-layer assignments.
+    #[serde(rename(deserialize = "pak:transport"), alias = "transport")]
+    pub transport: PackageTransport,
+    /// Package-interface use accesses.
+    #[serde(rename(deserialize = "pak:useAccesses"), alias = "useAccesses")]
+    pub use_accesses: Option<PackageUseAccesses>,
+    /// Interfaces defined by this package.
+    #[serde(
+        rename(deserialize = "pak:packageInterfaces"),
+        alias = "packageInterfaces"
+    )]
+    pub package_interfaces: Option<PackageInterfaces>,
+    /// Direct subpackages included in the properties representation.
+    #[serde(rename(deserialize = "pak:subPackages"), alias = "subPackages")]
+    pub sub_packages: Option<PackageSubpackages>,
+}
+
+/// The V1 package-properties media type uses the shared package payload.
+pub type PackagePropertiesV1 = PackageProperties;
+
+/// The V2 package-properties media type uses the shared package payload.
+pub type PackagePropertiesV2 = PackageProperties;
+
+/// One raw Atom link in a package-properties payload.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all(serialize = "camelCase"))]
+pub struct PackageLink {
+    #[serde(rename(deserialize = "@href"), alias = "href")]
+    pub href: String,
+    #[serde(rename(deserialize = "@rel"), alias = "relation")]
+    pub relation: Option<String>,
+    #[serde(rename(deserialize = "@type"), alias = "mediaType")]
+    pub media_type: Option<String>,
+    #[serde(rename(deserialize = "@hreflang"), alias = "hreflang")]
+    pub hreflang: Option<String>,
+    #[serde(rename(deserialize = "@title"), alias = "title")]
+    pub title: Option<String>,
+    #[serde(rename(deserialize = "@length"), alias = "length")]
+    pub length: Option<String>,
+    #[serde(rename(deserialize = "@etag"), alias = "etag")]
+    pub etag: Option<String>,
+}
+
+/// An unresolved object reference in a package-properties payload.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all(serialize = "camelCase"))]
+pub struct PackageObjectReference {
+    #[serde(rename(deserialize = "@adtcore:uri"), alias = "uri")]
+    pub uri: String,
+    #[serde(rename(deserialize = "@adtcore:type"), alias = "objectType")]
+    pub object_type: String,
+    #[serde(rename(deserialize = "@adtcore:name"), alias = "name")]
+    pub name: String,
+    #[serde(rename(deserialize = "@adtcore:description"), alias = "description")]
+    pub description: Option<String>,
 }
 
 /// Package behavior and editor capability flags.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all(serialize = "camelCase"))]
 pub struct PackageAttributes {
     /// The semantic package type, such as `development`.
+    #[serde(rename(deserialize = "@pak:packageType"), alias = "packageType")]
     pub package_type: String,
     /// Whether the package type is editable.
+    #[serde(
+        rename(deserialize = "@pak:isPackageTypeEditable"),
+        alias = "packageTypeEditable"
+    )]
     pub package_type_editable: bool,
     /// Whether repository objects can be assigned to the package.
+    #[serde(
+        rename(deserialize = "@pak:isAddingObjectsAllowed"),
+        alias = "addingObjectsAllowed"
+    )]
     pub adding_objects_allowed: bool,
     /// Whether object-assignment behavior is editable.
+    #[serde(
+        rename(deserialize = "@pak:isAddingObjectsAllowedEditable"),
+        alias = "addingObjectsAllowedEditable"
+    )]
     pub adding_objects_allowed_editable: bool,
     /// Whether package encapsulation is enabled.
+    #[serde(rename(deserialize = "@pak:isEncapsulated"), alias = "encapsulated")]
     pub encapsulated: bool,
     /// Whether encapsulation is editable.
+    #[serde(
+        rename(deserialize = "@pak:isEncapsulationEditable"),
+        alias = "encapsulationEditable"
+    )]
     pub encapsulation_editable: bool,
     /// Whether encapsulation is shown by the package editor.
+    #[serde(
+        rename(deserialize = "@pak:isEncapsulationVisible"),
+        alias = "encapsulationVisible"
+    )]
     pub encapsulation_visible: bool,
     /// Whether changes assigned to the package are recorded for transport.
+    #[serde(rename(deserialize = "@pak:recordChanges"), alias = "recordChanges")]
     pub record_changes: bool,
     /// Whether change recording is editable.
+    #[serde(
+        rename(deserialize = "@pak:isRecordChangesEditable"),
+        alias = "recordChangesEditable"
+    )]
     pub record_changes_editable: bool,
     /// Whether switch assignment is shown by the package editor.
+    #[serde(rename(deserialize = "@pak:isSwitchVisible"), alias = "switchVisible")]
     pub switch_visible: bool,
     /// The configured ABAP language version.
+    #[serde(
+        rename(deserialize = "@pak:languageVersion"),
+        alias = "languageVersion",
+        default
+    )]
     pub language_version: String,
     /// Whether the language version is shown by the package editor.
+    #[serde(
+        rename(deserialize = "@pak:isLanguageVersionVisible"),
+        alias = "languageVersionVisible"
+    )]
     pub language_version_visible: bool,
     /// Whether the language version is editable.
+    #[serde(
+        rename(deserialize = "@pak:isLanguageVersionEditable"),
+        alias = "languageVersionEditable"
+    )]
     pub language_version_editable: bool,
 }
 
 /// A named package assignment with editor visibility and mutability flags.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all(serialize = "camelCase"))]
 pub struct PackageAssignment {
     /// The assigned value.
+    #[serde(rename(deserialize = "@pak:name"), alias = "name", default)]
     pub name: String,
     /// The server-provided value description.
+    #[serde(
+        rename(deserialize = "@pak:description"),
+        alias = "description",
+        default
+    )]
     pub description: String,
     /// Whether this assignment is shown by the package editor.
+    #[serde(rename(deserialize = "@pak:isVisible"), alias = "visible")]
     pub visible: bool,
     /// Whether this assignment is editable.
+    #[serde(rename(deserialize = "@pak:isEditable"), alias = "editable")]
     pub editable: bool,
 }
 
 /// Software-component and transport-layer assignments.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all(serialize = "camelCase"))]
 pub struct PackageTransport {
     /// The package's software component.
+    #[serde(
+        rename(deserialize = "pak:softwareComponent"),
+        alias = "softwareComponent"
+    )]
     pub software_component: PackageAssignment,
     /// The package's transport layer.
+    #[serde(rename(deserialize = "pak:transportLayer"), alias = "transportLayer")]
     pub transport_layer: PackageAssignment,
 }
 
+/// Use-access visibility and entries in a package-properties payload.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all(serialize = "camelCase"))]
+pub struct PackageUseAccesses {
+    #[serde(rename(deserialize = "@pak:isVisible"), alias = "visible", default)]
+    pub visible: bool,
+    #[serde(rename(deserialize = "pak:useAccess"), alias = "useAccess", default)]
+    pub use_access: Vec<PackageUseAccess>,
+}
+
+/// A package-interface use access exactly as represented in package XML.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all(serialize = "camelCase"))]
+pub struct PackageUseAccess {
+    #[serde(rename(deserialize = "@pak:severity"), alias = "severity")]
+    pub severity: String,
+    #[serde(
+        rename(deserialize = "pak:packageInterfaceRef"),
+        alias = "packageInterface"
+    )]
+    pub package_interface: PackageObjectReference,
+    #[serde(rename(deserialize = "pak:packageRef"), alias = "packageRef")]
+    pub package_ref: Option<PackageObjectReference>,
+}
+
+/// Package-interface visibility and references in a package-properties payload.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all(serialize = "camelCase"))]
+pub struct PackageInterfaces {
+    #[serde(rename(deserialize = "@pak:isVisible"), alias = "visible", default)]
+    pub visible: bool,
+    #[serde(
+        rename(deserialize = "pak:packageInterfaceRef"),
+        alias = "packageInterfaceRef",
+        default
+    )]
+    pub package_interface_ref: Vec<PackageObjectReference>,
+}
+
+/// Direct subpackage references in a package-properties payload.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all(serialize = "camelCase"))]
+pub struct PackageSubpackages {
+    #[serde(rename(deserialize = "pak:packageRef"), alias = "packageRef", default)]
+    pub package_ref: Vec<PackageObjectReference>,
+}
+
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+
+    const PACKAGE_XML: &[u8] = include_bytes!("../../tests/fixtures/package-sadt-tools-core.xml");
+
+    #[test]
+    fn complete_wire_payload_has_friendly_round_trip_json() {
+        let properties: PackageProperties = serde_xml_rs::from_reader(PACKAGE_XML).unwrap();
+
+        assert_eq!(properties.name, "SADT_TOOLS_CORE");
+        assert_eq!(properties.object_type, Package::WORKBENCH_TYPE);
+        assert_eq!(properties.version, "active");
+        assert_eq!(properties.links.len(), 1);
+        assert_eq!(properties.links[0].href, "versions");
+        assert_eq!(
+            properties.super_package.as_ref().unwrap().uri,
+            "/sap/bc/adt/packages/sadt_main"
+        );
+        assert_eq!(
+            properties.use_accesses.as_ref().unwrap().use_access[0]
+                .package_interface
+                .object_type,
+            "PINF/KI"
+        );
+        assert_eq!(
+            properties
+                .package_interfaces
+                .as_ref()
+                .unwrap()
+                .package_interface_ref
+                .len(),
+            1
+        );
+        assert_eq!(
+            properties.sub_packages.as_ref().unwrap().package_ref.len(),
+            1
+        );
+
+        let json = serde_json::to_value(&properties).unwrap();
+        assert_eq!(json["objectType"], "DEVC/K");
+        assert_eq!(json["useAccesses"]["useAccess"][0]["severity"], "none");
+        assert!(json.get("@adtcore:name").is_none());
+        let roundtrip: PackageProperties = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(serde_json::to_value(roundtrip).unwrap(), json);
+    }
+
+    #[test]
+    fn nested_wire_values_are_not_validated_or_resolved() {
+        let xml = String::from_utf8(PACKAGE_XML.to_vec())
+            .unwrap()
+            .replacen(
+                "adtcore:version=\"active\"",
+                "adtcore:version=\"future\"",
+                1,
+            )
+            .replacen(
+                "adtcore:uri=\"/sap/bc/adt/packages/sadt_main\"",
+                "adtcore:uri=\"https://example.test/package\"",
+                1,
+            )
+            .replacen("adtcore:type=\"PINF/KI\"", "adtcore:type=\"FUTURE/I\"", 1);
+        let properties: PackageProperties = serde_xml_rs::from_str(&xml).unwrap();
+
+        assert_eq!(properties.version, "future");
+        assert_eq!(
+            properties.super_package.unwrap().uri,
+            "https://example.test/package"
+        );
+        assert_eq!(
+            properties.use_accesses.unwrap().use_access[0]
+                .package_interface
+                .object_type,
+            "FUTURE/I"
+        );
+    }
+}
+
 /// A typed package reference and its optional short description.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PackageReference {
     /// The typed package resource.
     pub reference: ObjectRef<Package>,
@@ -276,7 +423,8 @@ pub struct PackageReference {
 }
 
 /// A package-interface reference advertised through a package representation.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PackageInterfaceReference {
     /// The package-interface name.
     pub name: String,
@@ -286,17 +434,6 @@ pub struct PackageInterfaceReference {
     pub object_type: String,
     /// The package-interface description, when advertised.
     pub description: Option<String>,
-}
-
-/// A package-interface use access and the package that owns it, when advertised.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PackageUseAccess {
-    /// The backend-defined use-access severity.
-    pub severity: String,
-    /// The package interface being consumed.
-    pub package_interface: PackageInterfaceReference,
-    /// The package that owns the interface, when advertised.
-    pub package: Option<PackageReference>,
 }
 
 /// Which side of a package hierarchy to request.
@@ -486,172 +623,11 @@ fn required<T>(value: Option<T>, field: &'static str) -> Result<T, ObjectError> 
     value.ok_or(ObjectError::IncompleteObjectReference { field })
 }
 
-#[derive(Deserialize)]
-#[serde(rename = "pak:package")]
-struct RawPackageProperties {
-    #[serde(rename = "@adtcore:name")]
-    name: String,
-    #[serde(rename = "@adtcore:type")]
-    object_type: GlobalWorkbenchType,
-    #[serde(rename = "@adtcore:changedAt")]
-    last_changed: String,
-    #[serde(rename = "@adtcore:version")]
-    version: String,
-    #[serde(rename = "@adtcore:createdAt")]
-    created_at: String,
-    #[serde(rename = "@adtcore:changedBy")]
-    changed_by: String,
-    #[serde(rename = "@adtcore:createdBy")]
-    created_by: String,
-    #[serde(rename = "@adtcore:description")]
-    description: String,
-    #[serde(rename = "@adtcore:descriptionTextLimit")]
-    description_text_limit: u32,
-    #[serde(rename = "@adtcore:language")]
-    language: String,
-    #[serde(rename = "@adtcore:responsible")]
-    responsible: String,
-    #[serde(rename = "@adtcore:masterLanguage")]
-    master_language: String,
-    #[serde(rename = "@adtcore:masterSystem")]
-    master_system: Option<String>,
-    #[serde(rename = "atom:link", default)]
-    links: Vec<AdvertisedLink>,
-    #[serde(rename = "pak:attributes")]
-    attributes: RawPackageAttributes,
-    #[serde(rename = "pak:superPackage", default)]
-    super_package: RawObjectReference,
-    #[serde(rename = "pak:applicationComponent")]
-    application_component: RawPackageAssignment,
-    #[serde(rename = "pak:transport")]
-    transport: RawPackageTransport,
-    #[serde(rename = "pak:useAccesses", default)]
-    use_accesses: RawUseAccesses,
-    #[serde(rename = "pak:packageInterfaces", default)]
-    package_interfaces: RawPackageInterfaces,
-    #[serde(rename = "pak:subPackages", default)]
-    sub_packages: RawSubPackages,
-}
-
-#[derive(Deserialize)]
-struct RawPackageAttributes {
-    #[serde(rename = "@pak:packageType")]
-    package_type: String,
-    #[serde(rename = "@pak:isPackageTypeEditable")]
-    package_type_editable: bool,
-    #[serde(rename = "@pak:isAddingObjectsAllowed")]
-    adding_objects_allowed: bool,
-    #[serde(rename = "@pak:isAddingObjectsAllowedEditable")]
-    adding_objects_allowed_editable: bool,
-    #[serde(rename = "@pak:isEncapsulated")]
-    encapsulated: bool,
-    #[serde(rename = "@pak:isEncapsulationEditable")]
-    encapsulation_editable: bool,
-    #[serde(rename = "@pak:isEncapsulationVisible")]
-    encapsulation_visible: bool,
-    #[serde(rename = "@pak:recordChanges")]
-    record_changes: bool,
-    #[serde(rename = "@pak:isRecordChangesEditable")]
-    record_changes_editable: bool,
-    #[serde(rename = "@pak:isSwitchVisible")]
-    switch_visible: bool,
-    #[serde(rename = "@pak:languageVersion", default)]
-    language_version: String,
-    #[serde(rename = "@pak:isLanguageVersionVisible")]
-    language_version_visible: bool,
-    #[serde(rename = "@pak:isLanguageVersionEditable")]
-    language_version_editable: bool,
-}
-
-impl From<RawPackageAttributes> for PackageAttributes {
-    fn from(raw: RawPackageAttributes) -> Self {
-        Self {
-            package_type: raw.package_type,
-            package_type_editable: raw.package_type_editable,
-            adding_objects_allowed: raw.adding_objects_allowed,
-            adding_objects_allowed_editable: raw.adding_objects_allowed_editable,
-            encapsulated: raw.encapsulated,
-            encapsulation_editable: raw.encapsulation_editable,
-            encapsulation_visible: raw.encapsulation_visible,
-            record_changes: raw.record_changes,
-            record_changes_editable: raw.record_changes_editable,
-            switch_visible: raw.switch_visible,
-            language_version: raw.language_version,
-            language_version_visible: raw.language_version_visible,
-            language_version_editable: raw.language_version_editable,
-        }
-    }
-}
-
-#[derive(Deserialize)]
-struct RawPackageAssignment {
-    #[serde(rename = "@pak:name", default)]
-    name: String,
-    #[serde(rename = "@pak:description", default)]
-    description: String,
-    #[serde(rename = "@pak:isVisible")]
-    visible: bool,
-    #[serde(rename = "@pak:isEditable")]
-    editable: bool,
-}
-
-impl From<RawPackageAssignment> for PackageAssignment {
-    fn from(raw: RawPackageAssignment) -> Self {
-        Self {
-            name: raw.name,
-            description: raw.description,
-            visible: raw.visible,
-            editable: raw.editable,
-        }
-    }
-}
-
-#[derive(Deserialize)]
-struct RawPackageTransport {
-    #[serde(rename = "pak:softwareComponent")]
-    software_component: RawPackageAssignment,
-    #[serde(rename = "pak:transportLayer")]
-    transport_layer: RawPackageAssignment,
-}
-
-impl From<RawPackageTransport> for PackageTransport {
-    fn from(raw: RawPackageTransport) -> Self {
-        Self {
-            software_component: raw.software_component.into(),
-            transport_layer: raw.transport_layer.into(),
-        }
-    }
-}
-
-#[derive(Default, Deserialize)]
-struct RawUseAccesses {
-    #[serde(rename = "@pak:isVisible", default)]
-    visible: bool,
-    #[serde(rename = "pak:useAccess", default)]
-    items: Vec<RawUseAccess>,
-}
-
-#[derive(Deserialize)]
-struct RawUseAccess {
-    #[serde(rename = "@pak:severity")]
-    severity: String,
-    #[serde(rename = "pak:packageInterfaceRef")]
-    package_interface: RawObjectReference,
-    #[serde(rename = "pak:packageRef", default)]
-    package: RawObjectReference,
-}
-
 #[derive(Default, Deserialize)]
 struct RawPackageInterfaces {
     #[serde(rename = "@pak:isVisible", default)]
-    visible: bool,
+    _visible: bool,
     #[serde(rename = "pak:packageInterfaceRef", default)]
-    items: Vec<RawObjectReference>,
-}
-
-#[derive(Default, Deserialize)]
-struct RawSubPackages {
-    #[serde(rename = "pak:packageRef", default)]
     items: Vec<RawObjectReference>,
 }
 
@@ -726,42 +702,49 @@ mod tests {
             resource: package_reference(),
             version: PackagePropertiesVersion::V2,
             body: PACKAGE_XML.to_vec(),
-            etag: Some(EntityTag::try_from("package-etag").unwrap()),
+            etag: None,
         })
         .unwrap();
-        let PackageProperties::V2(properties) = properties else {
-            panic!("unexpected package-properties version");
-        };
 
         assert_eq!(properties.name, "SADT_TOOLS_CORE");
         assert_eq!(properties.object_type, Package::WORKBENCH_TYPE);
-        assert_eq!(properties.version, ObjectVersion::Active);
-        assert_eq!(properties.master_system.as_deref(), Some("SAP"));
-        assert!(properties.attributes.encapsulated);
-        assert!(properties.attributes.record_changes);
-        assert_eq!(
-            properties.super_package.as_ref().unwrap().reference.name(),
-            "SADT_MAIN"
+    }
+
+    #[test]
+    fn validates_only_the_root_package_type_and_name() {
+        let wrong_type = String::from_utf8(PACKAGE_XML.to_vec()).unwrap().replacen(
+            "adtcore:type=\"DEVC/K\"",
+            "adtcore:type=\"PROG/P\"",
+            1,
         );
-        assert_eq!(properties.application_component.name, "BC-DWB-AIE");
-        assert_eq!(properties.transport.software_component.name, "SAP_BASIS");
-        assert_eq!(properties.use_accesses.len(), 1);
-        assert_eq!(
-            properties.use_accesses[0]
-                .package
-                .as_ref()
-                .unwrap()
-                .reference
-                .name(),
-            "SADT_CORE"
+        assert!(matches!(
+            PackageProperties::try_from(RawObjectProperties {
+                resource: package_reference(),
+                version: PackagePropertiesVersion::V1,
+                body: wrong_type.into_bytes(),
+                etag: None,
+            }),
+            Err(ResponseError::Object(
+                ObjectError::UnexpectedObjectType { .. }
+            ))
+        ));
+
+        let wrong_name = String::from_utf8(PACKAGE_XML.to_vec()).unwrap().replacen(
+            "adtcore:name=\"SADT_TOOLS_CORE\"",
+            "adtcore:name=\"OTHER_PACKAGE\"",
+            1,
         );
-        assert_eq!(properties.package_interfaces.len(), 1);
-        assert_eq!(
-            properties.sub_packages[0].reference.name(),
-            "SADT_TOOLS_CORE_TEST"
-        );
-        assert_eq!(properties.etag.as_deref(), Some("package-etag"));
-        assert_eq!(properties.relations().len(), 1);
+        assert!(matches!(
+            PackageProperties::try_from(RawObjectProperties {
+                resource: package_reference(),
+                version: PackagePropertiesVersion::V2,
+                body: wrong_name.into_bytes(),
+                etag: None,
+            }),
+            Err(ResponseError::Object(
+                ObjectError::UnexpectedObjectName { .. }
+            ))
+        ));
     }
 
     #[test]

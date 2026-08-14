@@ -1,10 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AdtUri, DataElement, EntityTag, GlobalWorkbenchType, MediaVersionNegotiation, ObjectError,
-    ObjectRef, ObjectType, ObjectVersion, Package, PackageReference, RawObjectProperties,
-    ResponseError, WritableProperties,
-    resource::{AdvertisedLink, Relations},
+    DataElement, GlobalWorkbenchType, MediaVersionNegotiation, ObjectError, ObjectRef, ObjectType,
+    RawObjectProperties, ResponseError, WritableProperties,
 };
 
 const BLUE_NAMESPACE: &str = "http://www.sap.com/wbobj/dictionary/dtel";
@@ -29,197 +27,114 @@ impl MediaVersionNegotiation for DataElementPropertiesVersion {
     }
 }
 
-/// Data Element properties tagged with the media-type version returned by ADT.
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[non_exhaustive]
-pub enum DataElementProperties {
-    /// A V2 Data Element properties response.
-    V2(Box<DataElementPropertiesV2>),
+/// The complete Data Element properties payload used by the V2 media type.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(
+    rename(deserialize = "blue:wbobj"),
+    rename_all(serialize = "camelCase"),
+    deny_unknown_fields
+)]
+pub struct DataElementProperties {
+    /// The Data Element name supplied by SAP.
+    #[serde(rename(deserialize = "@adtcore:name"), alias = "name")]
+    pub name: String,
+
+    /// The repository object type, normally `DTEL/DE`.
+    #[serde(rename(deserialize = "@adtcore:type"), alias = "objectType")]
+    pub object_type: GlobalWorkbenchType,
+
+    /// The user responsible for the Data Element, when advertised.
+    #[serde(rename(deserialize = "@adtcore:responsible"), alias = "responsible")]
+    pub responsible: Option<String>,
+
+    /// The Data Element's master language, when advertised.
+    #[serde(
+        rename(deserialize = "@adtcore:masterLanguage"),
+        alias = "masterLanguage"
+    )]
+    pub master_language: Option<String>,
+
+    /// The object's master system, when advertised.
+    #[serde(rename(deserialize = "@adtcore:masterSystem"), alias = "masterSystem")]
+    pub master_system: Option<String>,
+
+    /// The configured ABAP language version, when advertised.
+    #[serde(
+        rename(deserialize = "@adtcore:abapLanguageVersion"),
+        alias = "abapLanguageVersion"
+    )]
+    pub abap_language_version: Option<String>,
+
+    /// The timestamp at which the object was last changed.
+    #[serde(rename(deserialize = "@adtcore:changedAt"), alias = "lastChanged")]
+    pub last_changed: Option<String>,
+
+    /// The object version exactly as advertised by SAP.
+    #[serde(rename(deserialize = "@adtcore:version"), alias = "version")]
+    pub version: Option<String>,
+
+    /// The timestamp at which the object was created.
+    #[serde(rename(deserialize = "@adtcore:createdAt"), alias = "createdAt")]
+    pub created_at: Option<String>,
+
+    /// The user who last changed the object.
+    #[serde(rename(deserialize = "@adtcore:changedBy"), alias = "changedBy")]
+    pub changed_by: Option<String>,
+
+    /// The user who created the object.
+    #[serde(rename(deserialize = "@adtcore:createdBy"), alias = "createdBy")]
+    pub created_by: Option<String>,
+
+    /// The Data Element description, when advertised.
+    #[serde(rename(deserialize = "@adtcore:description"), alias = "description")]
+    pub description: Option<String>,
+
+    /// The language in which language-dependent values are represented.
+    #[serde(rename(deserialize = "@adtcore:language"), alias = "language")]
+    pub language: Option<String>,
+
+    /// Atom links exactly as advertised at the payload root.
+    #[serde(rename(deserialize = "atom:link"), alias = "links", default)]
+    pub links: Vec<DataElementLink>,
+
+    /// The package reference exactly as embedded in the payload.
+    #[serde(rename(deserialize = "adtcore:packageRef"), alias = "package")]
+    pub package: Option<DataElementObjectReference>,
+
+    /// The Data Element's type definition and field behavior.
+    #[serde(rename(deserialize = "dtel:dataElement"), alias = "definition")]
+    pub definition: DataElementDefinition,
 }
 
-impl DataElementProperties {
-    /// Returns the response media-type version.
-    pub fn media_version(&self) -> DataElementPropertiesVersion {
-        match self {
-            Self::V2(_) => DataElementPropertiesVersion::V2,
-        }
-    }
-
-    /// Returns the V2 properties representation.
-    pub fn properties(&self) -> &DataElementPropertiesV2 {
-        match self {
-            Self::V2(properties) => properties,
-        }
-    }
-
-    /// Returns the mutable V2 properties representation.
-    pub fn properties_mut(&mut self) -> &mut DataElementPropertiesV2 {
-        match self {
-            Self::V2(properties) => properties,
-        }
-    }
-
-    /// Returns the response entity tag, when present.
-    pub fn etag(&self) -> Option<&EntityTag> {
-        self.properties().etag.as_ref()
-    }
-}
-
-impl WritableProperties<DataElement> for DataElementProperties {
-    fn media_version(&self) -> DataElementPropertiesVersion {
-        self.media_version()
-    }
-
-    fn to_xml(&self, resource: &ObjectRef<DataElement>) -> Result<String, ObjectError> {
-        match self {
-            Self::V2(properties) => properties.to_xml(resource),
-        }
-    }
-}
+/// The V2 Data Element media type uses the complete shared payload.
+pub type DataElementPropertiesV2 = DataElementProperties;
 
 impl TryFrom<RawObjectProperties<DataElement>> for DataElementProperties {
     type Error = ResponseError;
 
     fn try_from(raw: RawObjectProperties<DataElement>) -> Result<Self, Self::Error> {
-        let properties: RawDataElementProperties =
+        let properties: Self =
             serde_xml_rs::from_reader(raw.body.as_slice()).map_err(ObjectError::InvalidResponse)?;
-        let properties = DataElementPropertiesV2::from_raw(raw.resource, properties, raw.etag)?;
-        Ok(match raw.version {
-            DataElementPropertiesVersion::V2 => Self::V2(Box::new(properties)),
-        })
-    }
-}
-
-/// The V2 Data Element properties representation.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DataElementPropertiesV2 {
-    /// The Data Element resource that was fetched.
-    pub reference: ObjectRef<DataElement>,
-
-    /// The Data Element name supplied by SAP.
-    pub name: String,
-
-    /// The repository object type, normally `DTEL/DE`.
-    pub object_type: GlobalWorkbenchType,
-
-    /// The user responsible for the Data Element, when advertised.
-    pub responsible: Option<String>,
-
-    /// The Data Element's master language, when advertised.
-    pub master_language: Option<String>,
-
-    /// The object's master system, when advertised.
-    pub master_system: Option<String>,
-
-    /// The configured ABAP language version, when advertised.
-    pub abap_language_version: Option<String>,
-
-    /// The timestamp at which the object was last changed.
-    pub last_changed: Option<String>,
-
-    /// The active, inactive, working-area, or new object version.
-    pub version: Option<ObjectVersion>,
-
-    /// The timestamp at which the object was created.
-    pub created_at: Option<String>,
-
-    /// The user who last changed the object.
-    pub changed_by: Option<String>,
-
-    /// The user who created the object.
-    pub created_by: Option<String>,
-
-    /// The Data Element description, when advertised.
-    pub description: Option<String>,
-
-    /// The language in which language-dependent values are represented.
-    pub language: Option<String>,
-
-    /// The package containing the Data Element, when advertised.
-    pub package: Option<PackageReference>,
-
-    /// The Data Element's type definition and field behavior.
-    pub definition: DataElementDefinition,
-
-    /// The response entity tag, when present.
-    pub etag: Option<EntityTag>,
-
-    relations: Relations,
-}
-
-impl DataElementPropertiesV2 {
-    /// Returns the links advertised with the properties response.
-    pub fn relations(&self) -> &Relations {
-        &self.relations
-    }
-
-    fn from_raw(
-        reference: ObjectRef<DataElement>,
-        raw: RawDataElementProperties,
-        etag: Option<EntityTag>,
-    ) -> Result<Self, ObjectError> {
-        if raw.object_type != DataElement::WORKBENCH_TYPE {
+        if properties.object_type != DataElement::WORKBENCH_TYPE {
             return Err(ObjectError::UnexpectedObjectType {
                 expected: DataElement::WORKBENCH_TYPE,
-                actual: raw.object_type,
-            });
+                actual: properties.object_type,
+            }
+            .into());
         }
-        if !raw.name.eq_ignore_ascii_case(reference.name()) {
+        if !properties.name.eq_ignore_ascii_case(raw.resource.name()) {
             return Err(ObjectError::UnexpectedObjectName {
-                expected: reference.name().to_owned(),
-                actual: raw.name,
-            });
+                expected: raw.resource.name().to_owned(),
+                actual: properties.name,
+            }
+            .into());
         }
-        let version = raw
-            .version
-            .as_deref()
-            .map(|version| {
-                ObjectVersion::parse(version).ok_or_else(|| ObjectError::UnsupportedObjectVersion {
-                    version: version.to_owned(),
-                })
-            })
-            .transpose()?;
-        let package = raw
-            .package
-            .map(RawPackageReference::into_reference)
-            .transpose()?;
-        let relations = Relations::new(reference.erase(), raw.links);
-
-        Ok(Self {
-            reference,
-            name: raw.name,
-            object_type: raw.object_type,
-            responsible: raw.responsible,
-            master_language: raw.master_language,
-            master_system: raw.master_system,
-            abap_language_version: raw.abap_language_version,
-            last_changed: raw.last_changed,
-            version,
-            created_at: raw.created_at,
-            changed_by: raw.changed_by,
-            created_by: raw.created_by,
-            description: raw.description,
-            language: raw.language,
-            package,
-            definition: raw.definition.try_into()?,
-            etag,
-            relations,
-        })
+        Ok(properties)
     }
+}
 
+impl DataElementProperties {
     fn validate(&self, resource: &ObjectRef<DataElement>) -> Result<(), ObjectError> {
-        if self.reference != *resource {
-            return Err(ObjectError::ObjectPropertiesMismatch {
-                expected: resource.to_string(),
-                actual: self.reference.to_string(),
-            });
-        }
-        if !self.reference.name().eq_ignore_ascii_case(resource.name()) {
-            return Err(ObjectError::UnexpectedObjectName {
-                expected: resource.name().to_owned(),
-                actual: self.reference.name().to_owned(),
-            });
-        }
         if !self.name.eq_ignore_ascii_case(resource.name()) {
             return Err(ObjectError::UnexpectedObjectName {
                 expected: resource.name().to_owned(),
@@ -234,6 +149,12 @@ impl DataElementPropertiesV2 {
         }
         Ok(())
     }
+}
+
+impl WritableProperties<DataElement> for DataElementProperties {
+    fn media_version(&self) -> DataElementPropertiesVersion {
+        DataElementPropertiesVersion::V2
+    }
 
     fn to_xml(&self, resource: &ObjectRef<DataElement>) -> Result<String, ObjectError> {
         self.validate(resource)?;
@@ -247,352 +168,174 @@ impl DataElementPropertiesV2 {
     }
 }
 
-/// The Data Element type-definition kind used by ADT.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum DataElementTypeKind {
-    /// The Data Element references a Dictionary domain.
-    Domain,
-
-    /// The Data Element directly uses a predefined ABAP type.
-    PredefinedAbapType,
-
-    /// The Data Element is a reference to a predefined ABAP type.
-    ReferenceToPredefinedAbapType,
-
-    /// The Data Element is a reference to another Dictionary type.
-    ReferenceToDictionaryType,
-
-    /// The Data Element is a reference to a class or interface type.
-    ReferenceToClassOrInterfaceType,
+/// One raw Atom link embedded in a Data Element properties payload.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all(serialize = "camelCase"), deny_unknown_fields)]
+pub struct DataElementLink {
+    /// The target exactly as advertised by SAP.
+    #[serde(rename(deserialize = "@href"), alias = "href")]
+    pub href: String,
+    /// The Atom relation URI, when advertised.
+    #[serde(rename(deserialize = "@rel"), alias = "relation")]
+    pub relation: Option<String>,
+    /// The target representation's media type, when advertised.
+    #[serde(rename(deserialize = "@type"), alias = "mediaType")]
+    pub media_type: Option<String>,
+    /// The target representation's language, when advertised.
+    #[serde(rename(deserialize = "@hreflang"), alias = "hreflang")]
+    pub hreflang: Option<String>,
+    /// A human-readable link title, when advertised.
+    #[serde(rename(deserialize = "@title"), alias = "title")]
+    pub title: Option<String>,
+    /// The target length exactly as advertised by SAP.
+    #[serde(rename(deserialize = "@length"), alias = "length")]
+    pub length: Option<String>,
+    /// The target representation's entity tag, when advertised.
+    #[serde(rename(deserialize = "@etag"), alias = "etag")]
+    pub etag: Option<String>,
 }
 
-impl DataElementTypeKind {
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "domain" => Some(Self::Domain),
-            "predefinedAbapType" => Some(Self::PredefinedAbapType),
-            "refToPredefinedAbapType" => Some(Self::ReferenceToPredefinedAbapType),
-            "refToDictionaryType" => Some(Self::ReferenceToDictionaryType),
-            "refToClifType" => Some(Self::ReferenceToClassOrInterfaceType),
-            _ => None,
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Domain => "domain",
-            Self::PredefinedAbapType => "predefinedAbapType",
-            Self::ReferenceToPredefinedAbapType => "refToPredefinedAbapType",
-            Self::ReferenceToDictionaryType => "refToDictionaryType",
-            Self::ReferenceToClassOrInterfaceType => "refToClifType",
-        }
-    }
+/// An object reference embedded in a Data Element properties payload.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all(serialize = "camelCase"), deny_unknown_fields)]
+pub struct DataElementObjectReference {
+    /// The referenced object name exactly as advertised by SAP.
+    #[serde(rename(deserialize = "@adtcore:name"), alias = "name")]
+    pub name: String,
+    /// The referenced object URI exactly as advertised by SAP.
+    #[serde(rename(deserialize = "@adtcore:uri"), alias = "uri")]
+    pub uri: String,
+    /// The referenced global Workbench type.
+    #[serde(rename(deserialize = "@adtcore:type"), alias = "objectType")]
+    pub object_type: GlobalWorkbenchType,
+    /// The referenced object description, when advertised.
+    #[serde(rename(deserialize = "@adtcore:description"), alias = "description")]
+    pub description: Option<String>,
 }
 
-/// One field label and the lengths advertised for it.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DataElementFieldLabel {
-    /// The language-dependent field label.
-    pub text: Option<String>,
-
-    /// The current output length of the label.
-    pub length: Option<u32>,
-
-    /// The maximum supported output length of the label.
-    pub max_length: Option<u32>,
-}
-
-/// Documentation status assigned to a Data Element.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum DataElementDocumentationStatus {
-    /// Documentation is required.
-    Required,
-
-    /// The Data Element is not used in screens.
-    NotUsedInScreens,
-
-    /// The short text sufficiently explains the Data Element.
-    ExplainedByShortText,
-
-    /// Documentation has been postponed.
-    Postponed,
-}
-
-impl DataElementDocumentationStatus {
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "required" => Some(Self::Required),
-            "notUsedInScreens" => Some(Self::NotUsedInScreens),
-            "explainedByShortText" => Some(Self::ExplainedByShortText),
-            "postponed" => Some(Self::Postponed),
-            _ => None,
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Required => "required",
-            Self::NotUsedInScreens => "notUsedInScreens",
-            Self::ExplainedByShortText => "explainedByShortText",
-            Self::Postponed => "postponed",
-        }
-    }
-}
-
-/// The nested Data Element definition preserved between reads and updates.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// The nested Data Element definition exactly as represented by ADT.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all(serialize = "camelCase"), deny_unknown_fields)]
 pub struct DataElementDefinition {
-    /// How the Data Element obtains its type.
-    pub type_kind: DataElementTypeKind,
-
-    /// The referenced domain or type name, when used by this type kind.
+    #[serde(rename(deserialize = "dtel:typeKind"), alias = "typeKind")]
+    pub type_kind: String,
+    #[serde(rename(deserialize = "dtel:typeName"), alias = "typeName")]
     pub type_name: Option<String>,
-
-    /// The resolved Dictionary datatype, when advertised.
+    #[serde(rename(deserialize = "dtel:dataType"), alias = "dataType")]
     pub data_type: Option<String>,
-
-    /// The resolved datatype length, when advertised.
+    #[serde(rename(deserialize = "dtel:dataTypeLength"), alias = "dataTypeLength")]
     pub data_type_length: Option<u32>,
-
-    /// Whether the datatype length can be edited for this type kind.
+    #[serde(
+        rename(deserialize = "dtel:dataTypeLengthEnabled"),
+        alias = "dataTypeLengthEnabled"
+    )]
     pub data_type_length_enabled: Option<bool>,
-
-    /// The resolved number of decimal places, when advertised.
+    #[serde(
+        rename(deserialize = "dtel:dataTypeDecimals"),
+        alias = "dataTypeDecimals"
+    )]
     pub data_type_decimals: Option<u32>,
-
-    /// Whether decimal places can be edited for this type kind.
+    #[serde(
+        rename(deserialize = "dtel:dataTypeDecimalsEnabled"),
+        alias = "dataTypeDecimalsEnabled"
+    )]
     pub data_type_decimals_enabled: Option<bool>,
-
-    /// The short field label.
-    pub short_field_label: DataElementFieldLabel,
-
-    /// The medium field label.
-    pub medium_field_label: DataElementFieldLabel,
-
-    /// The long field label.
-    pub long_field_label: DataElementFieldLabel,
-
-    /// The heading field label.
-    pub heading_field_label: DataElementFieldLabel,
-
-    /// The assigned search help, including an explicitly empty value.
+    #[serde(
+        rename(deserialize = "dtel:shortFieldLabel"),
+        alias = "shortFieldLabel"
+    )]
+    pub short_field_label: Option<String>,
+    #[serde(
+        rename(deserialize = "dtel:shortFieldLength"),
+        alias = "shortFieldLength"
+    )]
+    pub short_field_length: Option<u32>,
+    #[serde(
+        rename(deserialize = "dtel:shortFieldMaxLength"),
+        alias = "shortFieldMaxLength"
+    )]
+    pub short_field_max_length: Option<u32>,
+    #[serde(
+        rename(deserialize = "dtel:mediumFieldLabel"),
+        alias = "mediumFieldLabel"
+    )]
+    pub medium_field_label: Option<String>,
+    #[serde(
+        rename(deserialize = "dtel:mediumFieldLength"),
+        alias = "mediumFieldLength"
+    )]
+    pub medium_field_length: Option<u32>,
+    #[serde(
+        rename(deserialize = "dtel:mediumFieldMaxLength"),
+        alias = "mediumFieldMaxLength"
+    )]
+    pub medium_field_max_length: Option<u32>,
+    #[serde(rename(deserialize = "dtel:longFieldLabel"), alias = "longFieldLabel")]
+    pub long_field_label: Option<String>,
+    #[serde(
+        rename(deserialize = "dtel:longFieldLength"),
+        alias = "longFieldLength"
+    )]
+    pub long_field_length: Option<u32>,
+    #[serde(
+        rename(deserialize = "dtel:longFieldMaxLength"),
+        alias = "longFieldMaxLength"
+    )]
+    pub long_field_max_length: Option<u32>,
+    #[serde(
+        rename(deserialize = "dtel:headingFieldLabel"),
+        alias = "headingFieldLabel"
+    )]
+    pub heading_field_label: Option<String>,
+    #[serde(
+        rename(deserialize = "dtel:headingFieldLength"),
+        alias = "headingFieldLength"
+    )]
+    pub heading_field_length: Option<u32>,
+    #[serde(
+        rename(deserialize = "dtel:headingFieldMaxLength"),
+        alias = "headingFieldMaxLength"
+    )]
+    pub heading_field_max_length: Option<u32>,
+    #[serde(rename(deserialize = "dtel:searchHelp"), alias = "searchHelp")]
     pub search_help: Option<String>,
-
-    /// The assigned search-help parameter, including an explicitly empty value.
+    #[serde(
+        rename(deserialize = "dtel:searchHelpParameter"),
+        alias = "searchHelpParameter"
+    )]
     pub search_help_parameter: Option<String>,
-
-    /// The assigned SET/GET parameter, including an explicitly empty value.
+    #[serde(
+        rename(deserialize = "dtel:setGetParameter"),
+        alias = "setGetParameter"
+    )]
     pub set_get_parameter: Option<String>,
-
-    /// The default component name, including an explicitly empty value.
+    #[serde(
+        rename(deserialize = "dtel:defaultComponentName"),
+        alias = "defaultComponentName"
+    )]
     pub default_component_name: Option<String>,
-
-    /// Whether input history is disabled, when advertised.
+    #[serde(
+        rename(deserialize = "dtel:deactivateInputHistory"),
+        alias = "deactivateInputHistory"
+    )]
     pub deactivate_input_history: Option<bool>,
-
-    /// Whether changes are recorded in change documents, when advertised.
+    #[serde(rename(deserialize = "dtel:changeDocument"), alias = "changeDocument")]
     pub change_document: Option<bool>,
-
-    /// Whether bidirectional text is forced left-to-right, when advertised.
+    #[serde(
+        rename(deserialize = "dtel:leftToRightDirection"),
+        alias = "leftToRightDirection"
+    )]
     pub left_to_right_direction: Option<bool>,
-
-    /// Whether bidirectional filtering is disabled, when advertised.
+    #[serde(
+        rename(deserialize = "dtel:deactivateBIDIFiltering"),
+        alias = "deactivateBidiFiltering"
+    )]
     pub deactivate_bidi_filtering: Option<bool>,
-
-    /// The documentation status returned with the Data Element definition.
-    pub documentation_status: Option<DataElementDocumentationStatus>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename = "blue:wbobj")]
-#[serde(deny_unknown_fields)]
-struct RawDataElementProperties {
-    #[serde(rename = "@adtcore:responsible")]
-    responsible: Option<String>,
-    #[serde(rename = "@adtcore:masterLanguage")]
-    master_language: Option<String>,
-    #[serde(rename = "@adtcore:masterSystem")]
-    master_system: Option<String>,
-    #[serde(rename = "@adtcore:abapLanguageVersion")]
-    abap_language_version: Option<String>,
-    #[serde(rename = "@adtcore:name")]
-    name: String,
-    #[serde(rename = "@adtcore:type")]
-    object_type: GlobalWorkbenchType,
-    #[serde(rename = "@adtcore:changedAt")]
-    last_changed: Option<String>,
-    #[serde(rename = "@adtcore:version")]
-    version: Option<String>,
-    #[serde(rename = "@adtcore:createdAt")]
-    created_at: Option<String>,
-    #[serde(rename = "@adtcore:changedBy")]
-    changed_by: Option<String>,
-    #[serde(rename = "@adtcore:createdBy")]
-    created_by: Option<String>,
-    #[serde(rename = "@adtcore:description")]
-    description: Option<String>,
-    #[serde(rename = "@adtcore:language")]
-    language: Option<String>,
-    #[serde(rename = "atom:link", default)]
-    links: Vec<AdvertisedLink>,
-    #[serde(rename = "adtcore:packageRef")]
-    package: Option<RawPackageReference>,
-    #[serde(rename = "dtel:dataElement")]
-    definition: RawDataElementDefinition,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawPackageReference {
-    #[serde(rename = "@adtcore:name")]
-    name: String,
-    #[serde(rename = "@adtcore:uri")]
-    uri: String,
-    #[serde(rename = "@adtcore:type")]
-    object_type: GlobalWorkbenchType,
-    #[serde(rename = "@adtcore:description")]
-    description: Option<String>,
-}
-
-impl RawPackageReference {
-    fn into_reference(self) -> Result<PackageReference, ObjectError> {
-        if self.object_type != Package::WORKBENCH_TYPE {
-            return Err(ObjectError::UnexpectedObjectType {
-                expected: Package::WORKBENCH_TYPE,
-                actual: self.object_type,
-            });
-        }
-        let uri = AdtUri::parse(&self.uri).map_err(|source| ObjectError::InvalidLink {
-            href: self.uri.clone(),
-            source,
-        })?;
-        Ok(PackageReference {
-            reference: ObjectRef::from_parts(self.name, uri),
-            description: self.description,
-        })
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawDataElementDefinition {
-    #[serde(rename = "dtel:typeKind")]
-    type_kind: String,
-    #[serde(rename = "dtel:typeName")]
-    type_name: Option<String>,
-    #[serde(rename = "dtel:dataType")]
-    data_type: Option<String>,
-    #[serde(rename = "dtel:dataTypeLength")]
-    data_type_length: Option<u32>,
-    #[serde(rename = "dtel:dataTypeLengthEnabled")]
-    data_type_length_enabled: Option<bool>,
-    #[serde(rename = "dtel:dataTypeDecimals")]
-    data_type_decimals: Option<u32>,
-    #[serde(rename = "dtel:dataTypeDecimalsEnabled")]
-    data_type_decimals_enabled: Option<bool>,
-    #[serde(rename = "dtel:shortFieldLabel")]
-    short_field_label: Option<String>,
-    #[serde(rename = "dtel:shortFieldLength")]
-    short_field_length: Option<u32>,
-    #[serde(rename = "dtel:shortFieldMaxLength")]
-    short_field_max_length: Option<u32>,
-    #[serde(rename = "dtel:mediumFieldLabel")]
-    medium_field_label: Option<String>,
-    #[serde(rename = "dtel:mediumFieldLength")]
-    medium_field_length: Option<u32>,
-    #[serde(rename = "dtel:mediumFieldMaxLength")]
-    medium_field_max_length: Option<u32>,
-    #[serde(rename = "dtel:longFieldLabel")]
-    long_field_label: Option<String>,
-    #[serde(rename = "dtel:longFieldLength")]
-    long_field_length: Option<u32>,
-    #[serde(rename = "dtel:longFieldMaxLength")]
-    long_field_max_length: Option<u32>,
-    #[serde(rename = "dtel:headingFieldLabel")]
-    heading_field_label: Option<String>,
-    #[serde(rename = "dtel:headingFieldLength")]
-    heading_field_length: Option<u32>,
-    #[serde(rename = "dtel:headingFieldMaxLength")]
-    heading_field_max_length: Option<u32>,
-    #[serde(rename = "dtel:searchHelp")]
-    search_help: Option<String>,
-    #[serde(rename = "dtel:searchHelpParameter")]
-    search_help_parameter: Option<String>,
-    #[serde(rename = "dtel:setGetParameter")]
-    set_get_parameter: Option<String>,
-    #[serde(rename = "dtel:defaultComponentName")]
-    default_component_name: Option<String>,
-    #[serde(rename = "dtel:deactivateInputHistory")]
-    deactivate_input_history: Option<bool>,
-    #[serde(rename = "dtel:changeDocument")]
-    change_document: Option<bool>,
-    #[serde(rename = "dtel:leftToRightDirection")]
-    left_to_right_direction: Option<bool>,
-    #[serde(rename = "dtel:deactivateBIDIFiltering")]
-    deactivate_bidi_filtering: Option<bool>,
-    #[serde(rename = "dtel:documentationStatus")]
-    documentation_status: Option<String>,
-}
-
-impl TryFrom<RawDataElementDefinition> for DataElementDefinition {
-    type Error = ObjectError;
-
-    fn try_from(raw: RawDataElementDefinition) -> Result<Self, Self::Error> {
-        let type_kind = DataElementTypeKind::parse(&raw.type_kind).ok_or_else(|| {
-            ObjectError::UnsupportedDataElementTypeKind {
-                kind: raw.type_kind.clone(),
-            }
-        })?;
-        let documentation_status = raw
-            .documentation_status
-            .as_deref()
-            .map(|status| {
-                DataElementDocumentationStatus::parse(status).ok_or_else(|| {
-                    ObjectError::UnsupportedDataElementDocumentationStatus {
-                        status: status.to_owned(),
-                    }
-                })
-            })
-            .transpose()?;
-        Ok(Self {
-            type_kind,
-            type_name: raw.type_name,
-            data_type: raw.data_type,
-            data_type_length: raw.data_type_length,
-            data_type_length_enabled: raw.data_type_length_enabled,
-            data_type_decimals: raw.data_type_decimals,
-            data_type_decimals_enabled: raw.data_type_decimals_enabled,
-            short_field_label: DataElementFieldLabel {
-                text: raw.short_field_label,
-                length: raw.short_field_length,
-                max_length: raw.short_field_max_length,
-            },
-            medium_field_label: DataElementFieldLabel {
-                text: raw.medium_field_label,
-                length: raw.medium_field_length,
-                max_length: raw.medium_field_max_length,
-            },
-            long_field_label: DataElementFieldLabel {
-                text: raw.long_field_label,
-                length: raw.long_field_length,
-                max_length: raw.long_field_max_length,
-            },
-            heading_field_label: DataElementFieldLabel {
-                text: raw.heading_field_label,
-                length: raw.heading_field_length,
-                max_length: raw.heading_field_max_length,
-            },
-            search_help: raw.search_help,
-            search_help_parameter: raw.search_help_parameter,
-            set_get_parameter: raw.set_get_parameter,
-            default_component_name: raw.default_component_name,
-            deactivate_input_history: raw.deactivate_input_history,
-            change_document: raw.change_document,
-            left_to_right_direction: raw.left_to_right_direction,
-            deactivate_bidi_filtering: raw.deactivate_bidi_filtering,
-            documentation_status,
-        })
-    }
+    #[serde(
+        rename(deserialize = "dtel:documentationStatus"),
+        alias = "documentationStatus"
+    )]
+    pub documentation_status: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -625,7 +368,7 @@ struct WritableDataElement<'a> {
     #[serde(rename = "@adtcore:changedAt", skip_serializing_if = "Option::is_none")]
     last_changed: Option<&'a str>,
     #[serde(rename = "@adtcore:version", skip_serializing_if = "Option::is_none")]
-    version: Option<&'static str>,
+    version: Option<&'a str>,
     #[serde(rename = "@adtcore:createdAt", skip_serializing_if = "Option::is_none")]
     created_at: Option<&'a str>,
     #[serde(rename = "@adtcore:changedBy", skip_serializing_if = "Option::is_none")]
@@ -640,7 +383,7 @@ struct WritableDataElement<'a> {
     #[serde(rename = "@adtcore:language", skip_serializing_if = "Option::is_none")]
     language: Option<&'a str>,
     #[serde(rename = "atom:link")]
-    links: &'a [AdvertisedLink],
+    links: &'a [DataElementLink],
     #[serde(rename = "adtcore:packageRef", skip_serializing_if = "Option::is_none")]
     package: Option<WritablePackageReference<'a>>,
     #[serde(rename = "dtel:dataElement")]
@@ -657,13 +400,13 @@ impl<'a> WritableDataElement<'a> {
             name: &properties.name,
             object_type: properties.object_type.as_str(),
             last_changed: properties.last_changed.as_deref(),
-            version: properties.version.map(ObjectVersion::as_str),
+            version: properties.version.as_deref(),
             created_at: properties.created_at.as_deref(),
             changed_by: properties.changed_by.as_deref(),
             created_by: properties.created_by.as_deref(),
             description: properties.description.as_deref(),
             language: properties.language.as_deref(),
-            links: properties.relations.advertised(),
+            links: &properties.links,
             package: properties
                 .package
                 .as_ref()
@@ -680,7 +423,7 @@ struct WritablePackageReference<'a> {
     #[serde(rename = "@adtcore:uri")]
     uri: &'a str,
     #[serde(rename = "@adtcore:type")]
-    object_type: String,
+    object_type: &'a str,
     #[serde(
         rename = "@adtcore:description",
         skip_serializing_if = "Option::is_none"
@@ -689,11 +432,11 @@ struct WritablePackageReference<'a> {
 }
 
 impl<'a> WritablePackageReference<'a> {
-    fn new(package: &'a PackageReference) -> Self {
+    fn new(package: &'a DataElementObjectReference) -> Self {
         Self {
-            name: package.reference.name(),
-            uri: package.reference.uri().as_str(),
-            object_type: Package::WORKBENCH_TYPE.to_string(),
+            name: &package.name,
+            uri: &package.uri,
+            object_type: package.object_type.as_str(),
             description: package.description.as_deref(),
         }
     }
@@ -702,7 +445,7 @@ impl<'a> WritablePackageReference<'a> {
 #[derive(Serialize)]
 struct WritableDataElementDefinition<'a> {
     #[serde(rename = "dtel:typeKind")]
-    type_kind: &'static str,
+    type_kind: &'a str,
     #[serde(rename = "dtel:typeName", skip_serializing_if = "Option::is_none")]
     type_name: Option<&'a str>,
     #[serde(rename = "dtel:dataType", skip_serializing_if = "Option::is_none")]
@@ -828,31 +571,31 @@ struct WritableDataElementDefinition<'a> {
         rename = "dtel:documentationStatus",
         skip_serializing_if = "Option::is_none"
     )]
-    documentation_status: Option<&'static str>,
+    documentation_status: Option<&'a str>,
 }
 
 impl<'a> WritableDataElementDefinition<'a> {
     fn new(definition: &'a DataElementDefinition) -> Self {
         Self {
-            type_kind: definition.type_kind.as_str(),
+            type_kind: &definition.type_kind,
             type_name: definition.type_name.as_deref(),
             data_type: definition.data_type.as_deref(),
             data_type_length: definition.data_type_length,
             data_type_length_enabled: definition.data_type_length_enabled,
             data_type_decimals: definition.data_type_decimals,
             data_type_decimals_enabled: definition.data_type_decimals_enabled,
-            short_field_label: definition.short_field_label.text.as_deref(),
-            short_field_length: definition.short_field_label.length,
-            short_field_max_length: definition.short_field_label.max_length,
-            medium_field_label: definition.medium_field_label.text.as_deref(),
-            medium_field_length: definition.medium_field_label.length,
-            medium_field_max_length: definition.medium_field_label.max_length,
-            long_field_label: definition.long_field_label.text.as_deref(),
-            long_field_length: definition.long_field_label.length,
-            long_field_max_length: definition.long_field_label.max_length,
-            heading_field_label: definition.heading_field_label.text.as_deref(),
-            heading_field_length: definition.heading_field_label.length,
-            heading_field_max_length: definition.heading_field_label.max_length,
+            short_field_label: definition.short_field_label.as_deref(),
+            short_field_length: definition.short_field_length,
+            short_field_max_length: definition.short_field_max_length,
+            medium_field_label: definition.medium_field_label.as_deref(),
+            medium_field_length: definition.medium_field_length,
+            medium_field_max_length: definition.medium_field_max_length,
+            long_field_label: definition.long_field_label.as_deref(),
+            long_field_length: definition.long_field_length,
+            long_field_max_length: definition.long_field_max_length,
+            heading_field_label: definition.heading_field_label.as_deref(),
+            heading_field_length: definition.heading_field_length,
+            heading_field_max_length: definition.heading_field_max_length,
             search_help: definition.search_help.as_deref(),
             search_help_parameter: definition.search_help_parameter.as_deref(),
             set_get_parameter: definition.set_get_parameter.as_deref(),
@@ -861,9 +604,7 @@ impl<'a> WritableDataElementDefinition<'a> {
             change_document: definition.change_document,
             left_to_right_direction: definition.left_to_right_direction,
             deactivate_bidi_filtering: definition.deactivate_bidi_filtering,
-            documentation_status: definition
-                .documentation_status
-                .map(DataElementDocumentationStatus::as_str),
+            documentation_status: definition.documentation_status.as_deref(),
         }
     }
 }
@@ -871,6 +612,7 @@ impl<'a> WritableDataElementDefinition<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{AdtUri, EntityTag};
 
     const DATA_ELEMENT_XML: &[u8] =
         include_bytes!("../../tests/fixtures/data-element-ztfrwtfrt-v2.xml");
@@ -897,15 +639,13 @@ mod tests {
     }
 
     fn properties() -> DataElementPropertiesV2 {
-        let properties = parse(
+        parse(
             &reference(),
             DataElementPropertiesVersion::V2,
             DATA_ELEMENT_XML,
             Some(EntityTag::from_static("data-element-etag")),
         )
-        .unwrap();
-        let DataElementProperties::V2(properties) = properties;
-        *properties
+        .unwrap()
     }
 
     fn sparse_properties_xml(type_kind: &str, extra: &str) -> String {
@@ -938,21 +678,16 @@ mod tests {
     fn parses_live_data_element_properties_as_one_representation() {
         let properties = properties();
 
-        assert_eq!(properties.reference, reference());
-        assert_eq!(properties.version, Some(ObjectVersion::New));
+        assert_eq!(properties.version.as_deref(), Some("new"));
         assert_eq!(properties.master_system.as_deref(), Some("A4H"));
-        assert_eq!(
-            properties.package.as_ref().unwrap().reference.name(),
-            "$TMP"
-        );
-        assert_eq!(properties.etag.as_deref(), Some("data-element-etag"));
-        assert_eq!(properties.relations().len(), 4);
+        assert_eq!(properties.package.as_ref().unwrap().name, "$TMP");
+        assert_eq!(properties.links.len(), 4);
         assert_eq!(properties.description.as_deref(), Some("tfarFAR"));
-        assert_eq!(properties.definition.type_kind, DataElementTypeKind::Domain);
+        assert_eq!(properties.definition.type_kind, "domain");
         assert_eq!(properties.definition.type_name.as_deref(), Some("CHAR0008"));
         assert_eq!(properties.definition.data_type_length, Some(8));
         assert_eq!(
-            properties.definition.short_field_label.text.as_deref(),
+            properties.definition.short_field_label.as_deref(),
             Some("123")
         );
         assert_eq!(properties.definition.search_help.as_deref(), Some(""));
@@ -974,8 +709,6 @@ mod tests {
         assert!(xml.contains("<atom:link"));
         assert!(!xml.contains("data-element-etag"));
 
-        let mut expected = properties.clone();
-        expected.etag = None;
         let decoded = parse(
             &reference(),
             DataElementPropertiesVersion::V2,
@@ -983,39 +716,25 @@ mod tests {
             None,
         )
         .unwrap();
-        assert_eq!(decoded, DataElementProperties::V2(Box::new(expected)));
-
-        let raw: RawDataElementProperties = serde_xml_rs::from_str(&xml).unwrap();
-        assert_eq!(raw.object_type, DataElement::WORKBENCH_TYPE);
-        assert_eq!(raw.links.len(), 4);
+        assert_eq!(decoded, properties);
+        assert_eq!(decoded.object_type, DataElement::WORKBENCH_TYPE);
+        assert_eq!(decoded.links.len(), 4);
         assert_eq!(
-            raw.package.unwrap().description.as_deref(),
+            decoded.package.unwrap().description.as_deref(),
             Some("Temporary Objects (never transported!)")
         );
-        assert_eq!(raw.definition.data_type_length, Some(8));
-        assert_eq!(raw.definition.search_help.as_deref(), Some(""));
+        assert_eq!(decoded.definition.data_type_length, Some(8));
+        assert_eq!(decoded.definition.search_help.as_deref(), Some(""));
     }
 
     #[test]
     fn preserves_variant_specific_omissions_for_every_type_kind() {
-        for (wire_value, expected) in [
-            ("domain", DataElementTypeKind::Domain),
-            (
-                "predefinedAbapType",
-                DataElementTypeKind::PredefinedAbapType,
-            ),
-            (
-                "refToPredefinedAbapType",
-                DataElementTypeKind::ReferenceToPredefinedAbapType,
-            ),
-            (
-                "refToDictionaryType",
-                DataElementTypeKind::ReferenceToDictionaryType,
-            ),
-            (
-                "refToClifType",
-                DataElementTypeKind::ReferenceToClassOrInterfaceType,
-            ),
+        for wire_value in [
+            "domain",
+            "predefinedAbapType",
+            "refToPredefinedAbapType",
+            "refToDictionaryType",
+            "refToClifType",
         ] {
             let properties = parse(
                 &reference(),
@@ -1024,12 +743,12 @@ mod tests {
                 None,
             )
             .unwrap();
-            let definition = &properties.properties().definition;
+            let definition = &properties.definition;
 
-            assert_eq!(definition.type_kind, expected);
+            assert_eq!(definition.type_kind, wire_value);
             assert!(definition.type_name.is_none());
             assert!(definition.data_type.is_none());
-            assert!(definition.short_field_label.text.is_none());
+            assert!(definition.short_field_label.is_none());
 
             let xml = properties.to_xml(&reference()).unwrap();
             assert!(xml.contains(&format!("<dtel:typeKind>{wire_value}</dtel:typeKind>")));
@@ -1049,19 +768,23 @@ mod tests {
             None,
         )
         .unwrap();
-        let properties_v2 = properties.properties();
-
-        assert!(properties_v2.responsible.is_none());
-        assert!(properties_v2.master_language.is_none());
-        assert!(properties_v2.description.is_none());
-        assert!(properties_v2.language.is_none());
+        assert!(properties.responsible.is_none());
+        assert!(properties.master_language.is_none());
+        assert!(properties.description.is_none());
+        assert!(properties.language.is_none());
 
         let update = properties.to_xml(&reference()).unwrap();
-        let raw: RawDataElementProperties = serde_xml_rs::from_str(&update).unwrap();
-        assert!(raw.responsible.is_none());
-        assert!(raw.master_language.is_none());
-        assert!(raw.description.is_none());
-        assert!(raw.language.is_none());
+        let decoded = parse(
+            &reference(),
+            DataElementPropertiesVersion::V2,
+            update.as_bytes(),
+            None,
+        )
+        .unwrap();
+        assert!(decoded.responsible.is_none());
+        assert!(decoded.master_language.is_none());
+        assert!(decoded.description.is_none());
+        assert!(decoded.language.is_none());
     }
 
     #[test]
@@ -1079,8 +802,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            properties.properties().definition.documentation_status,
-            Some(DataElementDocumentationStatus::Required)
+            properties.definition.documentation_status.as_deref(),
+            Some("required")
         );
         assert!(
             properties
@@ -1117,7 +840,7 @@ mod tests {
 
         assert!(matches!(
             properties.to_xml(&other),
-            Err(ObjectError::ObjectPropertiesMismatch { .. })
+            Err(ObjectError::UnexpectedObjectName { .. })
         ));
     }
 

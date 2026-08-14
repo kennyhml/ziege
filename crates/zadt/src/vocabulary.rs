@@ -12,47 +12,10 @@ pub struct CategoryId {
     pub term: &'static str,
 }
 
-/// Relations currently understood in program representations.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum Relation {
-    Versions,
-    Source,
-    ObjectStructure,
-    TextElements,
-    EnhancementImplementations,
-    ObjectEnhancementOptions,
-    SourceEnhancementOptions,
-    ObjectStates,
-    Parser,
-}
-
 pub const SECURITY_SESSION_HEADER: HeaderName = HeaderName::from_static("x-sap-security-session");
 pub const PURPOSE_HEADER: HeaderName = HeaderName::from_static("sap-adt-purpose");
 pub const LOAD_BALANCER_HEADER: HeaderName = HeaderName::from_static("sap-adt-saplb");
 pub const CANCEL_ON_CLOSE_HEADER: HeaderName = HeaderName::from_static("sap-cancel-on-close");
-
-impl Relation {
-    pub fn from_uri(uri: &str) -> Option<Self> {
-        match uri {
-            "http://www.sap.com/adt/relations/versions" => Some(Self::Versions),
-            "http://www.sap.com/adt/relations/source" => Some(Self::Source),
-            "http://www.sap.com/adt/relations/objectstructure" => Some(Self::ObjectStructure),
-            "http://www.sap.com/adt/relations/sources/textelements" => Some(Self::TextElements),
-            "http://www.sap.com/adt/relations/enhancementImplementations" => {
-                Some(Self::EnhancementImplementations)
-            }
-            "http://www.sap.com/adt/relations/enhancementOptionsOfMainObject" => {
-                Some(Self::ObjectEnhancementOptions)
-            }
-            "http://www.sap.com/adt/relations/enhancementOptions" => {
-                Some(Self::SourceEnhancementOptions)
-            }
-            "http://www.sap.com/adt/relations/objectstates" => Some(Self::ObjectStates),
-            "http://www.sap.com/adt/relations/abapsource/parser" => Some(Self::Parser),
-            _ => None,
-        }
-    }
-}
 
 /// Actions accepted through ADT's `_action` query parameter.
 ///
@@ -90,7 +53,6 @@ pub(crate) mod query_parameter {
 
 pub(crate) mod media_type {
     pub const DISCOVERY: &str = "application/atomsvc+xml";
-    pub const HTML: &str = "text/html";
     pub const LOCK_RESULT: &str =
         "application/vnd.sap.as+xml; charset=utf-8; dataname=com.sap.adt.lock.Result2";
     pub const REPOSITORY_CONTENT_REQUEST: &str =
