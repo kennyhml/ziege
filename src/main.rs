@@ -27,17 +27,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .build()?
         .traced()
         .with_body_logging(64 * 1024);
+
     let client = Client::new(transport).discover().await?;
 
     let object = client.object::<Class>("ZZZZ")?;
-    let mut properties = object.query().execute(&client).await?;
-    properties.payload.shared_memory_enabled = true;
-    let session = client.create_user_session();
-    let lock = object.lock(AccessMode::Modify).execute(&session).await?;
 
-    let res = object.update(&lock, properties)?.execute(&session).await;
+    let res = object.activation().forced(false).execute(&client).await?;
 
-    lock.remove().execute(&session).await?;
     println!("{res:#?}");
 
     Ok(())

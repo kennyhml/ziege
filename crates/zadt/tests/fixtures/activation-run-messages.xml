@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<chkl:messages xmlns:chkl="http://www.sap.com/abapxml/checklist">
+    <chkl:properties checkExecuted="false" activationExecuted="false" generationExecuted="false"/>
+    <msg objDescr="Class Z_SYNTAX_TEST, Public Section" type="E" line="1" href="/sap/bc/adt/oo/classes/z_syntax_test/source/main#start=207,19" forceSupported="true">
+        <shortText>
+            <txt>Implementation missing for method "CLS_METHODS_MULTIPLE1".</txt>
+        </shortText>
+        <atom:link href="art.syntax:G(2" rel="http://www.sap.com/adt/categories/quickfixes" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </msg>
+    <msg objDescr="Class Z_SYNTAX_TEST, Public Section" type="E" line="2" href="/sap/bc/adt/oo/classes/z_syntax_test/source/main#start=208,12" forceSupported="true">
+        <shortText>
+            <txt>Implementation missing for method "CLS_METHODS_MULTIPLE2".</txt>
+        </shortText>
+        <atom:link href="art.syntax:G(2" rel="http://www.sap.com/adt/categories/quickfixes" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </msg>
+    <msg objDescr="Class Z_SYNTAX_TEST, Public Section" type="E" line="3" href="/sap/bc/adt/oo/classes/z_syntax_test/source/main#start=209,12" forceSupported="true">
+        <shortText>
+            <txt>Implementation missing for method "CLS_METHODS_MULTIPLE3".</txt>
+        </shortText>
+        <atom:link href="art.syntax:G(2" rel="http://www.sap.com/adt/categories/quickfixes" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </msg>
+    <msg objDescr="Class Z_SYNTAX_TEST, Public Section" type="E" line="4" href="/sap/bc/adt/oo/classes/z_syntax_test/source/main#start=122,12" forceSupported="true">
+        <shortText>
+            <txt>Implementation missing for method "CONSTRUCTOR".</txt>
+        </shortText>
+        <atom:link href="art.syntax:G(2" rel="http://www.sap.com/adt/categories/quickfixes" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </msg>
+    <msg objDescr="Class Z_SYNTAX_TEST, Public Section" type="E" line="5" href="/sap/bc/adt/oo/classes/z_syntax_test/source/main#start=160,13" forceSupported="true">
+        <shortText>
+            <txt>Implementation missing for method "METHODS_MULTIPLE1".</txt>
+        </shortText>
+        <atom:link href="art.syntax:G(2" rel="http://www.sap.com/adt/categories/quickfixes" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </msg>
+    <msg objDescr="Class Z_SYNTAX_TEST, Public Section" type="E" line="6" href="/sap/bc/adt/oo/classes/z_syntax_test/source/main#start=161,12" forceSupported="true">
+        <shortText>
+            <txt>Implementation missing for method "METHODS_MULTIPLE2".</txt>
+        </shortText>
+        <atom:link href="art.syntax:G(2" rel="http://www.sap.com/adt/categories/quickfixes" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </msg>
+    <msg objDescr="Class Z_SYNTAX_TEST, Public Section" type="E" line="7" href="/sap/bc/adt/oo/classes/z_syntax_test/source/main#start=162,12" forceSupported="true">
+        <shortText>
+            <txt>Implementation missing for method "METHODS_MULTIPLE3".</txt>
+        </shortText>
+        <atom:link href="art.syntax:G(2" rel="http://www.sap.com/adt/categories/quickfixes" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </msg>
+    <msg objDescr="Class Z_SYNTAX_TEST, Public Section" type="E" line="8" href="/sap/bc/adt/oo/classes/z_syntax_test/source/main#start=166,13" forceSupported="true">
+        <shortText>
+            <txt>Implementation missing for method "METHODS_MULTIPLE_WITH_PARAMS1".</txt>
+        </shortText>
+        <atom:link href="art.syntax:G(2" rel="http://www.sap.com/adt/categories/quickfixes" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </msg>
+    <msg objDescr="Class Z_SYNTAX_TEST, Public Section" type="E" line="9" href="/sap/bc/adt/oo/classes/z_syntax_test/source/main#start=125,12" forceSupported="true">
+        <shortText>
+            <txt>Implementation missing for method "METHOD_SINGLE".</txt>
+        </shortText>
+        <atom:link href="art.syntax:G(2" rel="http://www.sap.com/adt/categories/quickfixes" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </msg>
+    <msg objDescr="Class Z_SYNTAX_TEST, Public Section" type="E" line="10" href="/sap/bc/adt/oo/classes/z_syntax_test/source/main#start=141,12" forceSupported="true">
+        <shortText>
+            <txt>Implementation missing for method "METHOD_SINGLE_WITH_PARAMS1".</txt>
+        </shortText>
+        <atom:link href="art.syntax:G(2" rel="http://www.sap.com/adt/categories/quickfixes" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </msg>
+    <msg objDescr="Class Z_SYNTAX_TEST, Public Section" type="E" line="11" href="/sap/bc/adt/oo/classes/z_syntax_test/source/main#start=147,12" forceSupported="true">
+        <shortText>
+            <txt>Implementation missing for method "METHOD_SINGLE_WITH_PARAMS2".</txt>
+        </shortText>
+        <atom:link href="art.syntax:G(2" rel="http://www.sap.com/adt/categories/quickfixes" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </msg>
+    <msg objDescr="Class Z_SYNTAX_TEST, Public Section" type="E" line="12" href="/sap/bc/adt/oo/classes/z_syntax_test/source/main#start=185,12" forceSupported="true">
+        <shortText>
+            <txt>Implementation missing for method "METHOD_WITH_SPECIAL_PARAMS".</txt>
+        </shortText>
+        <atom:link href="art.syntax:G(2" rel="http://www.sap.com/adt/categories/quickfixes" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </msg>
+    <msg objDescr="Class Z_SYNTAX_TEST, Public Section" type="E" line="13" href="/sap/bc/adt/oo/classes/z_syntax_test/source/main#start=177,13" forceSupported="true">
+        <shortText>
+            <txt>Implementation missing for method "MULTIPLE_WITH_PARAMS2".</txt>
+        </shortText>
+        <atom:link href="art.syntax:G(2" rel="http://www.sap.com/adt/categories/quickfixes" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </msg>
+    <msg objDescr="Class Z_SYNTAX_TEST, Public Section" type="E" line="14" href="/sap/bc/adt/oo/classes/z_syntax_test/source/main#start=127,12" forceSupported="true">
+        <shortText>
+            <txt>Implementation missing for method "RETURNING".</txt>
+        </shortText>
+        <atom:link href="art.syntax:G(2" rel="http://www.sap.com/adt/categories/quickfixes" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </msg>
+    <msg objDescr="Class Z_SYNTAX_TEST, Public Section" type="E" line="15" href="/sap/bc/adt/oo/classes/z_syntax_test/source/main#start=129,12" forceSupported="true">
+        <shortText>
+            <txt>Implementation missing for method "RETURNS_SFLIGHT".</txt>
+        </shortText>
+        <atom:link href="art.syntax:G(2" rel="http://www.sap.com/adt/categories/quickfixes" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </msg>
+    <msg objDescr="Class Z_SYNTAX_TEST, Public Section" type="E" line="16" href="/sap/bc/adt/oo/classes/z_syntax_test/source/main#start=198,18" forceSupported="true">
+        <shortText>
+            <txt>Implementation missing for method "SINGLE_CLS_METHOD".</txt>
+        </shortText>
+        <atom:link href="art.syntax:G(2" rel="http://www.sap.com/adt/categories/quickfixes" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </msg>
+    <msg objDescr="Class Z_SYNTAX_TEST, Public Section" type="E" line="17" href="/sap/bc/adt/oo/classes/z_syntax_test/source/main#start=201,18" forceSupported="true">
+        <shortText>
+            <txt>Implementation missing for method "SINGLE_CLS_METHOD_WITH_PARAMS".</txt>
+        </shortText>
+        <atom:link href="art.syntax:G(2" rel="http://www.sap.com/adt/categories/quickfixes" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </msg>
+    <msg objDescr="Class Z_SYNTAX_TEST, Public Section" type="E" line="18" href="/sap/bc/adt/oo/classes/z_syntax_test/source/main#start=192,12" forceSupported="true">
+        <shortText>
+            <txt>Implementation missing for method "SINGLE_METHOD_USING_ESCAPE".</txt>
+        </shortText>
+        <atom:link href="art.syntax:G(2" rel="http://www.sap.com/adt/categories/quickfixes" xmlns:atom="http://www.w3.org/2005/Atom"/>
+    </msg>
+</chkl:messages>

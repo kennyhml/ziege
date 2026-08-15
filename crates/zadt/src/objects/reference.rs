@@ -153,6 +153,28 @@ pub struct AdvertisedObjectReference {
     pub parent_uri: Option<String>,
 }
 
+impl<T: ObjectType> From<&ObjectRef<T>> for AdvertisedObjectReference {
+    fn from(value: &ObjectRef<T>) -> Self {
+        Self {
+            uri: Some(value.uri().as_str().to_owned()),
+            object_type: Some(T::WORKBENCH_TYPE),
+            name: Some(value.name.clone()),
+            ..Default::default()
+        }
+    }
+}
+
+impl From<&ObjectRef<Erased>> for AdvertisedObjectReference {
+    fn from(value: &ObjectRef<Erased>) -> Self {
+        Self {
+            uri: Some(value.uri().as_str().to_owned()),
+            object_type: Some(value.object_type().clone()),
+            name: Some(value.name.clone()),
+            ..Default::default()
+        }
+    }
+}
+
 /// A collection of unresolved object references exactly as advertised by ADT.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename = "adtcore:objectReferences")]

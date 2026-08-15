@@ -15,8 +15,9 @@ mod vocabulary;
 pub mod transport;
 
 pub use api::activation::{
-    InactiveCtsObject, InactiveCtsObjectEntry, InactiveCtsObjectTransport, InactiveCtsObjects,
-    InactiveCtsObjectsQuery, InactiveObjectsQuery,
+    ActivationRun, ActivationRunMessage, ActivationRunMessageText, ActivationRunMessages,
+    ActivationRunMode, ActivationRunProperties, InactiveCtsObject, InactiveCtsObjectEntry,
+    InactiveCtsObjectTransport, InactiveCtsObjects, InactiveCtsObjectsQuery, InactiveObjectsQuery,
 };
 pub use api::classes::{ClassRun, ClassRunResult};
 pub use api::discovery::{
