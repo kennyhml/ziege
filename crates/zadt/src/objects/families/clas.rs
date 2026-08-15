@@ -15,6 +15,7 @@ use zadt_macros::object_type;
         SourceComponents(ClassSourceComponent),
         Run,
         ReadProperties(model = ClassProperties),
+        UpdateProperties,
     ),
 )]
 #[derive(Clone, Copy, Debug, Default)]
@@ -42,8 +43,8 @@ impl ClassPropertiesVersion {
 }
 
 /// The currently modeled class-properties payload.
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename = "class:abapClass")]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename = "class:abapClass", deny_unknown_fields)]
 pub struct ClassProperties {
     /// The class name supplied by SAP.
     #[serde(rename = "@adtcore:name")]
@@ -157,14 +158,30 @@ impl PropertyModel for ClassProperties {
         ClassPropertiesVersion::V3,
         ClassPropertiesVersion::V2,
     ];
+    const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
+        ("class", "http://www.sap.com/adt/oo/classes"),
+        ("abapoo", "http://www.sap.com/adt/oo"),
+        ("abapsource", "http://www.sap.com/adt/abapsource"),
+        ("adtcore", "http://www.sap.com/adt/core"),
+        ("atom", "http://www.w3.org/2005/Atom"),
+    ];
 
     fn media_type(version: Self::Version) -> &'static str {
         version.media_type()
     }
+
+    fn object_name(&self) -> &str {
+        &self.name
+    }
+
+    fn object_type(&self) -> &GlobalWorkbenchType {
+        &self.object_type
+    }
 }
 
 /// The syntax configuration embedded in a class-properties payload.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ClassSyntaxConfiguration {
     /// The configured ABAP language, when advertised.
     #[serde(rename = "abapsource:language")]
@@ -172,7 +189,8 @@ pub struct ClassSyntaxConfiguration {
 }
 
 /// An ABAP language description embedded in a class syntax configuration.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ClassSyntaxLanguage {
     /// The language-version token.
     #[serde(rename = "abapsource:version")]
@@ -186,7 +204,8 @@ pub struct ClassSyntaxLanguage {
 }
 
 /// One source include embedded in a class-properties payload.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ClassSourceProperties {
     /// The include type exactly as advertised by SAP.
     #[serde(rename = "@class:includeType")]
@@ -375,6 +394,49 @@ mod tests {
                 .as_deref(),
             Some("757")
         );
+    }
+
+    #[test]
+    fn serializes_class_properties_as_a_complete_update_payload() {
+        fn assert_writable<T: crate::UpdateProperties>() {}
+        assert_writable::<Class>();
+
+        let class = parse(CLASS_XML).unwrap();
+        let object = crate::ObjectRef::erased(
+            class.name.clone(),
+            crate::AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
+            Class::WORKBENCH_TYPE,
+        );
+        let xml = Class::DESCRIPTOR
+            .properties_to_xml(
+                &object,
+                ClassPropertiesVersion::V4.media_type(),
+                serde_json::to_value(&class).unwrap(),
+            )
+            .unwrap();
+
+        assert!(xml.contains("<class:abapClass"));
+        assert!(xml.contains("xmlns:class=\"http://www.sap.com/adt/oo/classes\""));
+        assert!(xml.contains("xmlns:abapoo=\"http://www.sap.com/adt/oo\""));
+        assert!(xml.contains("xmlns:abapsource=\"http://www.sap.com/adt/abapsource\""));
+        assert!(xml.contains("xmlns:adtcore=\"http://www.sap.com/adt/core\""));
+        assert!(xml.contains("xmlns:atom=\"http://www.w3.org/2005/Atom\""));
+        assert!(xml.contains("adtcore:name=\"CL_ADT_URI_MAPPER\""));
+        assert!(xml.contains("<adtcore:packageRef"));
+        assert!(xml.contains("<class:include"));
+        assert!(xml.contains("<atom:link"));
+        assert_eq!(parse(&xml).unwrap(), class);
+    }
+
+    #[test]
+    fn rejects_unmodeled_class_property_fields() {
+        let xml = CLASS_XML.replacen(
+            "class:final=",
+            "class:futureAttribute=\"future\" class:final=",
+            1,
+        );
+
+        assert!(parse(&xml).is_err());
     }
 
     #[test]

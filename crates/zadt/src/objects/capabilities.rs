@@ -1,6 +1,6 @@
 use serde::{Serialize, de::DeserializeOwned};
 
-use super::ObjectType;
+use super::{GlobalWorkbenchType, ObjectType};
 use crate::{compatibility::media_types_match, target::TemplateTarget, vocabulary::CategoryId};
 
 /// Marks an object capable of being executed immediately (not a job).
@@ -55,6 +55,10 @@ pub trait PropertyModel: std::fmt::Debug + DeserializeOwned + Serialize + Send +
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[];
 
     fn media_type(version: Self::Version) -> &'static str;
+
+    fn object_name(&self) -> &str;
+
+    fn object_type(&self) -> &GlobalWorkbenchType;
 
     fn version_from_media_type(media_type: &str) -> Option<Self::Version> {
         Self::SUPPORTED_VERSIONS

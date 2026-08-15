@@ -43,7 +43,7 @@ without a stateful session context. It also provides convenient methods to navig
 and their relations. You can find more on the technical details down below.
 
 ADT object types often arrive at runtime from a command line or network request. `ZADT` supports that
-case with a descriptor-backed `RepositoryObject` while retaining `ObjectRef<T>` for statically known
+case with a descriptor-backed `ObjectRef<Erased>` while retaining `ObjectRef<T>` for statically known
 object types. Each modeled type has one `#[object_type(...)]` declaration that generates its static trait
 implementations and a private runtime descriptor. The explicit registry lists only those generated
 descriptors, so discovery identity, source capabilities, and property parsing come from the
@@ -54,14 +54,14 @@ family-specific operations exist.
 `CLAS/OC`, the vocabulary is opaque and also includes compact values such as `AUTH` and identifiers with
 more than one slash; callers should compare the complete value rather than decomposing it.
 
-Common runtime operations dispatch through that descriptor. Properties reads and writes remain available
-only through `ObjectRef<T>`, where the concrete object family determines the media-version and model types.
-The placeholder `RepositoryObject::properties()` and `RepositoryObject::update(...)` methods currently panic
-while runtime properties dispatch is being redesigned.
+Common runtime operations dispatch through that descriptor. Typed references expose their concrete
+property models, while `ObjectRef<Erased>` exposes the same representations as validated JSON together
+with their originating object, media type, and ETag. Runtime property updates deserialize through the registered concrete
+model before creating XML, so unsupported object types and read-only property models fail explicitly.
 
 Programs and classes retain distinct typed run operations because ADT advertises
 separate protocol contracts for them. Runtime callers can use the same capability
-through `RepositoryObject::run()` without trying each modeled object type:
+through `ObjectRef<Erased>::run()` without trying each modeled object type:
 
 ```rust,ignore
 let typed_output = program.run().execute(&client).await?;
@@ -69,7 +69,7 @@ let runtime_output = repository_object.run()?.execute(&client).await?;
 ```
 
 Primary source and secondary component sources are modeled separately. `ObjectRef<T>::source()` and
-`RepositoryObject::source()` resolve the primary source, while class definitions, implementations, and
+`ObjectRef<Erased>::source()` resolve the primary source, while class definitions, implementations, and
 other includes are exposed through `component_source(...)` and `source_component(...)`. Runtime component
 enumeration therefore never includes a synthetic `main` component.
 

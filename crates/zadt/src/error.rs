@@ -143,6 +143,9 @@ pub enum ObjectError {
         actual: GlobalWorkbenchType,
     },
 
+    #[error("expected properties for object `{expected}`, but received properties for `{actual}`")]
+    UnexpectedObjectReference { expected: String, actual: String },
+
     #[error("expected repository object type `{expected}`, but RIS advertised `{actual}`")]
     UnexpectedRepositoryObjectType {
         expected: GlobalWorkbenchType,

@@ -112,6 +112,14 @@ impl PropertyModel for PackageProperties {
     fn media_type(version: Self::Version) -> &'static str {
         version.media_type()
     }
+
+    fn object_name(&self) -> &str {
+        &self.name
+    }
+
+    fn object_type(&self) -> &GlobalWorkbenchType {
+        &self.object_type
+    }
 }
 
 /// Package behavior and editor capability flags.

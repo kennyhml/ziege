@@ -44,6 +44,7 @@ pub(crate) trait RuntimeObjectTypeDescriptor: std::fmt::Debug + Sync {
     // Still go through the typed deserizalization it normally would.
     fn properties_to_xml(
         &self,
+        object: &ObjectRef<Erased>,
         media_type: &'static str,
         payload: serde_json::Value,
     ) -> Result<String, ObjectError>;
@@ -109,6 +110,7 @@ where
         })?;
     let properties = resource.query().decode(response)?;
     Ok(JsonObjectProperties {
+        resource: object.clone(),
         media_type: T::Properties::media_type(properties.media_version),
         etag: properties.etag,
         payload: serde_json::to_value(properties.payload)?,
@@ -116,6 +118,7 @@ where
 }
 
 pub(crate) fn properties_to_xml<T>(
+    object: &ObjectRef<Erased>,
     _media_type: &'static str,
     payload: serde_json::Value,
 ) -> Result<String, ObjectError>
@@ -124,6 +127,22 @@ where
 {
     let properties: T::Properties =
         serde_json::from_value(payload).map_err(ObjectError::InvalidPropertiesJson)?;
+    if properties.object_name() != object.name() {
+        return Err(ObjectError::UnexpectedObjectReference {
+            expected: object.to_string(),
+            actual: format!(
+                "{} ({})",
+                properties.object_name(),
+                properties.object_type()
+            ),
+        });
+    }
+    if properties.object_type() != object.object_type() {
+        return Err(ObjectError::UnexpectedObjectType {
+            expected: object.object_type().clone(),
+            actual: properties.object_type().clone(),
+        });
+    }
     T::Properties::XML_NAMESPACES
         .iter()
         .fold(

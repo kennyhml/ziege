@@ -113,6 +113,14 @@ impl PropertyModel for DataElementProperties {
         ("atom", "http://www.w3.org/2005/Atom"),
     ];
 
+    fn object_name(&self) -> &str {
+        &self.name
+    }
+
+    fn object_type(&self) -> &GlobalWorkbenchType {
+        &self.object_type
+    }
+
     fn media_type(version: Self::Version) -> &'static str {
         version.media_type()
     }

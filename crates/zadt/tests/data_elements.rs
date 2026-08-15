@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    AccessMode, Client, DataElement, DataElementPropertiesVersion, Logon, ObjectVersion, Operation,
-    Ready, ReqwestTransport,
+    AccessMode, Client, DataElement, DataElementPropertiesVersion, Logon, ObjectError,
+    ObjectVersion, Operation, Ready, ReqwestTransport,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -204,6 +204,7 @@ async fn runtime_data_element_update_reuses_json_properties_in_the_lock_session(
     let reference = client.object::<DataElement>("ZTFRWTFRT").unwrap();
     let object = reference.erase();
     let mut properties = object.query().unwrap().execute(&client).await.unwrap();
+    assert_eq!(properties.resource(), &object);
     properties.payload["@adtcore:description"] = "Updated description".into();
     let session = client.create_user_session();
     let object_lock = object
@@ -211,6 +212,11 @@ async fn runtime_data_element_update_reuses_json_properties_in_the_lock_session(
         .execute(&session)
         .await
         .unwrap();
+    let other = client.object::<DataElement>("ZOTHER").unwrap().erase();
+    assert!(matches!(
+        other.update(&object_lock, properties.clone()),
+        Err(ObjectError::UnexpectedObjectReference { .. })
+    ));
     let result = object
         .update(&object_lock, properties)
         .unwrap()

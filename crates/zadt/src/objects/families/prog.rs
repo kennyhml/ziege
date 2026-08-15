@@ -15,6 +15,7 @@ use crate::{AdvertisedLink, AdvertisedObjectReference};
         HasSource,
         Run,
         ReadProperties(model = ProgramProperties),
+        UpdateProperties,
     ),
 )]
 #[derive(Clone, Copy, Debug, Default)]
@@ -30,6 +31,7 @@ pub struct Program;
     capabilities(
         HasSource,
         ReadProperties(model = IncludeProperties),
+        UpdateProperties,
     ),
 )]
 #[derive(Clone, Copy, Debug, Default)]
@@ -84,7 +86,8 @@ impl IncludePropertyVersion {
 }
 
 /// The source parser configuration advertised by a program.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SyntaxConfiguration {
     /// The configured ABAP language.
     #[serde(rename = "abapsource:language")]
@@ -92,7 +95,8 @@ pub struct SyntaxConfiguration {
 }
 
 /// An ABAP language version, description, and its advertised parser links.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SyntaxLanguage {
     /// The language version identifier, such as `X`.
     #[serde(rename = "abapsource:version")]
@@ -108,8 +112,8 @@ pub struct SyntaxLanguage {
 }
 
 /// The currently modeled ABAP program-properties payload.
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename = "program:abapProgram")]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename = "program:abapProgram", deny_unknown_fields)]
 pub struct ProgramProperties {
     /// The program name supplied by ADT.
     #[serde(rename = "@adtcore:name")]
@@ -201,15 +205,29 @@ impl PropertyModel for ProgramProperties {
 
     const SUPPORTED_VERSIONS: &'static [Self::Version] =
         &[ProgramPropertiesVersion::V3, ProgramPropertiesVersion::V2];
+    const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
+        ("program", "http://www.sap.com/adt/programs/programs"),
+        ("abapsource", "http://www.sap.com/adt/abapsource"),
+        ("adtcore", "http://www.sap.com/adt/core"),
+        ("atom", "http://www.w3.org/2005/Atom"),
+    ];
 
     fn media_type(version: Self::Version) -> &'static str {
         version.media_type()
     }
+
+    fn object_name(&self) -> &str {
+        &self.name
+    }
+
+    fn object_type(&self) -> &GlobalWorkbenchType {
+        &self.object_type
+    }
 }
 
 /// The complete standalone ABAP include-properties payload.
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename = "include:abapInclude")]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename = "include:abapInclude", deny_unknown_fields)]
 pub struct IncludeProperties {
     /// The include name supplied by ADT.
     #[serde(rename = "@adtcore:name")]
@@ -292,9 +310,23 @@ impl PropertyModel for IncludeProperties {
     type Version = IncludePropertyVersion;
 
     const SUPPORTED_VERSIONS: &'static [Self::Version] = &[IncludePropertyVersion::V2];
+    const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
+        ("include", "http://www.sap.com/adt/programs/includes"),
+        ("abapsource", "http://www.sap.com/adt/abapsource"),
+        ("adtcore", "http://www.sap.com/adt/core"),
+        ("atom", "http://www.w3.org/2005/Atom"),
+    ];
 
     fn media_type(version: Self::Version) -> &'static str {
         version.media_type()
+    }
+
+    fn object_name(&self) -> &str {
+        &self.name
+    }
+
+    fn object_type(&self) -> &GlobalWorkbenchType {
+        &self.object_type
     }
 }
 
@@ -366,6 +398,66 @@ mod tests {
     }
 
     #[test]
+    fn serializes_program_properties_as_a_complete_update_payload() {
+        fn assert_writable<T: crate::UpdateProperties>() {}
+        assert_writable::<Program>();
+
+        let program = parse_program(PROGRAM_XML).unwrap();
+        let object = crate::ObjectRef::erased(
+            program.name.clone(),
+            crate::AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
+            Program::WORKBENCH_TYPE,
+        );
+        let xml = Program::DESCRIPTOR
+            .properties_to_xml(
+                &object,
+                ProgramPropertiesVersion::V3.media_type(),
+                serde_json::to_value(&program).unwrap(),
+            )
+            .unwrap();
+
+        assert!(xml.contains("<program:abapProgram"));
+        assert!(xml.contains("xmlns:program=\"http://www.sap.com/adt/programs/programs\""));
+        assert!(xml.contains("xmlns:abapsource=\"http://www.sap.com/adt/abapsource\""));
+        assert!(xml.contains("xmlns:adtcore=\"http://www.sap.com/adt/core\""));
+        assert!(xml.contains("xmlns:atom=\"http://www.w3.org/2005/Atom\""));
+        assert!(xml.contains("adtcore:name=\"Z_TEST\""));
+        assert!(xml.contains("<adtcore:packageRef"));
+        assert!(xml.contains("<atom:link"));
+        assert_eq!(parse_program(&xml).unwrap(), program);
+    }
+
+    #[test]
+    fn serializes_include_properties_as_a_complete_update_payload() {
+        fn assert_writable<T: crate::UpdateProperties>() {}
+        assert_writable::<Include>();
+
+        let include = parse_include(INCLUDE_XML).unwrap();
+        let object = crate::ObjectRef::erased(
+            include.name.clone(),
+            crate::AdtUri::parse("/sap/bc/adt/programs/includes/ztest").unwrap(),
+            Include::WORKBENCH_TYPE,
+        );
+        let xml = Include::DESCRIPTOR
+            .properties_to_xml(
+                &object,
+                IncludePropertyVersion::V2.media_type(),
+                serde_json::to_value(&include).unwrap(),
+            )
+            .unwrap();
+
+        assert!(xml.contains("<include:abapInclude"));
+        assert!(xml.contains("xmlns:include=\"http://www.sap.com/adt/programs/includes\""));
+        assert!(xml.contains("xmlns:abapsource=\"http://www.sap.com/adt/abapsource\""));
+        assert!(xml.contains("xmlns:adtcore=\"http://www.sap.com/adt/core\""));
+        assert!(xml.contains("xmlns:atom=\"http://www.w3.org/2005/Atom\""));
+        assert!(xml.contains("adtcore:name=\"ZTEST\""));
+        assert!(xml.contains("<adtcore:packageRef"));
+        assert!(xml.contains("<atom:link"));
+        assert_eq!(parse_include(&xml).unwrap(), include);
+    }
+
+    #[test]
     fn include_json_with_context_reference_round_trips() {
         let mut value = serde_json::to_value(parse_include(INCLUDE_XML).unwrap()).unwrap();
         assert_eq!(value["@adtcore:name"], "ZTEST");
@@ -426,6 +518,14 @@ mod tests {
     #[test]
     fn rejects_malformed_program_xml() {
         assert!(parse_program("<program:abapProgram>").is_err());
+        assert!(
+            parse_program(&PROGRAM_XML.replacen(
+                "program:lockedByEditor=",
+                "program:futureAttribute=\"future\" program:lockedByEditor=",
+                1,
+            ))
+            .is_err()
+        );
     }
 
     #[test]

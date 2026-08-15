@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use http::{Method, StatusCode, header};
 
 use crate::{
-    Erased, ObjectError, ObjectLock, TransportNumber,
+    AccessMode, Erased, ObjectError, ObjectLock, TransportNumber,
     client::{Client, ClientState, Ready},
     error::{OperationError, ResponseError},
     objects::{
@@ -21,6 +21,7 @@ pub struct ObjectProperties<P>
 where
     P: PropertyModel,
 {
+    resource: ObjectRef<Erased>,
     pub(crate) media_version: P::Version,
     pub etag: Option<EntityTag>,
     pub payload: P,
@@ -30,6 +31,11 @@ impl<P> ObjectProperties<P>
 where
     P: PropertyModel,
 {
+    /// Returns the runtime object from which these properties were queried.
+    pub fn resource(&self) -> &ObjectRef<Erased> {
+        &self.resource
+    }
+
     /// Returns the media-type version used by this representation.
     pub fn media_version(&self) -> P::Version {
         self.media_version
@@ -44,12 +50,18 @@ where
 /// A fetched object-properties payload exposed through its runtime JSON form.
 #[derive(Clone, Debug)]
 pub struct JsonObjectProperties {
+    pub(crate) resource: ObjectRef<Erased>,
     pub(crate) media_type: &'static str,
     pub etag: Option<EntityTag>,
     pub payload: serde_json::Value,
 }
 
 impl JsonObjectProperties {
+    /// Returns the runtime object from which these properties were queried.
+    pub fn resource(&self) -> &ObjectRef<Erased> {
+        &self.resource
+    }
+
     pub fn media_type(&self) -> &'static str {
         self.media_type
     }
@@ -108,7 +120,7 @@ where
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        decode_query::<T>(response)
+        decode_query::<T>(&self.resource.erase(), response)
     }
 }
 
@@ -219,7 +231,9 @@ where
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        decode_update(response, decode_query::<T>)
+        decode_update(response, |response| {
+            decode_query::<T>(&self.resource, response)
+        })
     }
 }
 
@@ -232,6 +246,10 @@ where
         object_lock: &ObjectLock,
         properties: ObjectProperties<T::Properties>,
     ) -> Result<ObjectPropertiesUpdate<T>, ObjectError> {
+        let resource = self.erase();
+        ensure_same_resource(&resource, properties.resource())?;
+        validate_payload_identity(&resource, &properties.payload)?;
+        validate_update_lock(&resource, object_lock)?;
         let media_type = properties.media_type();
         let serializer = T::Properties::XML_NAMESPACES.iter().fold(
             serde_xml_rs::SerdeXml::new(),
@@ -242,7 +260,7 @@ where
             .map_err(ObjectError::InvalidRequest)?
             .into_bytes();
         Ok(ObjectPropertiesUpdate {
-            resource: self.erase(),
+            resource,
             object_lock: object_lock.clone(),
             media_type,
             body,
@@ -309,10 +327,12 @@ impl ObjectRef<Erased> {
         object_lock: &ObjectLock,
         properties: JsonObjectProperties,
     ) -> Result<JsonObjectPropertiesUpdate, ObjectError> {
+        ensure_same_resource(self, properties.resource())?;
+        validate_update_lock(self, object_lock)?;
         let descriptor = self
             .descriptor()
             .ok_or_else(|| unsupported(self, "object properties update"))?;
-        let body = descriptor.properties_to_xml(properties.media_type, properties.payload)?;
+        let body = descriptor.properties_to_xml(self, properties.media_type, properties.payload)?;
         Ok(JsonObjectPropertiesUpdate {
             resource: self.clone(),
             object_lock: object_lock.clone(),
@@ -331,9 +351,71 @@ fn unsupported(object: &ObjectRef<Erased>, capability: &'static str) -> ObjectEr
     }
 }
 
+fn ensure_same_resource(
+    expected: &ObjectRef<Erased>,
+    actual: &ObjectRef<Erased>,
+) -> Result<(), ObjectError> {
+    if expected.uri() != actual.uri()
+        || expected.name() != actual.name()
+        || expected.object_type() != actual.object_type()
+    {
+        return Err(ObjectError::UnexpectedObjectReference {
+            expected: expected.to_string(),
+            actual: actual.to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_payload_identity<P>(
+    resource: &ObjectRef<Erased>,
+    properties: &P,
+) -> Result<(), ObjectError>
+where
+    P: PropertyModel,
+{
+    if properties.object_name() != resource.name() {
+        return Err(ObjectError::UnexpectedObjectReference {
+            expected: resource.to_string(),
+            actual: format!(
+                "{} ({})",
+                properties.object_name(),
+                properties.object_type()
+            ),
+        });
+    }
+    if properties.object_type() != resource.object_type() {
+        return Err(ObjectError::UnexpectedObjectType {
+            expected: resource.object_type().clone(),
+            actual: properties.object_type().clone(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_update_lock(
+    resource: &ObjectRef<Erased>,
+    object_lock: &ObjectLock,
+) -> Result<(), ObjectError> {
+    if resource.uri() != object_lock.object().uri()
+        || resource.name() != object_lock.object().name()
+        || resource.object_type() != object_lock.object().object_type()
+    {
+        return Err(ObjectError::ObjectLockMismatch {
+            expected: resource.to_string(),
+            actual: object_lock.object().to_string(),
+        });
+    }
+    if object_lock.access_mode() != AccessMode::Modify {
+        return Err(ObjectError::ObjectLockNotModifiable);
+    }
+    Ok(())
+}
+
 // Shared helper for typed property decoding as both update and query
 // receive the same response payload.
 fn decode_query<T>(
+    resource: &ObjectRef<Erased>,
     response: OperationResponse,
 ) -> Result<ObjectProperties<T::Properties>, ResponseError>
 where
@@ -363,9 +445,11 @@ where
         }
     })?;
     let etag = response.entity_tag();
-    let payload =
+    let payload: T::Properties =
         serde_xml_rs::from_reader(response.body()).map_err(ObjectError::InvalidResponse)?;
+    validate_payload_identity(resource, &payload)?;
     Ok(ObjectProperties {
+        resource: resource.clone(),
         media_version,
         etag,
         payload,
