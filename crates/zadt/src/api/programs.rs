@@ -1,4 +1,4 @@
-use super::object::ObjectRun;
+use super::run::ObjectRun;
 use crate::{
     client::{Client, Ready},
     error::{OperationError, ResponseError},

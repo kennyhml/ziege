@@ -1,9 +1,11 @@
 pub(crate) mod classes;
 pub(crate) mod discovery;
-pub(crate) mod object;
+pub(crate) mod locking;
 pub(crate) mod packages;
 pub(crate) mod programs;
 pub(crate) mod properties;
 pub(crate) mod repository;
+pub(crate) mod run;
 pub(crate) mod session;
+pub(crate) mod source;
 pub(crate) mod transports;

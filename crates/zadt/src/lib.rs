@@ -18,10 +18,7 @@ pub use api::classes::{ClassRun, ClassRunResult};
 pub use api::discovery::{
     Capabilities, Category, Collection, CoreDiscoveryQuery, DiscoveryQuery, TemplateLink, Workspace,
 };
-pub use api::object::{
-    AccessMode, LockRequest, ObjectLock, ObjectRun, ObjectRunResult, ObjectSourceQuery,
-    ObjectSourceUpdate, SourceCode, SourceUpdateResult, UnlockRequest,
-};
+pub use api::locking::{AccessMode, LockRequest, ObjectLock, UnlockRequest};
 pub use api::packages::{
     PackageInterfaceReference, PackageReference, PackageSettings, PackageSettingsQuery,
     PackageTree, PackageTreeKind, PackageTreeNode, PackageTreeQuery,
@@ -40,7 +37,9 @@ pub use api::repository::{
     RepositoryObjectSummary, RepositoryPreselection, RepositoryPreselectionInfo,
     RepositoryProperty, RepositoryVirtualFolder,
 };
+pub use api::run::{ObjectRun, ObjectRunResult};
 pub use api::session::{Logon, SessionInformation, SessionUri, SystemInformationLink};
+pub use api::source::{ObjectSourceQuery, ObjectSourceUpdate, SourceCode, SourceUpdateResult};
 pub use api::transports::{
     QueryTransportKind, TransportCheck, TransportCheckBuilder, TransportCheckBuilderError,
     TransportCheckLinkUpMode, TransportCheckMessage, TransportCheckOperation, TransportCheckResult,
