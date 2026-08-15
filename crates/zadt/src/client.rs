@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
-    BatchOperation, Capabilities, CategoryId, Collection, CompatibilityError, Stateless, Transport,
-    UserSession,
+    BatchOperation, Capabilities, CategoryId, Collection, CompatibilityError, OperationError,
+    Stateless, Transport, UserSession,
 };
 
 mod private {
@@ -79,7 +79,7 @@ impl Client<Initial> {
 
 impl Client<Ready> {
     /// Creates an empty stateless batch using this client's core capabilities.
-    pub fn batch(&self) -> Result<BatchOperation<Stateless>, CompatibilityError> {
+    pub fn batch(&self) -> Result<BatchOperation<Stateless>, OperationError> {
         BatchOperation::new(self)
     }
 

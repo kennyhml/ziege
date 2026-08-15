@@ -50,7 +50,10 @@ impl CollectionTarget {
         client: &Client<Ready>,
         method: Method,
     ) -> Result<AdtRequest, OperationError> {
-        let target = self.collection(client)?.target().clone();
+        let target = self
+            .collection(client)?
+            .target()
+            .map_err(ObjectError::InvalidTarget)?;
         Ok(AdtRequest::new(method, target))
     }
 }

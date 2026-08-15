@@ -42,16 +42,6 @@ impl From<derive_builder::UninitializedFieldError> for ReqwestTransportBuildErro
 pub enum DiscoveryError {
     #[error("invalid discovery XML: {0}")]
     Xml(#[from] serde_xml_rs::Error),
-
-    #[error("discovery collection `{title}` has no href")]
-    MissingCollectionHref { title: String },
-
-    #[error("discovery collection `{title}` has an invalid href `{href}`: {source}")]
-    InvalidCollectionHref {
-        title: String,
-        href: String,
-        source: AdtUriError,
-    },
 }
 
 /// An error decoding or validating the HTTP session established during logon.

@@ -7,8 +7,8 @@ use httpmock::prelude::*;
 use std::sync::{Arc, Mutex};
 use zadt::{
     AdtRequest, AdtResponse, CategoryId, Class, Client, CoreDiscoveryQuery, DataElement,
-    DiscoveryError, DiscoveryQuery, GlobalWorkbenchType, Logon, ObjectError, Operation,
-    OperationError, ReqwestTransport, ResponseError, Transport, TransportError,
+    DiscoveryQuery, GlobalWorkbenchType, Logon, ObjectError, Operation, OperationError,
+    ReqwestTransport, ResponseError, Transport, TransportError,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -47,7 +47,7 @@ async fn core_discovery_is_available_before_central_discovery() {
         .unwrap();
 
     assert_eq!(
-        collection.target().as_str(),
+        collection.target().unwrap().as_str(),
         "/sap/bc/adt/compatibility/graph"
     );
     assert!(
@@ -314,17 +314,15 @@ async fn unexpected_status_is_an_operation_response_error() {
 }
 
 #[tokio::test]
-async fn discovery_rejects_collection_urls_outside_the_sap_resource_root() {
+async fn discovery_defers_collection_url_validation_until_use() {
     let client = Client::new(FixtureTransport::new(INVALID_DISCOVERY_XML));
     Logon.execute(&client).await.unwrap();
-    let error = DiscoveryQuery.execute(&client).await.unwrap_err();
+    let capabilities = DiscoveryQuery.execute(&client).await.unwrap();
+    let collection = capabilities
+        .collection("http://www.sap.com/adt/categories/programs", "programs")
+        .unwrap();
 
-    assert!(matches!(
-        error,
-        OperationError::Response(ResponseError::Discovery(
-            DiscoveryError::InvalidCollectionHref { .. }
-        ))
-    ));
+    assert!(collection.target().is_err());
 }
 
 struct FixtureTransport {

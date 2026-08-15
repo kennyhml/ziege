@@ -99,8 +99,7 @@ fn decode_discovery_response(response: OperationResponse) -> Result<Capabilities
 }
 
 pub(crate) fn parse_capabilities(body: &[u8]) -> Result<Capabilities, DiscoveryError> {
-    let raw: RawService = serde_xml_rs::from_reader(body)?;
-    Capabilities::try_from(raw)
+    serde_xml_rs::from_reader(body).map_err(Into::into)
 }
 
 /// Capabilities advertised by an ADT discovery document.
@@ -108,8 +107,10 @@ pub(crate) fn parse_capabilities(body: &[u8]) -> Result<Capabilities, DiscoveryE
 /// A capability document consists of one or more [`Workspace`] values, each
 /// containing related [`Collection`] values. Use [`Capabilities::collection`]
 /// with a category scheme and term when selecting a protocol capability.
-#[derive(Debug)]
+#[derive(Debug, Deserialize)]
+#[serde(rename = "app:service")]
 pub struct Capabilities {
+    #[serde(rename = "app:workspace", default)]
     workspaces: Vec<Workspace>,
 }
 
@@ -137,9 +138,11 @@ impl Capabilities {
 }
 
 /// A named group of related ADT collections.
-#[derive(Debug)]
+#[derive(Debug, Deserialize)]
 pub struct Workspace {
+    #[serde(rename = "atom:title")]
     title: String,
+    #[serde(rename = "app:collection", default)]
     collections: Vec<Collection>,
 }
 
@@ -158,14 +161,18 @@ impl Workspace {
 }
 
 /// An ADT resource collection advertised by a discovery document.
-#[derive(Debug)]
+#[derive(Debug, Deserialize)]
 pub struct Collection {
+    #[serde(rename = "@href")]
     href: String,
-    target: AdtUri,
+    #[serde(rename = "atom:title")]
     title: Option<String>,
+    #[serde(rename = "app:accept", default)]
     accepted_media_types: Vec<String>,
+    #[serde(rename = "atom:category", default)]
     categories: Vec<Category>,
-    template_links: Vec<TemplateLink>,
+    #[serde(rename = "adtcomp:templateLinks", default)]
+    template_links: TemplateLinks,
 }
 
 impl Collection {
@@ -178,13 +185,13 @@ impl Collection {
         &self.href
     }
 
-    /// Returns the validated, destination-relative target for the collection.
+    /// Resolves the advertised href to a destination-relative request target.
     ///
     /// For an absolute advertised `href`, this preserves the path while
     /// discarding its authority. Requests therefore remain bound to the
     /// transport's configured SAP destination.
-    pub fn target(&self) -> &AdtUri {
-        &self.target
+    pub fn target(&self) -> Result<AdtUri, crate::AdtUriError> {
+        collection_target(&self.href)
     }
 
     /// Returns the collection's optional display title.
@@ -207,7 +214,7 @@ impl Collection {
 
     /// Returns the collections parameterized links to related resources.
     pub fn template_links(&self) -> &[TemplateLink] {
-        &self.template_links
+        &self.template_links.links
     }
 }
 
@@ -215,9 +222,11 @@ impl Collection {
 ///
 /// ADT identifies a category by the combination of its [`scheme`](Self::scheme)
 /// and [`term`](Self::term).
-#[derive(Debug)]
+#[derive(Debug, Deserialize)]
 pub struct Category {
+    #[serde(rename = "@term")]
     term: String,
+    #[serde(rename = "@scheme")]
     scheme: String,
 }
 
@@ -234,11 +243,15 @@ impl Category {
 }
 
 /// A parameterized link from a collection to a related ADT resource.
-#[derive(Debug)]
+#[derive(Debug, Deserialize)]
 pub struct TemplateLink {
+    #[serde(rename = "@title")]
     title: Option<String>,
+    #[serde(rename = "@rel")]
     relation: String,
+    #[serde(rename = "@template")]
     template: String,
+    #[serde(rename = "@type")]
     media_type: Option<String>,
 }
 
@@ -264,141 +277,10 @@ impl TemplateLink {
     }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename = "app:service")]
-struct RawService {
-    #[serde(rename = "app:workspace", default)]
-    workspaces: Vec<RawWorkspace>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawWorkspace {
-    #[serde(rename = "atom:title")]
-    title: String,
-
-    #[serde(rename = "app:collection", default)]
-    collections: Vec<RawCollection>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawCollection {
-    #[serde(rename = "@href")]
-    href: Option<String>,
-
-    #[serde(rename = "atom:title")]
-    title: Option<String>,
-
-    #[serde(rename = "app:accept", default)]
-    accepted_media_types: Vec<String>,
-
-    #[serde(rename = "atom:category", default)]
-    categories: Vec<RawCategory>,
-
-    #[serde(rename = "adtcomp:templateLinks", default)]
-    template_links: RawTemplateLinks,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawCategory {
-    #[serde(rename = "@term")]
-    term: String,
-
-    #[serde(rename = "@scheme")]
-    scheme: String,
-}
-
 #[derive(Debug, Default, Deserialize)]
-struct RawTemplateLinks {
+struct TemplateLinks {
     #[serde(rename = "adtcomp:templateLink", default)]
-    links: Vec<RawTemplateLink>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawTemplateLink {
-    #[serde(rename = "@title")]
-    title: Option<String>,
-
-    #[serde(rename = "@rel")]
-    relation: String,
-
-    #[serde(rename = "@template")]
-    template: String,
-
-    #[serde(rename = "@type")]
-    media_type: Option<String>,
-}
-
-impl TryFrom<RawService> for Capabilities {
-    type Error = DiscoveryError;
-
-    fn try_from(raw: RawService) -> Result<Self, Self::Error> {
-        let workspaces = raw
-            .workspaces
-            .into_iter()
-            .map(|workspace| {
-                let collections = workspace
-                    .collections
-                    .into_iter()
-                    .map(Collection::try_from)
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(Workspace {
-                    title: workspace.title,
-                    collections,
-                })
-            })
-            .collect::<Result<Vec<_>, DiscoveryError>>()?;
-
-        Ok(Self { workspaces })
-    }
-}
-
-impl TryFrom<RawCollection> for Collection {
-    type Error = DiscoveryError;
-
-    fn try_from(collection: RawCollection) -> Result<Self, Self::Error> {
-        let error_title = collection
-            .title
-            .as_deref()
-            .unwrap_or("<untitled>")
-            .to_owned();
-        let href = collection
-            .href
-            .ok_or_else(|| DiscoveryError::MissingCollectionHref {
-                title: error_title.clone(),
-            })?;
-        let target =
-            collection_target(&href).map_err(|source| DiscoveryError::InvalidCollectionHref {
-                title: error_title,
-                href: href.clone(),
-                source,
-            })?;
-
-        Ok(Self {
-            href,
-            target,
-            title: collection.title,
-            accepted_media_types: collection.accepted_media_types,
-            categories: collection
-                .categories
-                .into_iter()
-                .map(|category| Category {
-                    term: category.term,
-                    scheme: category.scheme,
-                })
-                .collect(),
-            template_links: collection
-                .template_links
-                .links
-                .into_iter()
-                .map(|link| TemplateLink {
-                    title: link.title,
-                    relation: link.relation,
-                    template: link.template,
-                    media_type: link.media_type,
-                })
-                .collect(),
-        })
-    }
+    links: Vec<TemplateLink>,
 }
 
 fn collection_target(href: &str) -> Result<AdtUri, crate::AdtUriError> {
@@ -439,7 +321,7 @@ mod tests {
 
         assert_eq!(capabilities.workspaces()[0].title(), "Programme");
         assert_eq!(collection.href(), "/sap/bc/adt/programs/programs");
-        assert_eq!(collection.target().as_str(), collection.href());
+        assert_eq!(collection.target().unwrap().as_str(), collection.href());
         assert_eq!(
             collection.accepted_media_types(),
             [
@@ -468,13 +350,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_invalid_collection_targets() {
-        let error = parse_capabilities(INVALID_DISCOVERY_XML).unwrap_err();
+    fn defers_collection_target_validation() {
+        let capabilities = parse_capabilities(INVALID_DISCOVERY_XML).unwrap();
+        let collection = capabilities
+            .collection(Program::CATEGORY.scheme, Program::CATEGORY.term)
+            .unwrap();
 
-        assert!(matches!(
-            error,
-            DiscoveryError::InvalidCollectionHref { .. }
-        ));
+        assert!(collection.target().is_err());
     }
 
     #[test]
@@ -520,6 +402,6 @@ mod tests {
             collection.href(),
             "https://sap.example.test:44300/sap/bc/adt"
         );
-        assert_eq!(collection.target().as_str(), "/sap/bc/adt");
+        assert_eq!(collection.target().unwrap().as_str(), "/sap/bc/adt");
     }
 }

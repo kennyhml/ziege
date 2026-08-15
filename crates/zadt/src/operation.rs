@@ -6,8 +6,8 @@ use secrecy::{ExposeSecret, SecretString};
 use uuid::Uuid;
 
 use crate::{
-    AdtRequest, AdtResponse, AdtUri, Client, ClientState, CompatibilityError, EntityTag,
-    OperationError, Ready, ResponseError, TransportError, target::CORE_DISCOVERY,
+    AdtRequest, AdtResponse, AdtUri, Client, ClientState, EntityTag, OperationError, Ready,
+    ResponseError, TransportError, target::CORE_DISCOVERY,
 };
 
 mod batch;
@@ -411,7 +411,7 @@ where
 
 impl UserSession<Ready> {
     /// Creates an empty stateful batch bound to this user session's client.
-    pub fn batch(&self) -> Result<BatchOperation<Stateful>, CompatibilityError> {
+    pub fn batch(&self) -> Result<BatchOperation<Stateful>, OperationError> {
         BatchOperation::new(&self.client)
     }
 }

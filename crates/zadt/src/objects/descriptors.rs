@@ -23,6 +23,8 @@ pub(crate) trait RuntimeObjectTypeDescriptor: std::fmt::Debug + Sync {
 
     fn run(&self) -> Option<RunCapability>;
 
+    // Type erased access to building the properties request, this allows us
+    // to reuse the typed media version in the request
     fn properties_request(
         &self,
         object: &ObjectRef<Erased>,
@@ -30,12 +32,16 @@ pub(crate) trait RuntimeObjectTypeDescriptor: std::fmt::Debug + Sync {
         client: &Client<Ready>,
     ) -> Result<AdtRequest, OperationError>;
 
+    // Convert the property response into a JSON payload. Through erasure, this
+    // will still go through the typed deserizalization it normally would.
     fn properties_to_json(
         &self,
         object: &ObjectRef<Erased>,
         response: OperationResponse,
     ) -> Result<JsonObjectProperties, ResponseError>;
 
+    // Convert the properties from a generic JSON blob into the XML payload.
+    // Still go through the typed deserizalization it normally would.
     fn properties_to_xml(
         &self,
         media_type: &'static str,

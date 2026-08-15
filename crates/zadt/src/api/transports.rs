@@ -1365,6 +1365,7 @@ impl Operation<Ready> for TransportPropertiesQuery {
         let collection = Self::TARGET.collection(client)?;
         let target = collection
             .target()
+            .map_err(ObjectError::InvalidTarget)?
             .append_segments([self.transport_number.as_str()])
             .map_err(ObjectError::InvalidTarget)?;
         let mut request = AdtRequest::new(Method::GET, target);
@@ -1461,7 +1462,8 @@ impl Operation<Ready> for TransportCreate {
         )
         .serialize()?;
 
-        let mut request = AdtRequest::new(Method::POST, collection.target().clone());
+        let target = collection.target().map_err(ObjectError::InvalidTarget)?;
+        let mut request = AdtRequest::new(Method::POST, target);
         if let Some(transport_layer) = &self.transport_layer {
             request.push_query("transportLayer", transport_layer);
         }

@@ -3,10 +3,8 @@ use std::{fmt, hash::Hash};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    api::object::{AccessMode, LockRequest, ObjectLock, ObjectRun, UnlockRequest},
     client::{Client, Ready},
     error::ObjectError,
-    resource::SourceRef,
     uri::AdtUri,
     vocabulary::CategoryId,
 };
@@ -159,50 +157,6 @@ impl ObjectRef<Erased> {
         }
         Some(ObjectRef::new(self.name.clone(), self.uri.clone()))
     }
-
-    /// Resolves the primary source when available.
-    pub fn source(&self) -> Option<SourceRef> {
-        self.descriptor()
-            .and_then(|descriptor| descriptor.source_path())
-            .map(|path| SourceRef::from_object_path(self.clone(), path))
-    }
-
-    /// Resolves one named secondary source component when available.
-    pub fn source_component(&self, name: &str) -> Option<SourceRef> {
-        self.descriptor()?
-            .source_component_paths()
-            .iter()
-            .find(|path| path.last() == Some(&name))
-            .map(|path| SourceRef::from_object_path(self.clone(), path))
-    }
-
-    /// Creates an immediate run operation when this object family supports it.
-    pub fn run(&self) -> Result<ObjectRun, ObjectError> {
-        let run = self
-            .descriptor()
-            .and_then(|descriptor| descriptor.run())
-            .ok_or_else(|| ObjectError::UnsupportedCapability {
-                object_type: self.object_type().clone(),
-                capability: "immediate run",
-            })?;
-        Ok(ObjectRun::new(self.clone(), run))
-    }
-
-    /// Creates an object-lock operation.
-    pub fn lock(&self, access_mode: AccessMode) -> LockRequest {
-        LockRequest::new(self.clone(), access_mode)
-    }
-
-    /// Creates an operation that releases this object's lock.
-    pub fn unlock(&self, object_lock: ObjectLock) -> Result<UnlockRequest, ObjectError> {
-        if self.uri() != object_lock.object().uri() {
-            return Err(ObjectError::ObjectLockMismatch {
-                expected: self.to_string(),
-                actual: object_lock.object().to_string(),
-            });
-        }
-        Ok(UnlockRequest::new(object_lock))
-    }
 }
 
 impl<T> PartialEq for ObjectRef<T> {
@@ -234,7 +188,7 @@ impl Client<Ready> {
         let name = name.to_ascii_uppercase();
         let uri_name = name.to_ascii_lowercase();
         let collection = self.require_collection(category)?;
-        let uri = collection.target().append_segments([&uri_name])?;
+        let uri = collection.target()?.append_segments([&uri_name])?;
         Ok((name, uri))
     }
 
@@ -263,6 +217,7 @@ impl Client<Ready> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::AccessMode;
 
     #[test]
     fn advertised_object_references_preserve_partial_wire_values() {

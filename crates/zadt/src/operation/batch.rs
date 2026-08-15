@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use super::{Execute, Operation, OperationKind, Stateful, Stateless, UserSession};
 use crate::{
-    AdtRequest, AdtResponse, AdtUri, CategoryId, Client, CompatibilityError, OperationError,
+    AdtRequest, AdtResponse, AdtUri, CategoryId, Client, ObjectError, OperationError,
     OperationResponse, Ready, ResponseError,
 };
 
@@ -78,12 +78,12 @@ where
     K: OperationKind,
 {
     /// Creates an empty batch using the endpoint advertised to a ready client.
-    pub(crate) fn new(client: &Client<Ready>) -> Result<Self, CompatibilityError> {
+    pub(crate) fn new(client: &Client<Ready>) -> Result<Self, OperationError> {
         let collection = client.require_core_collection(BATCH_CATEGORY)?;
 
         Ok(Self {
             identity: Arc::new(()),
-            endpoint: collection.target().clone(),
+            endpoint: collection.target().map_err(ObjectError::InvalidTarget)?,
             operations: Vec::new(),
             kind: PhantomData,
         })
@@ -292,17 +292,17 @@ trait CreateBatch<K>: Execute<Ready, BatchOperation<K>>
 where
     K: OperationKind,
 {
-    fn create_batch(&self) -> Result<BatchOperation<K>, CompatibilityError>;
+    fn create_batch(&self) -> Result<BatchOperation<K>, OperationError>;
 }
 
 impl CreateBatch<Stateless> for Client<Ready> {
-    fn create_batch(&self) -> Result<BatchOperation<Stateless>, CompatibilityError> {
+    fn create_batch(&self) -> Result<BatchOperation<Stateless>, OperationError> {
         Client::batch(self)
     }
 }
 
 impl CreateBatch<Stateful> for UserSession<Ready> {
-    fn create_batch(&self) -> Result<BatchOperation<Stateful>, CompatibilityError> {
+    fn create_batch(&self) -> Result<BatchOperation<Stateful>, OperationError> {
         UserSession::batch(self)
     }
 }
