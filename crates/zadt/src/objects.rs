@@ -18,7 +18,7 @@ pub use families::{
     PackageUseAccess, Program, ProgramProperties, ProgramPropertiesVersion, SyntaxConfiguration,
     SyntaxLanguage,
 };
-pub use reference::{AdvertisedObjectReference, Erased, ObjectRef};
+pub use reference::{AdvertisedObjectReference, Erased, ObjectRef, ObjectReferences};
 pub use version::ObjectVersion;
 pub use workbench::{GlobalWorkbenchType, InvalidWorkbenchType};
 

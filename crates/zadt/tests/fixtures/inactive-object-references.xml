@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<adtcore:objectReferences xmlns:adtcore="http://www.sap.com/adt/core">
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/ddic/dataelements/ztfrwtfrt" adtcore:type="DTEL/DE" adtcore:name="ZTFRWTFRT"/>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/ddic/lockobjects/sources/ezabapgit" adtcore:type="ENQU/DL" adtcore:name="EZABAPGIT"/>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/functions/groups/z_test_group" adtcore:type="FUGR/F" adtcore:name="Z_TEST_GROUP"/>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/functions/groups/z_test_group/fmodules/zzzzfunc" adtcore:type="FUGR/FF" adtcore:name="ZZZZFUNC" adtcore:parentUri="/sap/bc/adt/functions/groups/z_test_group"/>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/%2fdmo%2fcl_travel_auxiliary" adtcore:type="CLAS/OC" adtcore:name="/DMO/CL_TRAVEL_AUXILIARY"/>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/%2fdmo%2ftfartfar" adtcore:type="CLAS/OC" adtcore:name="/DMO/TFARTFAR"/>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/z_syntax_test" adtcore:type="CLAS/OC" adtcore:name="Z_SYNTAX_TEST"/>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/z_test_create_class" adtcore:type="CLAS/OC" adtcore:name="Z_TEST_CREATE_CLASS"/>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/zzztarfa" adtcore:type="CLAS/OC" adtcore:name="ZZZTARFA"/>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/zzzz" adtcore:type="CLAS/OC" adtcore:name="ZZZZ"/>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/programs/includes/%2fbods%2fzzzztest" adtcore:type="PROG/I" adtcore:name="/BODS/ZZZZTEST"/>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/programs/includes/zfoo" adtcore:type="PROG/I" adtcore:name="ZFOO"/>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/programs/programs/%2fbods%2frpt_stream_read_table" adtcore:type="PROG/P" adtcore:name="/BODS/RPT_STREAM_READ_TABLE"/>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/programs/programs/z_test" adtcore:type="PROG/P" adtcore:name="Z_TEST"/>
+    <adtcore:objectReference adtcore:uri="/sap/bc/adt/programs/programs/zwegwerf1" adtcore:type="PROG/P" adtcore:name="ZWEGWERF1"/>
+</adtcore:objectReferences>

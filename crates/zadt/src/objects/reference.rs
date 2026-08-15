@@ -147,6 +147,19 @@ pub struct AdvertisedObjectReference {
         skip_serializing_if = "Option::is_none"
     )]
     pub description: Option<String>,
+
+    /// The owning object's URI when this reference identifies a subobject.
+    #[serde(rename = "@adtcore:parentUri", skip_serializing_if = "Option::is_none")]
+    pub parent_uri: Option<String>,
+}
+
+/// A collection of unresolved object references exactly as advertised by ADT.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename = "adtcore:objectReferences")]
+pub struct ObjectReferences {
+    /// Object references in response order.
+    #[serde(rename = "adtcore:objectReference", default)]
+    pub objects: Vec<AdvertisedObjectReference>,
 }
 
 impl Client<Ready> {

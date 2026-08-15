@@ -14,6 +14,10 @@ mod vocabulary;
 
 pub mod transport;
 
+pub use api::activation::{
+    InactiveCtsObject, InactiveCtsObjectEntry, InactiveCtsObjectTransport, InactiveCtsObjects,
+    InactiveCtsObjectsQuery, InactiveObjectsQuery,
+};
 pub use api::classes::{ClassRun, ClassRunResult};
 pub use api::discovery::{
     Capabilities, Category, Collection, CoreDiscoveryQuery, DiscoveryQuery, TemplateLink, Workspace,
@@ -62,10 +66,10 @@ pub use objects::{
     ClassSourceComponent, ClassSourceProperties, DataElement, DataElementDefinition,
     DataElementProperties, DataElementPropertiesVersion, Erased, GlobalWorkbenchType, HasSource,
     Include, IncludeProperties, IncludePropertyVersion, InvalidWorkbenchType, ObjectRef,
-    ObjectType, ObjectVersion, Package, PackageAssignment, PackageAttributes, PackageProperties,
-    PackagePropertiesVersion, PackageTransport, PackageUseAccess, Program, ProgramProperties,
-    ProgramPropertiesVersion, PropertyModel, ReadProperties, SyntaxConfiguration, SyntaxLanguage,
-    UpdateProperties,
+    ObjectReferences, ObjectType, ObjectVersion, Package, PackageAssignment, PackageAttributes,
+    PackageProperties, PackagePropertiesVersion, PackageTransport, PackageUseAccess, Program,
+    ProgramProperties, ProgramPropertiesVersion, PropertyModel, ReadProperties,
+    SyntaxConfiguration, SyntaxLanguage, UpdateProperties,
 };
 pub use operation::{
     BatchError, BatchKey, BatchOperation, BatchResponses, Batched, Execute, IfNoneMatch, Operation,

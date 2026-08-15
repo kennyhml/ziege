@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ioc:inactiveObjects xmlns:ioc="http://www.sap.com/abapxml/inactiveCtsObjects">
+    <ioc:entry>
+        <ioc:object/>
+        <ioc:transport/>
+    </ioc:entry>
+    <ioc:entry>
+        <ioc:object/>
+        <ioc:transport ioc:user="DEVELOPER" ioc:linked="false">
+            <ioc:ref adtcore:uri="/sap/bc/adt/cts/transportrequests/A4HK900099" adtcore:type="/RQ" adtcore:name="A4HK900099" adtcore:description="tfrtfartarftfr" xmlns:adtcore="http://www.sap.com/adt/core"/>
+        </ioc:transport>
+    </ioc:entry>
+    <ioc:entry>
+        <ioc:object ioc:user="DEVELOPER" ioc:deleted="false">
+            <ioc:ref adtcore:uri="/sap/bc/adt/oo/classes/%2fdmo%2fcl_travel_auxiliary" adtcore:type="CLAS/OC" adtcore:name="/DMO/CL_TRAVEL_AUXILIARY" xmlns:adtcore="http://www.sap.com/adt/core"/>
+        </ioc:object>
+        <ioc:transport/>
+    </ioc:entry>
+    <ioc:entry>
+        <ioc:object ioc:user="DEVELOPER" ioc:deleted="false">
+            <ioc:ref adtcore:uri="/sap/bc/adt/oo/classes/%2fdmo%2ftfartfar/includes/definitions" adtcore:type="CLAS/OCN/definitions" adtcore:name="/DMO/TFARTFAR" adtcore:parentUri="/sap/bc/adt/oo/classes/%2fdmo%2ftfartfar" xmlns:adtcore="http://www.sap.com/adt/core"/>
+        </ioc:object>
+        <ioc:transport ioc:user="DEVELOPER" ioc:linked="true">
+            <ioc:ref adtcore:uri="/sap/bc/adt/cts/transportrequests/A4HK900100" adtcore:type="/RQ" adtcore:name="A4HK900100" adtcore:parentUri="/sap/bc/adt/cts/transportrequests/A4HK900099" adtcore:description="tfrtfartarftfr" xmlns:adtcore="http://www.sap.com/adt/core"/>
+        </ioc:transport>
+    </ioc:entry>
+    <ioc:entry>
+        <ioc:object ioc:user="DEVELOPER" ioc:deleted="true">
+            <ioc:ref adtcore:uri="/sap/bc/adt/oo/classes/z_syntax_test/source/main#type=CLAS%2FOM;name=FUNCS_WITH_PARAMS" adtcore:type="CLAS/OM" adtcore:name="Z_SYNTAX_TEST                 FUNCS_WITH_PARAMS" adtcore:parentUri="/sap/bc/adt/oo/classes/z_syntax_test" xmlns:adtcore="http://www.sap.com/adt/core"/>
+        </ioc:object>
+        <ioc:transport/>
+    </ioc:entry>
+    <ioc:entry>
+        <ioc:object ioc:user="DEVELOPER" ioc:deleted="false">
+            <ioc:ref adtcore:uri="/sap/bc/adt/ddic/dataelements/ztfrwtfrt" adtcore:type="DTEL/DE" adtcore:name="ZTFRWTFRT" xmlns:adtcore="http://www.sap.com/adt/core"/>
+        </ioc:object>
+        <ioc:transport/>
+    </ioc:entry>
+</ioc:inactiveObjects>
