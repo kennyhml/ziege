@@ -283,6 +283,7 @@ fn expand_object_type(
     let runtime_to_xml = if update_properties {
         quote! {
             crate::objects::descriptors::properties_to_xml::<#ident>(
+                object,
                 media_type,
                 payload,
             )
@@ -373,6 +374,7 @@ fn expand_object_type(
 
             fn properties_to_xml(
                 &self,
+                object: &crate::objects::ObjectRef<crate::objects::Erased>,
                 media_type: &'static str,
                 payload: serde_json::Value,
             ) -> Result<String, crate::error::ObjectError> {

@@ -1,7 +1,7 @@
 use std::{env, error::Error, io};
 
 use tracing_subscriber::EnvFilter;
-use zadt::{AccessMode, Client, DataElement, Operation, ReqwestTransport, TransportExt};
+use zadt::{AccessMode, Class, Client, DataElement, Operation, ReqwestTransport, TransportExt};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -29,18 +29,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_body_logging(64 * 1024);
     let client = Client::new(transport).discover().await?;
 
-    let object = client.object::<DataElement>("ZTFRWTFRT")?;
-    let mut properties = object.erase().query()?.execute(&client).await?;
-    properties.payload["description"] = "Hi from ZADT!".into();
-
+    let object = client.object::<Class>("ZZZZ")?;
+    let mut properties = object.query().execute(&client).await?;
+    properties.payload.shared_memory_enabled = true;
     let session = client.create_user_session();
     let lock = object.lock(AccessMode::Modify).execute(&session).await?;
 
-    let res = object
-        .erase()
-        .update(&lock, properties)?
-        .execute(&session)
-        .await;
+    let res = object.update(&lock, properties)?.execute(&session).await;
 
     lock.remove().execute(&session).await?;
     println!("{res:#?}");

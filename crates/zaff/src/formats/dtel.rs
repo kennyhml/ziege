@@ -1,11 +1,111 @@
 use serde::{Deserialize, Serialize};
 use zadt::{
-    DataElementDefinition, DataElementFieldLabel, DataElementProperties, DataElementTypeKind,
+    DataElement, DataElementDefinition, DataElementProperties, Erased, GlobalWorkbenchType,
+    JsonObjectProperties, ObjectRef, ObjectType,
 };
 
-use crate::ProjectionError;
+use crate::{
+    Cardinality, ComponentId, FileBacking, FileSpec, ObjectFormat, ProjectionError,
+    format::{
+        FileDescriptor, FormatDescriptor, PropertiesCodec, decode_properties, encode_properties,
+    },
+    language,
+};
 
-const FORMAT_VERSION: &str = "1";
+pub const DATA_ELEMENT_FORMAT: ObjectFormat = ObjectFormat::new("DTEL", "1");
+
+#[derive(Debug)]
+pub(crate) struct DataElementDescriptor;
+
+#[derive(Debug)]
+struct DataElementMetadata;
+
+static DATA_ELEMENT_FILES: &[FileSpec] = &[FileSpec::new(
+    "<name>.dtel.json",
+    Cardinality::One,
+    &DataElementMetadata,
+)];
+
+impl FormatDescriptor for DataElementDescriptor {
+    fn format(&self) -> ObjectFormat {
+        DATA_ELEMENT_FORMAT
+    }
+
+    fn repository_types(&self) -> &'static [GlobalWorkbenchType] {
+        const TYPES: &[GlobalWorkbenchType] = &[DataElement::WORKBENCH_TYPE];
+        TYPES
+    }
+
+    fn files(&self) -> &'static [FileSpec] {
+        DATA_ELEMENT_FILES
+    }
+
+    fn repository_type_from_metadata(
+        &self,
+        metadata: &[u8],
+    ) -> Result<GlobalWorkbenchType, ProjectionError> {
+        let metadata: MetadataDiscriminator = serde_json::from_slice(metadata)?;
+        if metadata.format_version != DATA_ELEMENT_FORMAT.version() {
+            return Err(ProjectionError::UnsupportedFormatVersion {
+                object_type: DATA_ELEMENT_FORMAT.object_type(),
+                version: metadata.format_version,
+            });
+        }
+        Ok(DataElement::WORKBENCH_TYPE)
+    }
+}
+
+impl FileDescriptor for DataElementMetadata {
+    fn component(&self) -> ComponentId {
+        ComponentId::new("metadata")
+    }
+
+    fn bind(
+        &self,
+        object: &ObjectRef<Erased>,
+        _language: Option<&str>,
+    ) -> Result<Option<FileBacking>, ProjectionError> {
+        if object.object_type() != &DataElement::WORKBENCH_TYPE {
+            return Err(ProjectionError::UnsupportedFileComponent {
+                object_type: object.object_type().clone(),
+                component: self.component(),
+            });
+        }
+        Ok(Some(FileBacking::Properties(object.clone())))
+    }
+
+    fn properties_codec(&self) -> Option<&dyn PropertiesCodec> {
+        Some(self)
+    }
+}
+
+impl PropertiesCodec for DataElementMetadata {
+    fn render(&self, properties: &JsonObjectProperties) -> Result<String, ProjectionError> {
+        render_data_element_properties(&decode_properties::<DataElementProperties>(
+            properties, "DTEL",
+        )?)
+    }
+
+    fn merge(
+        &self,
+        original: &JsonObjectProperties,
+        edited: &str,
+    ) -> Result<JsonObjectProperties, ProjectionError> {
+        let properties = decode_properties::<DataElementProperties>(original, "DTEL")?;
+        encode_properties(
+            original,
+            merge_data_element_properties(&properties, edited)?,
+            "DTEL",
+        )
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MetadataDiscriminator {
+    format_version: String,
+}
+
 const DATA_TYPES: &[&str] = &[
     "ACCP",
     "CHAR",
@@ -140,32 +240,28 @@ pub enum AffDataElementCategory {
     ReferenceClassOrInterfaceType,
 }
 
-impl From<DataElementTypeKind> for AffDataElementCategory {
-    fn from(value: DataElementTypeKind) -> Self {
+impl AffDataElementCategory {
+    fn from_adt(value: &str) -> Result<Self, ProjectionError> {
         match value {
-            DataElementTypeKind::Domain => Self::Domain,
-            DataElementTypeKind::PredefinedAbapType => Self::PredefinedType,
-            DataElementTypeKind::ReferenceToPredefinedAbapType => Self::ReferenceToPredefinedType,
-            DataElementTypeKind::ReferenceToDictionaryType => Self::ReferenceDictionaryType,
-            DataElementTypeKind::ReferenceToClassOrInterfaceType => {
-                Self::ReferenceClassOrInterfaceType
-            }
+            "domain" => Ok(Self::Domain),
+            "predefinedAbapType" => Ok(Self::PredefinedType),
+            "refToPredefinedAbapType" => Ok(Self::ReferenceToPredefinedType),
+            "refToDictionaryType" => Ok(Self::ReferenceDictionaryType),
+            "refToClifType" => Ok(Self::ReferenceClassOrInterfaceType),
+            value => Err(invalid_field(
+                "dataTypeInformation.category",
+                format!("unsupported ADT type kind `{value}`"),
+            )),
         }
     }
-}
 
-impl From<AffDataElementCategory> for DataElementTypeKind {
-    fn from(value: AffDataElementCategory) -> Self {
-        match value {
-            AffDataElementCategory::Domain => Self::Domain,
-            AffDataElementCategory::PredefinedType => Self::PredefinedAbapType,
-            AffDataElementCategory::ReferenceToPredefinedType => {
-                Self::ReferenceToPredefinedAbapType
-            }
-            AffDataElementCategory::ReferenceDictionaryType => Self::ReferenceToDictionaryType,
-            AffDataElementCategory::ReferenceClassOrInterfaceType => {
-                Self::ReferenceToClassOrInterfaceType
-            }
+    const fn adt_value(self) -> &'static str {
+        match self {
+            Self::Domain => "domain",
+            Self::PredefinedType => "predefinedAbapType",
+            Self::ReferenceToPredefinedType => "refToPredefinedAbapType",
+            Self::ReferenceDictionaryType => "refToDictionaryType",
+            Self::ReferenceClassOrInterfaceType => "refToClifType",
         }
     }
 }
@@ -205,14 +301,14 @@ pub struct AffDataElementFieldLabels {
 impl AffDataElementFieldLabels {
     fn from_definition(definition: &DataElementDefinition) -> Option<Self> {
         let labels = Self {
-            short: nonempty(definition.short_field_label.text.as_deref()),
-            short_length: nonzero(definition.short_field_label.length),
-            medium: nonempty(definition.medium_field_label.text.as_deref()),
-            medium_length: nonzero(definition.medium_field_label.length),
-            long: nonempty(definition.long_field_label.text.as_deref()),
-            long_length: nonzero(definition.long_field_label.length),
-            heading: nonempty(definition.heading_field_label.text.as_deref()),
-            heading_length: nonzero(definition.heading_field_label.length),
+            short: nonempty(definition.short_field_label.as_deref()),
+            short_length: nonzero(definition.short_field_length),
+            medium: nonempty(definition.medium_field_label.as_deref()),
+            medium_length: nonzero(definition.medium_field_length),
+            long: nonempty(definition.long_field_label.as_deref()),
+            long_length: nonzero(definition.long_field_length),
+            heading: nonempty(definition.heading_field_label.as_deref()),
+            heading_length: nonzero(definition.heading_field_length),
         };
         (!labels.is_empty()).then_some(labels)
     }
@@ -327,7 +423,7 @@ impl AffBasicDirection {
 pub(crate) fn render_data_element_properties(
     properties: &DataElementProperties,
 ) -> Result<String, ProjectionError> {
-    let document = document_from_properties(properties.properties())?;
+    let document = document_from_properties(properties)?;
     let mut content = serde_json::to_string_pretty(&document)
         .map_err(ProjectionError::InvalidDataElementDocument)?;
     content.push('\n');
@@ -338,40 +434,39 @@ fn document_from_properties(
     properties: &DataElementProperties,
 ) -> Result<AffDataElement, ProjectionError> {
     let definition = &properties.definition;
-    let category = AffDataElementCategory::from(definition.type_kind);
-    let predefined_type = if category == AffDataElementCategory::PredefinedType {
-        Some(AffPredefinedType {
-            data_type: required(
-                definition.data_type.clone(),
-                "dataTypeInformation.predefinedType.dataType",
-            )?,
-            length: required(
-                definition.data_type_length,
-                "dataTypeInformation.predefinedType.length",
-            )?,
-            decimals: definition.data_type_decimals.filter(|value| *value != 0),
-        })
-    } else {
-        None
+    let category = AffDataElementCategory::from_adt(&definition.type_kind)?;
+    let predefined_type = match (
+        category,
+        definition.data_type.clone(),
+        definition.data_type_length,
+    ) {
+        (AffDataElementCategory::PredefinedType, Some(data_type), Some(length)) => {
+            Some(AffPredefinedType {
+                data_type,
+                length,
+                decimals: definition.data_type_decimals.filter(|value| *value != 0),
+            })
+        }
+        _ => None,
     };
     let document = AffDataElement {
-        format_version: FORMAT_VERSION.to_owned(),
+        format_version: DATA_ELEMENT_FORMAT.version().to_owned(),
         header: AffDataElementHeader {
             description: required(properties.description.clone(), "header.description")?,
-            original_language: required(
-                properties.master_language.clone(),
+            original_language: language::from_adt(
+                &required(
+                    properties.master_language.clone(),
+                    "header.originalLanguage",
+                )?,
                 "header.originalLanguage",
-            )?
-            .to_ascii_lowercase(),
+            )?,
             abap_language_version: AffAbapLanguageVersion::from_adt(
                 properties.abap_language_version.as_deref(),
             )?,
         },
         data_type_information: AffDataElementTypeInformation {
             category,
-            type_name: (category != AffDataElementCategory::PredefinedType)
-                .then(|| definition.type_name.clone())
-                .flatten(),
+            type_name: definition.type_name.clone(),
             predefined_type,
         },
         field_labels: AffDataElementFieldLabels::from_definition(definition),
@@ -389,19 +484,22 @@ pub(crate) fn merge_data_element_properties(
     let document: AffDataElement =
         serde_json::from_str(edited).map_err(ProjectionError::InvalidDataElementDocument)?;
     document.validate()?;
-    let original_properties = original.properties();
+    let original_properties = original;
     let original_document = document_from_properties(original_properties)?;
     let original_language_version = original_properties.abap_language_version.clone();
     let mut definition = original_properties.definition.clone();
     apply_document(&original_document, &document, &mut definition);
 
     let mut merged = original.clone();
-    let properties = merged.properties_mut();
+    let properties = &mut merged;
     if document.header.description != original_document.header.description {
         properties.description = Some(document.header.description);
     }
     if document.header.original_language != original_document.header.original_language {
-        properties.master_language = Some(document.header.original_language.to_ascii_uppercase());
+        properties.master_language = Some(language::to_adt(
+            &document.header.original_language,
+            "header.originalLanguage",
+        )?);
     }
     if document.header.abap_language_version != original_document.header.abap_language_version {
         properties.abap_language_version = document
@@ -415,60 +513,36 @@ pub(crate) fn merge_data_element_properties(
 
 impl AffDataElement {
     fn validate(&self) -> Result<(), ProjectionError> {
-        if self.format_version != FORMAT_VERSION {
+        if self.format_version != DATA_ELEMENT_FORMAT.version() {
             return Err(invalid_field(
                 "formatVersion",
-                format!("expected `{FORMAT_VERSION}`"),
+                format!("expected `{}`", DATA_ELEMENT_FORMAT.version()),
             ));
         }
         max_length("header.description", &self.header.description, 60)?;
-        if self.header.original_language.chars().count() < 2 {
-            return Err(invalid_field(
-                "header.originalLanguage",
-                "must contain at least two characters",
-            ));
-        }
+        language::to_adt(&self.header.original_language, "header.originalLanguage")?;
         if let Some(type_name) = &self.data_type_information.type_name {
             max_length("dataTypeInformation.typeName", type_name, 30)?;
         }
-        match self.data_type_information.category {
-            AffDataElementCategory::PredefinedType => {
-                let predefined = self
-                    .data_type_information
-                    .predefined_type
-                    .as_ref()
-                    .ok_or_else(|| {
-                        invalid_field(
-                            "dataTypeInformation.predefinedType",
-                            "is required for category `predefinedType`",
-                        )
-                    })?;
-                if !DATA_TYPES.contains(&predefined.data_type.as_str()) {
-                    return Err(invalid_field(
-                        "dataTypeInformation.predefinedType.dataType",
-                        format!("unsupported data type `{}`", predefined.data_type),
-                    ));
-                }
-                maximum(
-                    "dataTypeInformation.predefinedType.length",
-                    predefined.length,
-                    999_999,
-                )?;
-                if let Some(decimals) = predefined.decimals {
-                    maximum(
-                        "dataTypeInformation.predefinedType.decimals",
-                        decimals,
-                        999_999,
-                    )?;
-                }
-            }
-            _ if self.data_type_information.predefined_type.is_some() => {
+        if let Some(predefined) = &self.data_type_information.predefined_type {
+            if !DATA_TYPES.contains(&predefined.data_type.as_str()) {
                 return Err(invalid_field(
-                    "dataTypeInformation.predefinedType",
-                    "is only valid for category `predefinedType`",
+                    "dataTypeInformation.predefinedType.dataType",
+                    format!("unsupported data type `{}`", predefined.data_type),
                 ));
             }
-            _ => {}
+            maximum(
+                "dataTypeInformation.predefinedType.length",
+                predefined.length,
+                999_999,
+            )?;
+            if let Some(decimals) = predefined.decimals {
+                maximum(
+                    "dataTypeInformation.predefinedType.decimals",
+                    decimals,
+                    999_999,
+                )?;
+            }
         }
         if let Some(labels) = &self.field_labels {
             validate_optional_text("fieldLabels.short", labels.short.as_deref(), 10)?;
@@ -510,13 +584,20 @@ fn apply_document(
     let original_type = &original.data_type_information;
     let edited_type = &edited.data_type_information;
     if edited_type.category != original_type.category {
-        definition.type_kind = edited_type.category.into();
+        definition.type_kind = edited_type.category.adt_value().to_owned();
+    }
+    if edited_type.type_name != original_type.type_name {
+        definition.type_name = edited_type.type_name.clone();
+        if edited_type.category != AffDataElementCategory::PredefinedType {
+            definition.data_type = None;
+            definition.data_type_length = None;
+            definition.data_type_decimals = None;
+            definition.data_type_length_enabled = None;
+            definition.data_type_decimals_enabled = None;
+        }
     }
     match (&original_type.predefined_type, &edited_type.predefined_type) {
-        (_, Some(predefined))
-            if original_type.category != AffDataElementCategory::PredefinedType =>
-        {
-            definition.type_name = None;
+        (None, Some(predefined)) => {
             definition.data_type = Some(predefined.data_type.clone());
             definition.data_type_length = Some(predefined.length);
             definition.data_type_decimals = Some(predefined.decimals.unwrap_or(0));
@@ -542,10 +623,7 @@ fn apply_document(
             definition.data_type_length_enabled = None;
             definition.data_type_decimals_enabled = None;
         }
-        (None, None)
-            if edited_type.category != original_type.category
-                || edited_type.type_name != original_type.type_name =>
-        {
+        (None, None) if edited_type.category != original_type.category => {
             definition.type_name = edited_type.type_name.clone();
             definition.data_type = None;
             definition.data_type_length = None;
@@ -560,6 +638,7 @@ fn apply_document(
     let edited_labels = edited.field_labels.as_ref();
     apply_label(
         &mut definition.short_field_label,
+        &mut definition.short_field_length,
         original_labels.and_then(|labels| labels.short.as_deref()),
         original_labels.and_then(|labels| labels.short_length),
         edited_labels.and_then(|labels| labels.short.as_deref()),
@@ -567,6 +646,7 @@ fn apply_document(
     );
     apply_label(
         &mut definition.medium_field_label,
+        &mut definition.medium_field_length,
         original_labels.and_then(|labels| labels.medium.as_deref()),
         original_labels.and_then(|labels| labels.medium_length),
         edited_labels.and_then(|labels| labels.medium.as_deref()),
@@ -574,6 +654,7 @@ fn apply_document(
     );
     apply_label(
         &mut definition.long_field_label,
+        &mut definition.long_field_length,
         original_labels.and_then(|labels| labels.long.as_deref()),
         original_labels.and_then(|labels| labels.long_length),
         edited_labels.and_then(|labels| labels.long.as_deref()),
@@ -581,6 +662,7 @@ fn apply_document(
     );
     apply_label(
         &mut definition.heading_field_label,
+        &mut definition.heading_field_length,
         original_labels.and_then(|labels| labels.heading.as_deref()),
         original_labels.and_then(|labels| labels.heading_length),
         edited_labels.and_then(|labels| labels.heading.as_deref()),
@@ -655,17 +737,18 @@ fn apply_document(
 }
 
 fn apply_label(
-    label: &mut DataElementFieldLabel,
+    text: &mut Option<String>,
+    length: &mut Option<u32>,
     original_text: Option<&str>,
     original_length: Option<u32>,
     edited_text: Option<&str>,
     edited_length: Option<u32>,
 ) {
     if edited_text != original_text {
-        label.text = Some(edited_text.unwrap_or_default().to_owned());
+        *text = Some(edited_text.unwrap_or_default().to_owned());
     }
     if edited_length != original_length {
-        label.length = Some(edited_length.unwrap_or(0));
+        *length = Some(edited_length.unwrap_or(0));
     }
 }
 
@@ -737,84 +820,45 @@ fn invalid_field(field: &'static str, message: impl Into<String>) -> ProjectionE
 
 #[cfg(test)]
 mod tests {
-    use http::{HeaderMap, StatusCode};
     use serde_json::{Value, json};
-    use zadt::{
-        AdtResponse, AdtUri, DataElement, DataElementDocumentationStatus, ObjectPropertiesQuery,
-        ObjectRef, ObjectType, Operation, OperationResponse, Ready, RepositoryContentQuery,
-    };
+    use zadt::{DataElement, DataElementPropertiesVersion};
 
     use super::*;
 
     const DATA_ELEMENT_XML: &[u8] =
-        include_bytes!("../../zadt/tests/fixtures/data-element-ztfrwtfrt-v2.xml");
-
-    fn reference(name: &str, uri: &str) -> ObjectRef<DataElement> {
-        let response = AdtResponse::new(
-            StatusCode::OK,
-            HeaderMap::new(),
-            format!(
-                r#"<vfs:virtualFoldersResult xmlns:vfs="http://www.sap.com/adt/ris/virtualFolders" objectCount="1">
-                    <vfs:object name="{name}" package="$TMP" type="DTEL/DE"
-                        uri="{uri}" expandable="false" />
-                </vfs:virtualFoldersResult>"#
-            )
-            .into_bytes(),
-        );
-        let target =
-            AdtUri::parse("/sap/bc/adt/repository/informationsystem/virtualfolders/contents")
-                .unwrap();
-        let mut content = <RepositoryContentQuery as Operation<Ready>>::decode(
-            &RepositoryContentQuery::new(),
-            OperationResponse::new(response, target),
-        )
-        .unwrap();
-        content
-            .objects
-            .pop()
-            .unwrap()
-            .typed_reference::<DataElement>()
-            .unwrap()
-    }
+        include_bytes!("../../../zadt/tests/fixtures/data-element-ztfrwtfrt-v2.xml");
 
     fn properties() -> DataElementProperties {
-        let reference = reference("ZTFRWTFRT", "/sap/bc/adt/ddic/dataelements/ztfrwtfrt");
-        let query = reference.query();
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            http::header::CONTENT_TYPE,
-            "application/vnd.sap.adt.dataelements.v2+xml"
-                .parse()
-                .unwrap(),
+        let reference = crate::test_support::reference::<DataElement>(
+            "ZTFRWTFRT",
+            "/sap/bc/adt/ddic/dataelements/ztfrwtfrt",
         );
-        headers.insert(http::header::ETAG, "data-element-etag".parse().unwrap());
-        let response = AdtResponse::new(StatusCode::OK, headers, DATA_ELEMENT_XML.to_vec());
-        let mut properties = <ObjectPropertiesQuery<DataElement> as Operation<Ready>>::decode(
-            &query,
-            OperationResponse::new(response, reference.uri().clone()),
+        let mut properties = crate::test_support::properties(
+            &reference,
+            DataElementPropertiesVersion::V2.media_type(),
+            "data-element-etag",
+            DATA_ELEMENT_XML,
         )
-        .unwrap();
-        let properties_v2 = properties.properties_mut();
+        .payload;
+        let properties_v2 = &mut properties;
         properties_v2.description = Some("Example data element".to_owned());
         properties_v2.master_language = Some("EN".to_owned());
         properties_v2.abap_language_version = Some("0".to_owned());
-        properties_v2.definition.type_kind = DataElementTypeKind::Domain;
+        properties_v2.definition.type_kind = "domain".to_owned();
         properties_v2.definition.type_name = Some("Z_EXAMPLE_DOMAIN".to_owned());
         properties_v2.definition.data_type = Some("CHAR".to_owned());
         properties_v2.definition.data_type_length = Some(8);
         properties_v2.definition.data_type_decimals = Some(0);
-        properties_v2.definition.short_field_label.text = Some("Example".to_owned());
-        properties_v2.definition.short_field_label.length = Some(10);
-        properties_v2.definition.medium_field_label.text = Some("Example field".to_owned());
-        properties_v2.definition.medium_field_label.length = Some(13);
-        properties_v2.definition.long_field_label.text =
-            Some("Example data element field".to_owned());
-        properties_v2.definition.long_field_label.length = Some(26);
-        properties_v2.definition.heading_field_label.text = Some("Example data element".to_owned());
-        properties_v2.definition.heading_field_label.length = Some(20);
+        properties_v2.definition.short_field_label = Some("Example".to_owned());
+        properties_v2.definition.short_field_length = Some(10);
+        properties_v2.definition.medium_field_label = Some("Example field".to_owned());
+        properties_v2.definition.medium_field_length = Some(13);
+        properties_v2.definition.long_field_label = Some("Example data element field".to_owned());
+        properties_v2.definition.long_field_length = Some(26);
+        properties_v2.definition.heading_field_label = Some("Example data element".to_owned());
+        properties_v2.definition.heading_field_length = Some(20);
         properties_v2.definition.left_to_right_direction = Some(true);
-        properties_v2.definition.documentation_status =
-            Some(DataElementDocumentationStatus::Required);
+        properties_v2.definition.documentation_status = Some("required".to_owned());
         properties
     }
 
@@ -843,28 +887,33 @@ mod tests {
     }
 
     #[test]
+    fn merges_an_aff_edit() {
+        let original = properties();
+        let content = render_data_element_properties(&original).unwrap();
+        let edited = content.replacen(
+            "\"description\": \"Example data element\"",
+            "\"description\": \"Updated data element\"",
+            1,
+        );
+        let merged = merge_data_element_properties(&original, &edited).unwrap();
+
+        assert_eq!(merged.description.as_deref(), Some("Updated data element"));
+    }
+
+    #[test]
     fn translates_every_adt_type_kind_to_the_aff_schema_name() {
         for (adt, aff) in [
-            (DataElementTypeKind::Domain, "domain"),
-            (DataElementTypeKind::PredefinedAbapType, "predefinedType"),
-            (
-                DataElementTypeKind::ReferenceToPredefinedAbapType,
-                "referenceToPredefinedType",
-            ),
-            (
-                DataElementTypeKind::ReferenceToDictionaryType,
-                "referenceDictionaryType",
-            ),
-            (
-                DataElementTypeKind::ReferenceToClassOrInterfaceType,
-                "referenceClasIntType",
-            ),
+            ("domain", "domain"),
+            ("predefinedAbapType", "predefinedType"),
+            ("refToPredefinedAbapType", "referenceToPredefinedType"),
+            ("refToDictionaryType", "referenceDictionaryType"),
+            ("refToClifType", "referenceClasIntType"),
         ] {
             let mut properties = properties();
-            properties.properties_mut().definition.type_kind = adt;
-            if adt == DataElementTypeKind::PredefinedAbapType {
-                properties.properties_mut().definition.data_type = Some("CHAR".to_owned());
-                properties.properties_mut().definition.data_type_length = Some(12);
+            properties.definition.type_kind = adt.to_owned();
+            if adt == "predefinedAbapType" {
+                properties.definition.data_type = Some("CHAR".to_owned());
+                properties.definition.data_type_length = Some(12);
             }
 
             let content = render_data_element_properties(&properties).unwrap();
@@ -875,11 +924,25 @@ mod tests {
     }
 
     #[test]
+    fn rejects_unmodeled_adt_type_kinds() {
+        let mut properties = properties();
+        properties.definition.type_kind = "futureTypeKind".to_owned();
+
+        assert!(matches!(
+            render_data_element_properties(&properties),
+            Err(ProjectionError::InvalidDataElementField {
+                field: "dataTypeInformation.category",
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn renders_predefined_types_and_nonstandard_language_versions() {
         let mut properties = properties();
-        let properties_v2 = properties.properties_mut();
+        let properties_v2 = &mut properties;
         properties_v2.abap_language_version = Some("5".to_owned());
-        properties_v2.definition.type_kind = DataElementTypeKind::PredefinedAbapType;
+        properties_v2.definition.type_kind = "predefinedAbapType".to_owned();
         properties_v2.definition.type_name = None;
         properties_v2.definition.data_type = Some("DEC".to_owned());
         properties_v2.definition.data_type_length = Some(12);
@@ -901,10 +964,7 @@ mod tests {
     #[test]
     fn maps_writing_direction_in_both_directions() {
         let mut properties = properties();
-        properties
-            .properties_mut()
-            .definition
-            .left_to_right_direction = Some(false);
+        properties.definition.left_to_right_direction = Some(false);
 
         let content = render_data_element_properties(&properties).unwrap();
         let document: Value = serde_json::from_str(&content).unwrap();
@@ -915,16 +975,13 @@ mod tests {
 
         let edited = content.replace("rightToLeft", "leftToRight");
         let merged = merge_data_element_properties(&properties, &edited).unwrap();
-        assert_eq!(
-            merged.properties().definition.left_to_right_direction,
-            Some(true)
-        );
+        assert_eq!(merged.definition.left_to_right_direction, Some(true));
     }
 
     #[test]
     fn merges_aff_edits_without_losing_adt_only_properties() {
         let original = properties();
-        let original_relations = original.properties().relations().clone();
+        let original_links = original.links.clone();
         let edited = r#"{
             "formatVersion": "1",
             "header": {
@@ -955,36 +1012,29 @@ mod tests {
         }"#;
 
         let merged = merge_data_element_properties(&original, edited).unwrap();
-        let properties = merged.properties();
+        let properties = &merged;
         let definition = &properties.definition;
 
         assert_eq!(properties.description.as_deref(), Some("Updated"));
         assert_eq!(properties.master_language.as_deref(), Some("DE"));
         assert_eq!(properties.abap_language_version.as_deref(), Some("2"));
-        assert_eq!(
-            definition.type_kind,
-            DataElementTypeKind::PredefinedAbapType
-        );
+        assert_eq!(definition.type_kind, "predefinedAbapType");
         assert_eq!(definition.type_name, None);
         assert_eq!(definition.data_type_length, Some(30));
         assert_eq!(definition.data_type_decimals, Some(0));
-        assert_eq!(definition.short_field_label.text.as_deref(), Some("New"));
-        assert_eq!(definition.short_field_label.length, Some(5));
-        assert_eq!(definition.short_field_label.max_length, Some(10));
-        assert_eq!(definition.medium_field_label.text.as_deref(), Some(""));
+        assert_eq!(definition.short_field_label.as_deref(), Some("New"));
+        assert_eq!(definition.short_field_length, Some(5));
+        assert_eq!(definition.short_field_max_length, Some(10));
+        assert_eq!(definition.medium_field_label.as_deref(), Some(""));
         assert_eq!(definition.search_help.as_deref(), Some("Z_SEARCH"));
         assert_eq!(definition.search_help_parameter.as_deref(), Some("VALUE"));
         assert_eq!(definition.set_get_parameter.as_deref(), Some("PID"));
         assert_eq!(definition.change_document, Some(true));
         assert_eq!(definition.deactivate_input_history, Some(true));
         assert_eq!(definition.left_to_right_direction, Some(true));
-        assert_eq!(
-            definition.documentation_status,
-            Some(DataElementDocumentationStatus::Required)
-        );
+        assert_eq!(definition.documentation_status.as_deref(), Some("required"));
         assert_eq!(properties.responsible.as_deref(), Some("DEVELOPER"));
-        assert_eq!(properties.relations(), &original_relations);
-        assert_eq!(properties.etag.as_deref(), Some("data-element-etag"));
+        assert_eq!(properties.links, original_links);
     }
 
     #[test]
@@ -1000,7 +1050,7 @@ mod tests {
     #[test]
     fn an_unedited_aff_file_preserves_sparse_adt_properties() {
         let mut original = properties();
-        let definition = &mut original.properties_mut().definition;
+        let definition = &mut original.definition;
         definition.search_help = None;
         definition.search_help_parameter = None;
         definition.set_get_parameter = None;
@@ -1015,8 +1065,15 @@ mod tests {
             &mut definition.long_field_label,
             &mut definition.heading_field_label,
         ] {
-            label.text = None;
-            label.length = None;
+            *label = None;
+        }
+        for length in [
+            &mut definition.short_field_length,
+            &mut definition.medium_field_length,
+            &mut definition.long_field_length,
+            &mut definition.heading_field_length,
+        ] {
+            *length = None;
         }
 
         let content = render_data_element_properties(&original).unwrap();
@@ -1026,10 +1083,28 @@ mod tests {
     }
 
     #[test]
+    fn preserves_unmodeled_adt_only_wire_values() {
+        let mut original = properties();
+        original.definition.documentation_status = Some("futureStatus".to_owned());
+        original.definition.short_field_max_length = Some(9);
+        original.definition.medium_field_max_length = Some(19);
+
+        let content = render_data_element_properties(&original).unwrap();
+        let merged = merge_data_element_properties(&original, &content).unwrap();
+
+        assert_eq!(
+            merged.definition.documentation_status.as_deref(),
+            Some("futureStatus")
+        );
+        assert_eq!(merged.definition.short_field_max_length, Some(9));
+        assert_eq!(merged.definition.medium_field_max_length, Some(19));
+    }
+
+    #[test]
     fn related_edits_preserve_untouched_sparse_members() {
         let mut original = properties();
-        let definition = &mut original.properties_mut().definition;
-        definition.type_kind = DataElementTypeKind::PredefinedAbapType;
+        let definition = &mut original.definition;
+        definition.type_kind = "predefinedAbapType".to_owned();
         definition.type_name = None;
         definition.data_type = Some("CHAR".to_owned());
         definition.data_type_length = Some(10);
@@ -1042,7 +1117,7 @@ mod tests {
             .replace("\"name\": \"Z_OLD\"", "\"name\": \"Z_NEW\"");
 
         let merged = merge_data_element_properties(&original, &edited).unwrap();
-        let definition = &merged.properties().definition;
+        let definition = &merged.definition;
 
         assert_eq!(definition.data_type_length, Some(11));
         assert_eq!(definition.data_type_decimals, None);
@@ -1057,7 +1132,7 @@ mod tests {
         let edited = content.replace("Z_EXAMPLE_DOMAIN", "Z_OTHER_DOMAIN");
 
         let merged = merge_data_element_properties(&original, &edited).unwrap();
-        let definition = &merged.properties().definition;
+        let definition = &merged.definition;
 
         assert_eq!(definition.type_name.as_deref(), Some("Z_OTHER_DOMAIN"));
         assert_eq!(definition.data_type, None);
@@ -1088,5 +1163,49 @@ mod tests {
             merge_data_element_properties(&properties, &unknown),
             Err(ProjectionError::InvalidDataElementDocument(_))
         ));
+    }
+
+    #[test]
+    fn accepts_schema_optional_type_information() {
+        let original = properties();
+        let mut missing_type_name: Value =
+            serde_json::from_str(&render_data_element_properties(&original).unwrap()).unwrap();
+        missing_type_name["dataTypeInformation"]
+            .as_object_mut()
+            .unwrap()
+            .remove("typeName");
+        let merged =
+            merge_data_element_properties(&original, &missing_type_name.to_string()).unwrap();
+        assert_eq!(merged.definition.type_name, None);
+
+        let mut predefined = properties();
+        predefined.definition.type_kind = "predefinedAbapType".to_owned();
+        predefined.definition.type_name = None;
+        predefined.definition.data_type = Some("CHAR".to_owned());
+        predefined.definition.data_type_length = Some(10);
+        let mut unexpected_type_name: Value =
+            serde_json::from_str(&render_data_element_properties(&predefined).unwrap()).unwrap();
+        unexpected_type_name["dataTypeInformation"]["typeName"] = json!("Z_DOMAIN");
+        let merged =
+            merge_data_element_properties(&predefined, &unexpected_type_name.to_string()).unwrap();
+        assert_eq!(merged.definition.type_name.as_deref(), Some("Z_DOMAIN"));
+
+        predefined.definition.type_name = None;
+        predefined.definition.data_type = None;
+        predefined.definition.data_type_length = None;
+        let rendered = render_data_element_properties(&predefined).unwrap();
+        let document: Value = serde_json::from_str(&rendered).unwrap();
+        assert!(
+            document["dataTypeInformation"]
+                .get("predefinedType")
+                .is_none()
+        );
+
+        let mut completed = document;
+        completed["dataTypeInformation"]["predefinedType"] =
+            json!({ "dataType": "CHAR", "length": 12 });
+        let merged = merge_data_element_properties(&predefined, &completed.to_string()).unwrap();
+        assert_eq!(merged.definition.data_type.as_deref(), Some("CHAR"));
+        assert_eq!(merged.definition.data_type_length, Some(12));
     }
 }

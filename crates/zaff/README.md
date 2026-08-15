@@ -8,7 +8,7 @@ between ADT models and AFF schemas, including merging an edited AFF document
 back into the original ADT properties so fields outside the AFF schema are
 preserved.
 
-## Projection 
+## Projection
 
 The following example shows `zaff` used through LSP orchestration. The language
 server coordinates repository traversal, AFF projection, and ADT operations.
@@ -18,8 +18,8 @@ server coordinates repository traversal, AFF projection, and ADT operations.
 sequenceDiagram
     participant IDE
     participant LSP as ABAP Language Server
-    participant VFS as zvfs
     participant AFF as zaff
+    participant VFS as zvfs
     participant ADT as zadt
     participant SAP as SAP ADT API
 
@@ -45,27 +45,38 @@ sequenceDiagram
     LSP-->>IDE: Document content
 ```
 
-Data Elements are properties-backed rather than source-backed. A `DTEL/DE`
-object projects to one `<name>.dtel.json` file. The consumer executes the
-typed `ObjectRef<DataElement>::query()` operation, asks `zaff` to render the
-returned `DataElementProperties` as AFF JSON, and retains those original
-properties. On save, `zaff` merges the edited AFF fields into that typed value
-before the consumer builds and executes `ObjectRef<DataElement>::update(...)`.
-This preserves ADT fields that the AFF schema does not represent.
+Metadata files are properties-backed rather than source-backed. The consumer
+queries the projected `ObjectRef<Erased>` to obtain `JsonObjectProperties`, then
+uses `ProjectedFile::render_properties` and `ProjectedFile::merge_properties`.
+The file's registered family codec validates and transforms the runtime JSON
+through its concrete ZADT property model. Merging retains the original media
+type, ETag, and ADT fields that the AFF schema does not represent.
+
+`DTEL/DE` projects to `<name>.dtel.json`, `CLAS/OC` to `<name>.clas.json`, and
+both `PROG/P` and standalone `PROG/I` to `<name>.prog.json`. Standalone Includes
+use AFF's shared Program schema with the required `programType: "include"`
+discriminator. Each family owns its file descriptors and codecs; the central
+registry only enumerates those descriptors.
 
 # Limitations
 
 Path resolution identifies an AFF family and component, not a globally unique
-remote object. A consumer should retain the `RepositoryObject` used
-to project every concrete path. That index disambiguates representations such
-as `PROG/P` and `PROG/I`, which share the same `.prog.*` file layout, and keeps
-the SAP system, package, URI, and object version attached to edits.
+remote object. A consumer should retain the `RepositoryObjectEntry` from which
+the projected `ObjectRef<Erased>` originated. That index disambiguates
+representations such as `PROG/P` and `PROG/I`, which share the same `.prog.*`
+file layout, and keeps the SAP system, package, URI, and object version attached
+to edits.
 
 Optional class includes and language-dependent property files are exposed as
 possible `FileSpec`s. The projection consumer decides which concrete files to
 publish based on resources available from the backend. `project` returns files
-that currently have a content backing; unsupported Program and Class metadata
-and text codecs remain available only as specifications.
+that currently have a content backing; text codecs remain available only as
+specifications.
+
+Some valid AFF metadata has no field in the currently modeled ADT properties.
+Class component descriptions and the Program status, variant, authorization,
+application, and logical-database fields are accepted and validated as AFF, but
+non-default edits are rejected until an ADT backing for those fields is modeled.
 
 # Challenges
 Legacy CLAS objects have no testclasses, macros, implementations and definitions include.
