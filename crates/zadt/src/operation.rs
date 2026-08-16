@@ -287,11 +287,12 @@ where
     }
 }
 
-// Execution of a stateful request, maybe we just restrict this to Client<Ready>?
+// Execution within a retained user session. Stateless operations can opt into
+// the session when they need affinity with an existing stateful workflow.
 impl<S, O> Execute<S, O> for UserSession<S>
 where
     S: ClientState,
-    O: Operation<S, Kind = Stateful>,
+    O: Operation<S>,
 {
     async fn execute(&self, operation: &O) -> Result<O::Response, OperationError> {
         let mut session = self.state.lock().await;
@@ -431,6 +432,8 @@ mod tests {
 
     struct StatefulProbe;
 
+    struct StatelessProbe;
+
     impl Operation<Initial> for StatefulProbe {
         type Response = AdtUri;
         type Kind = Stateful;
@@ -439,6 +442,26 @@ mod tests {
             Ok(AdtRequest::new(
                 Method::GET,
                 AdtUri::parse("/sap/bc/adt/stateful-probe").unwrap(),
+            ))
+        }
+
+        fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+            if response.status() == StatusCode::OK {
+                Ok(response.request_target().clone())
+            } else {
+                Err(ResponseError::unexpected_status(response.response()))
+            }
+        }
+    }
+
+    impl Operation<Initial> for StatelessProbe {
+        type Response = AdtUri;
+        type Kind = Stateless;
+
+        fn request(&self, _client: &Client<Initial>) -> Result<AdtRequest, OperationError> {
+            Ok(AdtRequest::new(
+                Method::GET,
+                AdtUri::parse("/sap/bc/adt/stateless-probe").unwrap(),
             ))
         }
 
@@ -511,10 +534,10 @@ mod tests {
         fn assert_static<T: 'static>(_value: &T) {}
         assert_static(&session);
         let first_target = StatefulProbe.execute(&session).await.unwrap();
-        let second_target = StatefulProbe.execute(&session).await.unwrap();
+        let second_target = StatelessProbe.execute(&session).await.unwrap();
 
         assert_eq!(first_target.as_str(), "/sap/bc/adt/stateful-probe");
-        assert_eq!(second_target, first_target);
+        assert_eq!(second_target.as_str(), "/sap/bc/adt/stateless-probe");
 
         let requests = requests.lock().unwrap();
         assert_eq!(requests.len(), 2);

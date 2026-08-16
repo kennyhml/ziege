@@ -3,10 +3,10 @@ use http::{Method, StatusCode};
 use crate::{
     client::{Client, ClientState},
     error::{ObjectError, OperationError, ResponseError},
-    objects::{Erased, HasSource, ObjectRef},
+    objects::{AdtObject, ObjectType, Source, SourceComponents},
     operation::{Operation, OperationResponse, Stateful, Stateless},
-    protocol::{AdtRequest, AdtResponse, EntityTag},
-    resource::SourceRef,
+    protocol::{AdtRequest, EntityTag},
+    resource::{SourceRef, refs::source_from_href},
     vocabulary::{media_type, query_parameter},
 };
 
@@ -86,7 +86,9 @@ impl<S: ClientState> Operation<S> for ObjectSourceQuery {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        expect_ok(response.response())?;
+        if response.status() != StatusCode::OK {
+            return Err(ResponseError::unexpected_status(response.response()));
+        }
         let etag = response.entity_tag();
         let content = String::from_utf8(response.into_body())
             .map_err(ObjectError::InvalidResponseEncoding)?;
@@ -94,28 +96,56 @@ impl<S: ClientState> Operation<S> for ObjectSourceQuery {
     }
 }
 
-impl ObjectRef<Erased> {
-    /// Resolves the primary source when available.
-    pub fn source(&self) -> Option<SourceRef> {
-        self.descriptor()
-            .and_then(|descriptor| descriptor.source_path())
-            .map(|path| SourceRef::from_object_path(self.clone(), path))
-    }
-
-    /// Resolves one named secondary source component when available.
-    pub fn source_component(&self, name: &str) -> Option<SourceRef> {
-        self.descriptor()?
-            .source_component_paths()
-            .iter()
-            .find(|path| path.last() == Some(&name))
-            .map(|path| SourceRef::from_object_path(self.clone(), path))
+impl<P> AdtObject<P>
+where
+    Self: Source + ObjectType<Properties = P>,
+{
+    /// Resolves the primary source advertised by this loaded object.
+    pub fn source(&self) -> Result<SourceRef, ObjectError> {
+        let href = <Self as Source>::source_uri(&self.properties)
+            .ok_or(ObjectError::MissingRelation { relation: "source" })?;
+        source_from_href(self.reference().clone(), href)
     }
 }
 
-impl<T: HasSource> ObjectRef<T> {
-    /// Returns the objects conventional source resource.
-    pub fn source(&self) -> SourceRef {
-        SourceRef::from_object_path(self.erase(), T::SOURCE_PATH)
+impl<P> AdtObject<P>
+where
+    Self: SourceComponents + ObjectType<Properties = P>,
+{
+    /// Resolves one named source component supported by this loaded object family.
+    pub fn source_component(
+        &self,
+        name: impl AsRef<str>,
+    ) -> Result<Option<SourceRef>, ObjectError> {
+        let Some(href) =
+            <Self as SourceComponents>::source_component_uri(&self.properties, name.as_ref())
+        else {
+            return Ok(None);
+        };
+        source_from_href(self.reference().clone(), href).map(Some)
+    }
+}
+
+impl AdtObject {
+    /// Resolves the primary source advertised by this runtime-typed object.
+    pub fn source(&self) -> Result<SourceRef, ObjectError> {
+        let Some(descriptor) = self.reference().descriptor() else {
+            return Err(ObjectError::MissingRelation { relation: "source" });
+        };
+        descriptor
+            .source(self.reference(), &self.properties)?
+            .ok_or(ObjectError::MissingRelation { relation: "source" })
+    }
+
+    /// Resolves one named source component supported by this runtime-typed object.
+    pub fn source_component(
+        &self,
+        name: impl AsRef<str>,
+    ) -> Result<Option<SourceRef>, ObjectError> {
+        let Some(descriptor) = self.reference().descriptor() else {
+            return Ok(None);
+        };
+        descriptor.source_component(self.reference(), &self.properties, name.as_ref())
     }
 }
 
@@ -220,23 +250,13 @@ impl SourceRef {
     }
 }
 
-fn expect_ok(response: &AdtResponse) -> Result<(), ResponseError> {
-    if response.status() == StatusCode::OK {
-        Ok(())
-    } else {
-        Err(ResponseError::unexpected_status(response))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use async_trait::async_trait;
     use http::{HeaderMap, HeaderValue, header};
 
-    use crate::{
-        AdtResponse, AdtUri, Class, ClassSourceComponent, Initial, ObjectRef, Program, Transport,
-    };
+    use crate::{AdtResponse, AdtUri, Class, Initial, ObjectRef, Program, Transport};
 
     struct UnusedTransport;
 
@@ -254,55 +274,23 @@ mod tests {
         )
     }
 
+    fn source_ref<T>(object: &ObjectRef<T>, uri: &str) -> SourceRef {
+        SourceRef::new(object.erase(), AdtUri::parse(uri).unwrap())
+    }
+
+    fn program_source() -> SourceRef {
+        source_ref(
+            &program(),
+            "/sap/bc/adt/programs/programs/zprogram/source/main",
+        )
+    }
+
     #[test]
     fn source_operations_do_not_require_discovery() {
         fn accepts_initial<O: Operation<Initial>>() {}
 
         accepts_initial::<ObjectSourceQuery>();
         accepts_initial::<ObjectSourceUpdate>();
-    }
-
-    #[test]
-    fn derives_the_conventional_source_from_a_program_reference() {
-        let program = program();
-
-        assert_eq!(
-            program.source().uri.as_str(),
-            "/sap/bc/adt/programs/programs/zprogram/source/main"
-        );
-    }
-
-    #[test]
-    fn derives_class_source_component_resources() {
-        let class = ObjectRef::<Class>::for_test(
-            "ZCL_EXAMPLE",
-            AdtUri::parse("/sap/bc/adt/oo/classes/zcl_example").unwrap(),
-        );
-
-        let main_source = class.source();
-        assert_eq!(
-            main_source.uri.as_str(),
-            "/sap/bc/adt/oo/classes/zcl_example/source/main"
-        );
-        assert_eq!(main_source.object, class.erase());
-
-        for (component, suffix) in [
-            (ClassSourceComponent::Definitions, "includes/definitions"),
-            (
-                ClassSourceComponent::Implementations,
-                "includes/implementations",
-            ),
-            (ClassSourceComponent::Macros, "includes/macros"),
-            (ClassSourceComponent::TestClasses, "includes/testclasses"),
-            (ClassSourceComponent::LocalTypes, "includes/localtypes"),
-        ] {
-            let source = class.component_source(component);
-            assert_eq!(
-                source.uri.as_str(),
-                format!("/sap/bc/adt/oo/classes/zcl_example/{suffix}")
-            );
-            assert_eq!(source.object, class.erase());
-        }
     }
 
     #[test]
@@ -314,11 +302,11 @@ mod tests {
         let object_lock = ObjectLock::for_test(class.erase(), AccessMode::Modify);
         let client = Client::new(UnusedTransport);
 
-        for component in [
-            ClassSourceComponent::Definitions,
-            ClassSourceComponent::Implementations,
+        for uri in [
+            "/sap/bc/adt/oo/classes/zcl_example/includes/definitions",
+            "/sap/bc/adt/oo/classes/zcl_example/includes/implementations",
         ] {
-            let source = class.component_source(component);
+            let source = source_ref(&class, uri);
             let update = source.update(&object_lock, "source").unwrap();
             let request =
                 <ObjectSourceUpdate as Operation<Initial>>::request(&update, &client).unwrap();
@@ -343,8 +331,7 @@ mod tests {
         );
         let object_lock = ObjectLock::for_test(first.erase(), AccessMode::Modify);
 
-        let error = second
-            .source()
+        let error = source_ref(&second, "/sap/bc/adt/programs/programs/zsecond/source/main")
             .update(&object_lock, "REPORT zsecond.")
             .unwrap_err();
 
@@ -356,8 +343,7 @@ mod tests {
         let program = program();
         let object_lock = ObjectLock::for_test(program.erase(), AccessMode::Show);
 
-        let error = program
-            .source()
+        let error = program_source()
             .update(&object_lock, "REPORT zprogram.")
             .unwrap_err();
 
@@ -367,7 +353,7 @@ mod tests {
     #[test]
     fn source_update_inherits_the_locks_transport_request() {
         let program = program();
-        let mut source = program.source();
+        let mut source = program_source();
         source
             .query
             .push(("version".to_owned(), "inactive".to_owned()));
@@ -396,7 +382,7 @@ mod tests {
     #[test]
     fn source_update_accepts_an_explicit_transport_request() {
         let program = program();
-        let source = program.source();
+        let source = program_source();
 
         for object_lock in [
             ObjectLock::for_test(program.erase(), AccessMode::Modify),
@@ -425,7 +411,7 @@ mod tests {
     #[test]
     fn source_update_decodes_canonical_content_and_etag() {
         let program = program();
-        let source = program.source();
+        let source = program_source();
         let object_lock = ObjectLock::for_test(program.erase(), AccessMode::Modify);
         let update = source.update(&object_lock, "REPORT zprogram.").unwrap();
         let mut headers = HeaderMap::new();
@@ -448,7 +434,7 @@ mod tests {
     #[test]
     fn source_update_decodes_structured_backend_exceptions() {
         let program = program();
-        let source = program.source();
+        let source = program_source();
         let object_lock = ObjectLock::for_test(program.erase(), AccessMode::Modify);
         let update = source.update(&object_lock, "REPORT zprogram.").unwrap();
         let body =
@@ -482,7 +468,7 @@ mod tests {
     #[test]
     fn source_update_accepts_an_empty_success_response() {
         let program = program();
-        let source = program.source();
+        let source = program_source();
         let object_lock = ObjectLock::for_test(program.erase(), AccessMode::Modify);
         let update = source.update(&object_lock, "REPORT zprogram.").unwrap();
 
@@ -503,8 +489,7 @@ mod tests {
     async fn source_update_rejects_another_user_session_before_transport() {
         let program = program();
         let object_lock = ObjectLock::for_test(program.erase(), AccessMode::Modify);
-        let update = program
-            .source()
+        let update = program_source()
             .update(&object_lock, "REPORT zprogram.")
             .unwrap();
         let session = Client::new(UnusedTransport).create_user_session();

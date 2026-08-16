@@ -33,7 +33,6 @@ thiserror = "2.0"
 tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
 url = "2.5"
 uuid = { version = "1.18", features = ["v4"] }
-zadt-macros = { path = "../zadt-macros" }
 
 [dev-dependencies]
 httpmock = "0.7"

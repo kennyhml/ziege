@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use zadt::{
-    AdvertisedObjectReference, Class, ClassProperties, Erased, GlobalWorkbenchType,
-    JsonObjectProperties, ObjectRef, ObjectType,
+    AdtObject, AdvertisedObjectReference, Class, ClassProperties, GlobalWorkbenchType, ObjectType,
 };
 
 use crate::{
@@ -99,7 +98,7 @@ impl FileDescriptor for ClassMetadata {
 
     fn bind(
         &self,
-        object: &ObjectRef<Erased>,
+        object: &dyn crate::format::ProjectionObject,
         _language: Option<&str>,
     ) -> Result<Option<FileBacking>, ProjectionError> {
         if object.object_type() != &Class::WORKBENCH_TYPE {
@@ -108,7 +107,7 @@ impl FileDescriptor for ClassMetadata {
                 component: self.component(),
             });
         }
-        Ok(Some(FileBacking::Properties(object.clone())))
+        Ok(Some(FileBacking::Properties(object.reference())))
     }
 
     fn properties_codec(&self) -> Option<&dyn PropertiesCodec> {
@@ -117,15 +116,11 @@ impl FileDescriptor for ClassMetadata {
 }
 
 impl PropertiesCodec for ClassMetadata {
-    fn render(&self, properties: &JsonObjectProperties) -> Result<String, ProjectionError> {
+    fn render(&self, properties: &AdtObject) -> Result<String, ProjectionError> {
         render_class_properties(&decode_properties::<ClassProperties>(properties, "CLAS")?)
     }
 
-    fn merge(
-        &self,
-        original: &JsonObjectProperties,
-        edited: &str,
-    ) -> Result<JsonObjectProperties, ProjectionError> {
+    fn merge(&self, original: &AdtObject, edited: &str) -> Result<AdtObject, ProjectionError> {
         let properties = decode_properties::<ClassProperties>(original, "CLAS")?;
         encode_properties(
             original,
@@ -558,7 +553,7 @@ mod tests {
             "class-etag",
             CLASS_XML,
         )
-        .payload
+        .properties
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use std::{fmt, hash::Hash};
+use std::{fmt, hash::Hash, marker::PhantomData};
 
 use serde::{Deserialize, Serialize};
 
@@ -10,32 +10,18 @@ use crate::{
     vocabulary::CategoryId,
 };
 
-/// Runtime type information retained by a type-erased object reference.
-#[derive(Clone, Debug)]
-pub struct Erased {
-    object_type: GlobalWorkbenchType,
-    descriptor: Option<&'static dyn descriptors::RuntimeObjectTypeDescriptor>,
-}
-
-impl Erased {
-    fn new(object_type: GlobalWorkbenchType) -> Self {
-        Self {
-            descriptor: descriptors::object_type_descriptor(&object_type),
-            object_type,
-        }
-    }
-}
-
 /// A validated ADT repository-object identity with static or runtime type state.
 ///
-/// Typed references obtain capabilities from `T`. [`ObjectRef<Erased>`] retains
-/// the exact runtime Workbench type and an optional descriptor for modeled
-/// runtime capabilities.
-#[derive(Clone, Debug)]
-pub struct ObjectRef<T = Erased> {
+/// Typed references obtain capabilities from `T`. [`ObjectRef<()>`] retains the
+/// exact runtime Workbench type for runtime capability dispatch.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(bound = "")]
+pub struct ObjectRef<T = ()> {
     name: String,
     uri: AdtUri,
-    state: T,
+    object_type: GlobalWorkbenchType,
+    #[serde(skip)]
+    marker: PhantomData<fn() -> T>,
 }
 
 impl<T> ObjectRef<T> {
@@ -48,6 +34,31 @@ impl<T> ObjectRef<T> {
     pub fn name(&self) -> &str {
         &self.name
     }
+
+    /// Returns the exact Workbench type retained by this reference.
+    pub fn object_type(&self) -> &GlobalWorkbenchType {
+        &self.object_type
+    }
+
+    /// Returns a runtime-typed copy of this object identity.
+    pub fn erase(&self) -> ObjectRef<()> {
+        self.retag()
+    }
+
+    pub(crate) fn retag<U>(&self) -> ObjectRef<U> {
+        ObjectRef {
+            name: self.name.clone(),
+            uri: self.uri.clone(),
+            object_type: self.object_type.clone(),
+            marker: PhantomData,
+        }
+    }
+
+    pub(crate) fn descriptor(
+        &self,
+    ) -> Option<&'static dyn descriptors::RuntimeObjectTypeDescriptor> {
+        descriptors::object_type_descriptor(&self.object_type)
+    }
 }
 
 impl<T: ObjectType> ObjectRef<T> {
@@ -55,39 +66,20 @@ impl<T: ObjectType> ObjectRef<T> {
         Self {
             name,
             uri,
-            state: T::default(),
+            object_type: T::WORKBENCH_TYPE,
+            marker: PhantomData,
         }
-    }
-
-    /// Returns a runtime-typed copy of this object identity.
-    pub fn erase(&self) -> ObjectRef<Erased> {
-        ObjectRef::erased(self.name.clone(), self.uri.clone(), T::WORKBENCH_TYPE)
-    }
-
-    /// Returns this reference's statically known Workbench type.
-    pub fn object_type(&self) -> GlobalWorkbenchType {
-        T::WORKBENCH_TYPE
     }
 }
 
-impl ObjectRef<Erased> {
+impl ObjectRef<()> {
     pub(crate) fn erased(name: String, uri: AdtUri, object_type: GlobalWorkbenchType) -> Self {
         Self {
             name,
             uri,
-            state: Erased::new(object_type),
+            object_type,
+            marker: PhantomData,
         }
-    }
-
-    /// Returns the exact runtime Workbench type.
-    pub fn object_type(&self) -> &GlobalWorkbenchType {
-        &self.state.object_type
-    }
-
-    pub(crate) fn descriptor(
-        &self,
-    ) -> Option<&'static dyn descriptors::RuntimeObjectTypeDescriptor> {
-        self.state.descriptor
     }
 
     /// Recovers a typed reference when this object has the requested type.
@@ -96,6 +88,17 @@ impl ObjectRef<Erased> {
             return None;
         }
         Some(ObjectRef::new(self.name.clone(), self.uri.clone()))
+    }
+}
+
+impl<T> Clone for ObjectRef<T> {
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            uri: self.uri.clone(),
+            object_type: self.object_type.clone(),
+            marker: PhantomData,
+        }
     }
 }
 
@@ -153,22 +156,11 @@ pub struct AdvertisedObjectReference {
     pub parent_uri: Option<String>,
 }
 
-impl<T: ObjectType> From<&ObjectRef<T>> for AdvertisedObjectReference {
+impl<T> From<&ObjectRef<T>> for AdvertisedObjectReference {
     fn from(value: &ObjectRef<T>) -> Self {
         Self {
             uri: Some(value.uri().as_str().to_owned()),
-            object_type: Some(T::WORKBENCH_TYPE),
-            name: Some(value.name.clone()),
-            ..Default::default()
-        }
-    }
-}
-
-impl From<&ObjectRef<Erased>> for AdvertisedObjectReference {
-    fn from(value: &ObjectRef<Erased>) -> Self {
-        Self {
-            uri: Some(value.uri().as_str().to_owned()),
-            object_type: Some(value.object_type().clone()),
+            object_type: Some(value.object_type.clone()),
             name: Some(value.name.clone()),
             ..Default::default()
         }
@@ -208,7 +200,7 @@ impl Client<Ready> {
         &self,
         object_type: &GlobalWorkbenchType,
         name: &str,
-    ) -> Result<ObjectRef<Erased>, ObjectError> {
+    ) -> Result<ObjectRef<()>, ObjectError> {
         let descriptor = descriptors::object_type_descriptor(object_type).ok_or_else(|| {
             ObjectError::UnsupportedObjectType {
                 object_type: object_type.clone(),
@@ -222,7 +214,7 @@ impl Client<Ready> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AccessMode, Class, Include, Program};
+    use crate::{AccessMode, Include, Program};
 
     #[test]
     fn advertised_object_references_preserve_partial_wire_values() {
@@ -256,22 +248,6 @@ mod tests {
         assert_eq!(object.object_type().as_str(), "PROG/P");
         assert_eq!(object.typed::<Program>(), Some(program));
         assert!(object.typed::<Include>().is_none());
-    }
-
-    #[test]
-    fn erased_reference_resolves_a_named_source_component() {
-        let class = ObjectRef::<Class>::for_test(
-            "ZCL_TEST",
-            AdtUri::parse("/sap/bc/adt/oo/classes/zcl_test").unwrap(),
-        );
-
-        let component = class.erase().source_component("definitions").unwrap();
-
-        assert_eq!(
-            component.uri.as_str(),
-            "/sap/bc/adt/oo/classes/zcl_test/includes/definitions"
-        );
-        assert_eq!(component.object, class.erase());
     }
 
     #[test]

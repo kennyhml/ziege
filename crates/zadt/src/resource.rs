@@ -1,5 +1,5 @@
 mod link;
-mod refs;
+pub(crate) mod refs;
 mod relations;
 mod template;
 

@@ -1,19 +1,19 @@
 use serde::{Deserialize, Serialize};
 
+use crate::objects::macros::object_type;
 use crate::{AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType, PropertyModel};
-use zadt_macros::object_type;
 
-/// The package (devclass) object type.
-#[object_type(
+object_type! {
+    /// The package (devclass) object type.
+    pub type Package = PackageProperties;
+
     workbench_type = "DEVC/K",
     collection(
         scheme = "http://www.sap.com/wbobj/packages",
         term = "devck",
     ),
-    capabilities(ReadProperties(model = PackageProperties)),
-)]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Package;
+    capabilities(),
+}
 
 /// The SAP media-type version used to decode package properties.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

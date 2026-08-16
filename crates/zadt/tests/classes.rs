@@ -110,11 +110,14 @@ async fn repository_object_properties_forward_through_the_typed_query() {
         properties.media_type(),
         "application/vnd.sap.adt.oo.classes.v4+xml"
     );
-    assert_eq!(properties.payload["@adtcore:name"], "CL_ADT_URI_MAPPER");
+    assert_eq!(properties.properties["@adtcore:name"], "CL_ADT_URI_MAPPER");
     assert_eq!(
         properties.etag.as_ref().map(EntityTag::as_str),
         Some("class-etag")
     );
+    let class: Class = properties.clone().try_into_typed::<Class>().unwrap();
+    assert_eq!(class.properties.name, "CL_ADT_URI_MAPPER");
+    assert_eq!(class.reference().uri(), object.uri());
     logon.assert_async().await;
     discovery.assert_async().await;
     metadata.assert_async().await;
@@ -196,8 +199,10 @@ async fn class_properties_query_converts_the_live_v4_manifest() {
         .await
         .unwrap();
     assert_eq!(response.media_version(), ClassPropertiesVersion::V4);
-    let class = &response.payload;
-    let source_ref = reference.source();
+    let cached = serde_json::to_string(&response).unwrap();
+    let response: Class = serde_json::from_str(&cached).unwrap();
+    let class = &response.properties;
+    let source_ref = response.source().unwrap();
     let source = source_ref.query().execute(&client).await.unwrap();
 
     assert_eq!(class.name, "CL_ADT_URI_MAPPER");

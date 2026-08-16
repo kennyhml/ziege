@@ -1,41 +1,39 @@
 use serde::{Deserialize, Serialize};
-use zadt_macros::object_type;
 
-use super::super::{GlobalWorkbenchType, ObjectRef, PropertyModel};
+use super::super::{GlobalWorkbenchType, ObjectRef, PropertyModel, Source};
+use crate::objects::macros::object_type;
 use crate::{AdvertisedLink, AdvertisedObjectReference};
 
-/// The ABAP program object type.
-#[object_type(
+object_type! {
+    /// The ABAP program object type.
+    pub type Program = ProgramProperties;
+
     workbench_type = "PROG/P",
     collection(
         scheme = "http://www.sap.com/adt/categories/programs",
         term = "programs",
     ),
     capabilities(
-        HasSource,
+        Source,
         Run,
-        ReadProperties(model = ProgramProperties),
         UpdateProperties,
     ),
-)]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Program;
+}
 
-/// The standalone ABAP include object type.
-#[object_type(
+object_type! {
+    /// The standalone ABAP include object type.
+    pub type Include = IncludeProperties;
+
     workbench_type = "PROG/I",
     collection(
         scheme = "http://www.sap.com/adt/categories/programs",
         term = "includes",
     ),
     capabilities(
-        HasSource,
-        ReadProperties(model = IncludeProperties),
+        Source,
         UpdateProperties,
     ),
-)]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Include;
+}
 
 impl ObjectRef<Program> {
     #[cfg(test)]
@@ -225,6 +223,12 @@ impl PropertyModel for ProgramProperties {
     }
 }
 
+impl Source for Program {
+    fn source_uri(properties: &Self::Properties) -> Option<&str> {
+        Some(&properties.source_uri)
+    }
+}
+
 /// The complete standalone ABAP include-properties payload.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename = "include:abapInclude", deny_unknown_fields)]
@@ -327,6 +331,12 @@ impl PropertyModel for IncludeProperties {
 
     fn object_type(&self) -> &GlobalWorkbenchType {
         &self.object_type
+    }
+}
+
+impl Source for Include {
+    fn source_uri(properties: &Self::Properties) -> Option<&str> {
+        Some(&properties.source_uri)
     }
 }
 

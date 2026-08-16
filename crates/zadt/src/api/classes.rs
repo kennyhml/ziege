@@ -75,3 +75,10 @@ impl ObjectRef<Class> {
         ClassRun::new(self.clone())
     }
 }
+
+impl Class {
+    /// Creates an operation that runs this loaded class.
+    pub fn run(&self) -> ClassRun {
+        self.reference().retag::<Self>().run()
+    }
+}

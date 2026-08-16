@@ -3,11 +3,11 @@ use std::marker::PhantomData;
 use http::{Method, StatusCode, header};
 
 use crate::{
-    AccessMode, Erased, ObjectError, ObjectLock, TransportNumber,
+    AccessMode, AdtObject, ObjectError, ObjectLock, TransportNumber,
     client::{Client, ClientState, Ready},
     error::{OperationError, ResponseError},
     objects::{
-        ObjectRef, ObjectVersion, PropertyModel, ReadProperties, RuntimeObjectTypeDescriptor,
+        ObjectRef, ObjectType, ObjectVersion, PropertyModel, RuntimeObjectTypeDescriptor,
         UpdateProperties,
     },
     operation::{IfNoneMatch, Operation, OperationResponse, Stateful, Stateless},
@@ -15,63 +15,11 @@ use crate::{
     vocabulary::query_parameter,
 };
 
-/// A fetched object-properties payload and its transport metadata.
-#[derive(Clone, Debug)]
-pub struct ObjectProperties<P>
-where
-    P: PropertyModel,
-{
-    resource: ObjectRef<Erased>,
-    pub(crate) media_version: P::Version,
-    pub etag: Option<EntityTag>,
-    pub payload: P,
-}
-
-impl<P> ObjectProperties<P>
-where
-    P: PropertyModel,
-{
-    /// Returns the runtime object from which these properties were queried.
-    pub fn resource(&self) -> &ObjectRef<Erased> {
-        &self.resource
-    }
-
-    /// Returns the media-type version used by this representation.
-    pub fn media_version(&self) -> P::Version {
-        self.media_version
-    }
-
-    /// Returns the media type used by this representation.
-    pub fn media_type(&self) -> &'static str {
-        P::media_type(self.media_version)
-    }
-}
-
-/// A fetched object-properties payload exposed through its runtime JSON form.
-#[derive(Clone, Debug)]
-pub struct JsonObjectProperties {
-    pub(crate) resource: ObjectRef<Erased>,
-    pub(crate) media_type: &'static str,
-    pub etag: Option<EntityTag>,
-    pub payload: serde_json::Value,
-}
-
-impl JsonObjectProperties {
-    /// Returns the runtime object from which these properties were queried.
-    pub fn resource(&self) -> &ObjectRef<Erased> {
-        &self.resource
-    }
-
-    pub fn media_type(&self) -> &'static str {
-        self.media_type
-    }
-}
-
 /// Fetches a versioned, statically typed object-properties representation.
 #[derive(Debug)]
 pub struct ObjectPropertiesQuery<T>
 where
-    T: ReadProperties,
+    T: ObjectType,
 {
     pub resource: ObjectRef<T>,
     pub version: Option<ObjectVersion>,
@@ -79,7 +27,7 @@ where
 
 impl<T> ObjectPropertiesQuery<T>
 where
-    T: ReadProperties,
+    T: ObjectType,
 {
     pub fn new(resource: ObjectRef<T>) -> Self {
         Self {
@@ -100,9 +48,9 @@ where
 
 impl<T> Operation<Ready> for ObjectPropertiesQuery<T>
 where
-    T: ReadProperties,
+    T: ObjectType,
 {
-    type Response = ObjectProperties<T::Properties>;
+    type Response = AdtObject<T::Properties>;
     type Kind = Stateless;
 
     fn request(&self, _client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
@@ -126,22 +74,35 @@ where
 
 impl<T> ObjectRef<T>
 where
-    T: ReadProperties,
+    T: ObjectType,
 {
     pub fn query(&self) -> ObjectPropertiesQuery<T> {
         ObjectPropertiesQuery::new(self.clone())
     }
 }
 
+impl<P> AdtObject<P>
+where
+    Self: ObjectType<Properties = P>,
+    P: PropertyModel,
+{
+    /// Creates a conditional query using this representation's entity tag.
+    pub fn revalidate(&self) -> Option<IfNoneMatch<ObjectPropertiesQuery<Self>>> {
+        self.etag
+            .clone()
+            .map(|etag| self.reference().retag::<Self>().query().if_none_match(etag))
+    }
+}
+
 /// Fetches one runtime-typed object's properties as JSON.
 #[derive(Debug)]
-pub struct JsonObjectPropertiesQuery {
-    resource: ObjectRef<Erased>,
+pub struct AdtObjectQuery {
+    resource: ObjectRef<()>,
     descriptor: &'static dyn RuntimeObjectTypeDescriptor,
     version: Option<ObjectVersion>,
 }
 
-impl JsonObjectPropertiesQuery {
+impl AdtObjectQuery {
     pub fn version(mut self, version: ObjectVersion) -> Self {
         self.version = Some(version);
         self
@@ -152,8 +113,8 @@ impl JsonObjectPropertiesQuery {
     }
 }
 
-impl Operation<Ready> for JsonObjectPropertiesQuery {
-    type Response = JsonObjectProperties;
+impl Operation<Ready> for AdtObjectQuery {
+    type Response = AdtObject;
     type Kind = Stateless;
 
     fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
@@ -166,12 +127,12 @@ impl Operation<Ready> for JsonObjectPropertiesQuery {
     }
 }
 
-impl ObjectRef<Erased> {
-    pub fn query(&self) -> Result<JsonObjectPropertiesQuery, ObjectError> {
+impl ObjectRef<()> {
+    pub fn query(&self) -> Result<AdtObjectQuery, ObjectError> {
         let descriptor = self
             .descriptor()
             .ok_or_else(|| unsupported(self, "object properties"))?;
-        Ok(JsonObjectPropertiesQuery {
+        Ok(AdtObjectQuery {
             resource: self.clone(),
             descriptor,
             version: None,
@@ -183,9 +144,9 @@ impl ObjectRef<Erased> {
 #[derive(Debug)]
 pub struct ObjectPropertiesUpdate<T>
 where
-    T: ReadProperties,
+    T: ObjectType,
 {
-    resource: ObjectRef<Erased>,
+    resource: ObjectRef<()>,
     object_lock: ObjectLock,
     media_type: &'static str,
     body: Vec<u8>,
@@ -195,7 +156,7 @@ where
 
 impl<T> ObjectPropertiesUpdate<T>
 where
-    T: ReadProperties,
+    T: ObjectType,
 {
     #[must_use]
     pub fn transport(mut self, transport_request: impl Into<TransportNumber>) -> Self {
@@ -207,9 +168,9 @@ where
 impl<S, T> Operation<S> for ObjectPropertiesUpdate<T>
 where
     S: ClientState,
-    T: ReadProperties,
+    T: ObjectType,
 {
-    type Response = Option<ObjectProperties<T::Properties>>;
+    type Response = Option<AdtObject<T::Properties>>;
     type Kind = Stateful;
 
     fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
@@ -244,19 +205,19 @@ where
     pub fn update(
         &self,
         object_lock: &ObjectLock,
-        properties: ObjectProperties<T::Properties>,
+        properties: AdtObject<T::Properties>,
     ) -> Result<ObjectPropertiesUpdate<T>, ObjectError> {
         let resource = self.erase();
-        ensure_same_resource(&resource, properties.resource())?;
-        validate_payload_identity(&resource, &properties.payload)?;
+        ensure_same_resource(&resource, properties.reference())?;
+        validate_payload_identity(&resource, &properties.properties)?;
         validate_update_lock(&resource, object_lock)?;
-        let media_type = properties.media_type();
+        let media_type = T::Properties::media_type(properties.media_version());
         let serializer = T::Properties::XML_NAMESPACES.iter().fold(
             serde_xml_rs::SerdeXml::new(),
             |serializer, &(prefix, namespace)| serializer.namespace(prefix, namespace),
         );
         let body = serializer
-            .to_string(&properties.payload)
+            .to_string(&properties.properties)
             .map_err(ObjectError::InvalidRequest)?
             .into_bytes();
         Ok(ObjectPropertiesUpdate {
@@ -270,10 +231,25 @@ where
     }
 }
 
+impl<P> AdtObject<P>
+where
+    Self: UpdateProperties<Properties = P>,
+    P: PropertyModel,
+{
+    /// Replaces this loaded object's properties under the supplied lock.
+    pub fn update(
+        self,
+        object_lock: &ObjectLock,
+    ) -> Result<ObjectPropertiesUpdate<Self>, ObjectError> {
+        let reference = self.reference().clone();
+        reference.retag::<Self>().update(object_lock, self)
+    }
+}
+
 /// Replaces one runtime-typed object's JSON properties representation.
 #[derive(Debug)]
-pub struct JsonObjectPropertiesUpdate {
-    resource: ObjectRef<Erased>,
+pub struct AdtObjectUpdate {
+    resource: ObjectRef<()>,
     object_lock: ObjectLock,
     media_type: &'static str,
     body: Vec<u8>,
@@ -281,7 +257,7 @@ pub struct JsonObjectPropertiesUpdate {
     descriptor: &'static dyn RuntimeObjectTypeDescriptor,
 }
 
-impl JsonObjectPropertiesUpdate {
+impl AdtObjectUpdate {
     #[must_use]
     pub fn transport(mut self, transport_request: impl Into<TransportNumber>) -> Self {
         self.transport_request = Some(transport_request.into());
@@ -289,11 +265,11 @@ impl JsonObjectPropertiesUpdate {
     }
 }
 
-impl<S> Operation<S> for JsonObjectPropertiesUpdate
+impl<S> Operation<S> for AdtObjectUpdate
 where
     S: ClientState,
 {
-    type Response = Option<JsonObjectProperties>;
+    type Response = Option<AdtObject>;
     type Kind = Stateful;
 
     fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
@@ -321,22 +297,28 @@ where
     }
 }
 
-impl ObjectRef<Erased> {
+impl ObjectRef<()> {
     pub fn update(
         &self,
         object_lock: &ObjectLock,
-        properties: JsonObjectProperties,
-    ) -> Result<JsonObjectPropertiesUpdate, ObjectError> {
-        ensure_same_resource(self, properties.resource())?;
+        properties: AdtObject,
+    ) -> Result<AdtObjectUpdate, ObjectError> {
+        ensure_same_resource(self, &properties.reference().erase())?;
         validate_update_lock(self, object_lock)?;
         let descriptor = self
             .descriptor()
             .ok_or_else(|| unsupported(self, "object properties update"))?;
-        let body = descriptor.properties_to_xml(self, properties.media_type, properties.payload)?;
-        Ok(JsonObjectPropertiesUpdate {
+        let media_type = descriptor
+            .properties_media_type(properties.media_type())
+            .ok_or_else(|| ObjectError::UnsupportedPropertiesMediaType {
+                object_type: self.object_type().clone(),
+                media_type: properties.media_type().to_owned(),
+            })?;
+        let body = descriptor.properties_to_xml(self, media_type, properties.properties)?;
+        Ok(AdtObjectUpdate {
             resource: self.clone(),
             object_lock: object_lock.clone(),
-            media_type: properties.media_type,
+            media_type,
             body: body.into_bytes(),
             transport_request: object_lock.transport_request().cloned(),
             descriptor,
@@ -344,7 +326,7 @@ impl ObjectRef<Erased> {
     }
 }
 
-fn unsupported(object: &ObjectRef<Erased>, capability: &'static str) -> ObjectError {
+fn unsupported(object: &ObjectRef<()>, capability: &'static str) -> ObjectError {
     ObjectError::UnsupportedCapability {
         object_type: object.object_type().clone(),
         capability,
@@ -352,8 +334,8 @@ fn unsupported(object: &ObjectRef<Erased>, capability: &'static str) -> ObjectEr
 }
 
 fn ensure_same_resource(
-    expected: &ObjectRef<Erased>,
-    actual: &ObjectRef<Erased>,
+    expected: &ObjectRef<()>,
+    actual: &ObjectRef<()>,
 ) -> Result<(), ObjectError> {
     if expected.uri() != actual.uri()
         || expected.name() != actual.name()
@@ -367,10 +349,7 @@ fn ensure_same_resource(
     Ok(())
 }
 
-fn validate_payload_identity<P>(
-    resource: &ObjectRef<Erased>,
-    properties: &P,
-) -> Result<(), ObjectError>
+fn validate_payload_identity<P>(resource: &ObjectRef<()>, properties: &P) -> Result<(), ObjectError>
 where
     P: PropertyModel,
 {
@@ -394,7 +373,7 @@ where
 }
 
 fn validate_update_lock(
-    resource: &ObjectRef<Erased>,
+    resource: &ObjectRef<()>,
     object_lock: &ObjectLock,
 ) -> Result<(), ObjectError> {
     if resource.uri() != object_lock.object().uri()
@@ -415,11 +394,11 @@ fn validate_update_lock(
 // Shared helper for typed property decoding as both update and query
 // receive the same response payload.
 fn decode_query<T>(
-    resource: &ObjectRef<Erased>,
+    resource: &ObjectRef<()>,
     response: OperationResponse,
-) -> Result<ObjectProperties<T::Properties>, ResponseError>
+) -> Result<AdtObject<T::Properties>, ResponseError>
 where
-    T: ReadProperties,
+    T: ObjectType,
 {
     if response.status() == StatusCode::NOT_MODIFIED {
         return Err(ResponseError::UnexpectedNotModified);
@@ -448,12 +427,12 @@ where
     let payload: T::Properties =
         serde_xml_rs::from_reader(response.body()).map_err(ObjectError::InvalidResponse)?;
     validate_payload_identity(resource, &payload)?;
-    Ok(ObjectProperties {
-        resource: resource.clone(),
-        media_version,
+    Ok(AdtObject::new(
+        resource.clone(),
+        T::Properties::media_type(media_version),
         etag,
         payload,
-    })
+    ))
 }
 
 fn decode_update<P>(

@@ -86,7 +86,7 @@ async fn package_properties_advertise_all_supported_contracts() {
     let reference = client.object::<Package>("sadt_tools_core").unwrap();
     let response = reference.query().execute(&client).await.unwrap();
     assert_eq!(response.media_version(), PackagePropertiesVersion::V2);
-    let package = &response.payload;
+    let package = &response.properties;
 
     assert_eq!(package.name, "SADT_TOOLS_CORE");
     assert_eq!(

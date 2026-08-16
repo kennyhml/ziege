@@ -158,8 +158,14 @@ async fn include_properties_query_converts_the_live_ztest_properties() {
         .await
         .unwrap();
     assert_eq!(response.media_version(), IncludePropertyVersion::V2);
-    let include = &response.payload;
-    let source = reference.source().query().execute(&client).await.unwrap();
+    let include = &response.properties;
+    let source = response
+        .source()
+        .unwrap()
+        .query()
+        .execute(&client)
+        .await
+        .unwrap();
 
     assert_eq!(include.name, "ZTEST");
     assert_eq!(include.object_type.to_string(), "PROG/I");
@@ -227,8 +233,14 @@ async fn program_properties_query_converts_the_live_z_test_v3_properties() {
     let reference = client.object::<Program>("Z_TEST").unwrap();
     let response = reference.query().execute(&client).await.unwrap();
     assert_eq!(response.media_version(), ProgramPropertiesVersion::V3);
-    let program = &response.payload;
-    let source = reference.source().query().execute(&client).await.unwrap();
+    let program = &response.properties;
+    let source = response
+        .source()
+        .unwrap()
+        .query()
+        .execute(&client)
+        .await
+        .unwrap();
 
     assert_eq!(program.name, "Z_TEST");
     assert_eq!(program.object_type.to_string(), "PROG/P");
@@ -330,7 +342,7 @@ async fn program_properties_query_accepts_server_selected_v2() {
         .await
         .unwrap();
     assert_eq!(response.media_version(), ProgramPropertiesVersion::V2);
-    let program = &response.payload;
+    let program = &response.properties;
 
     assert_eq!(program.name, "Z_TEST");
     assert_eq!(program.version, "inactive");
@@ -414,6 +426,24 @@ async fn program_lock_and_update_share_one_user_session() {
                 .header("x-sap-adt-sessiontype", "stateless")
                 .header("cookie", "sap-usercontext=sap-client=001&sap-language=EN");
             then.status(200).header("x-csrf-token", "CSRF-TOKEN-1");
+        })
+        .await;
+    let metadata = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/sap/bc/adt/programs/programs/z_ziege_test")
+                .header("accept", PROGRAM_PROPERTIES_ACCEPT)
+                .header("cache-control", "no-cache");
+            then.status(200)
+                .header(
+                    "content-type",
+                    "application/vnd.sap.adt.programs.programs.v3+xml; charset=utf-8",
+                )
+                .body(
+                    PROGRAM_XML
+                        .replace("Z_TEST", "Z_ZIEGE_TEST")
+                        .replace("z_test", "z_ziege_test"),
+                );
         })
         .await;
     let get_source = server
@@ -501,8 +531,20 @@ async fn program_lock_and_update_share_one_user_session() {
         .unwrap();
 
     let client = ready_client(transport).await;
-    let program = client.object::<Program>("Z_ZIEGE_TEST").unwrap();
-    let source = program.source().query().execute(&client).await.unwrap();
+    let program = client
+        .object::<Program>("Z_ZIEGE_TEST")
+        .unwrap()
+        .query()
+        .execute(&client)
+        .await
+        .unwrap();
+    let source = program
+        .source()
+        .unwrap()
+        .query()
+        .execute(&client)
+        .await
+        .unwrap();
     let session = client.create_user_session();
 
     let object_lock = program
@@ -517,7 +559,7 @@ async fn program_lock_and_update_share_one_user_session() {
         .execute(&session)
         .await
         .unwrap();
-    assert_eq!(object_lock.object().uri(), program.uri());
+    assert_eq!(object_lock.object().uri(), program.reference().uri());
     assert_eq!(object_lock.handle(), "LOCK-HANDLE-1");
     program
         .unlock(object_lock)
@@ -533,6 +575,7 @@ async fn program_lock_and_update_share_one_user_session() {
     logon.assert_async().await;
     discovery.assert_async().await;
     csrf.assert_async().await;
+    metadata.assert_async().await;
     get_source.assert_async().await;
     lock_program.assert_async().await;
     update_source.assert_async().await;

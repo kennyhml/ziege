@@ -3,13 +3,15 @@
 use std::path::Path;
 
 use thiserror::Error;
-use zadt::{Erased, GlobalWorkbenchType, ObjectRef, RepositoryObjectEntry, SourceRef};
+use zadt::{AdtObject, GlobalWorkbenchType, SourceRef};
 
 mod format;
 mod formats;
 mod language;
 mod registry;
 
+#[doc(hidden)]
+pub use format::ProjectionObject;
 pub use format::{
     Cardinality, ComponentId, FileBacking, FileSpec, ObjectFormat, ProjectedFile, Projection,
 };
@@ -33,25 +35,20 @@ impl TryFrom<&GlobalWorkbenchType> for ObjectFormat {
     }
 }
 
-impl TryFrom<&ObjectRef<Erased>> for ObjectFormat {
+impl<P> TryFrom<&AdtObject<P>> for ObjectFormat {
     type Error = ProjectionError;
 
-    fn try_from(object: &ObjectRef<Erased>) -> Result<Self, Self::Error> {
-        Self::for_workbench_type(object.object_type())
-    }
-}
-
-impl TryFrom<&RepositoryObjectEntry> for ObjectFormat {
-    type Error = ProjectionError;
-
-    fn try_from(entry: &RepositoryObjectEntry) -> Result<Self, Self::Error> {
-        Self::try_from(&entry.reference)
+    fn try_from(object: &AdtObject<P>) -> Result<Self, Self::Error> {
+        Self::for_workbench_type(object.reference().object_type())
     }
 }
 
 /// Projects a runtime repository object into its currently materializable AFF files.
-pub fn project(object: &ObjectRef<Erased>) -> Result<Projection, ProjectionError> {
-    let descriptor = registry::for_workbench_type(object.object_type())?;
+pub fn project<P>(object: &AdtObject<P>) -> Result<Projection, ProjectionError>
+where
+    AdtObject<P>: ProjectionObject,
+{
+    let descriptor = registry::for_workbench_type(object.reference().object_type())?;
     let format = descriptor.format();
     let mut files = Vec::new();
     for specification in descriptor.files() {
@@ -62,7 +59,7 @@ pub fn project(object: &ObjectRef<Erased>) -> Result<Projection, ProjectionError
             continue;
         };
         files.push(ProjectedFile {
-            name: specification.file_name(object.name(), None)?,
+            name: specification.file_name(object.reference().name(), None)?,
             format,
             cardinality: specification.cardinality,
             component: specification.component(),
@@ -84,11 +81,17 @@ pub struct ResolvedFile {
 
 impl ResolvedFile {
     /// Binds this projected path to the runtime repository object that produced it.
-    pub fn bind(&self, object: &ObjectRef<Erased>) -> Result<FileBacking, ProjectionError> {
-        if !self.object_name.eq_ignore_ascii_case(object.name()) {
+    pub fn bind<P>(&self, object: &AdtObject<P>) -> Result<FileBacking, ProjectionError>
+    where
+        AdtObject<P>: ProjectionObject,
+    {
+        if !self
+            .object_name
+            .eq_ignore_ascii_case(object.reference().name())
+        {
             return Err(ProjectionError::BindingNameMismatch {
                 projected_name: self.object_name.clone(),
-                repository_name: object.name().to_owned(),
+                repository_name: object.reference().name().to_owned(),
             });
         }
 
@@ -96,7 +99,7 @@ impl ResolvedFile {
         if self.format != repository_format {
             return Err(ProjectionError::BindingTypeMismatch {
                 projected_type: self.format.object_type(),
-                repository_type: object.object_type().clone(),
+                repository_type: object.reference().object_type().clone(),
             });
         }
 
@@ -105,19 +108,22 @@ impl ResolvedFile {
             .iter()
             .find(|file| file.component() == self.component)
             .ok_or_else(|| ProjectionError::UnsupportedFileComponent {
-                object_type: object.object_type().clone(),
+                object_type: object.reference().object_type().clone(),
                 component: self.component,
             })?;
         specification
             .bind(object, self.language.as_deref())?
             .ok_or_else(|| ProjectionError::UnsupportedFileComponent {
-                object_type: object.object_type().clone(),
+                object_type: object.reference().object_type().clone(),
                 component: self.component,
             })
     }
 
     /// Resolves this projected file to its ADT source resource.
-    pub fn source_ref(&self, entry: &RepositoryObjectEntry) -> Result<SourceRef, ProjectionError> {
+    pub fn source_ref<P>(&self, object: &AdtObject<P>) -> Result<SourceRef, ProjectionError>
+    where
+        AdtObject<P>: ProjectionObject,
+    {
         let source_backed = registry::by_format(self.format)
             .files()
             .iter()
@@ -128,7 +134,7 @@ impl ResolvedFile {
                 component: self.component,
             });
         }
-        match self.bind(&entry.reference)? {
+        match self.bind(object)? {
             FileBacking::Source(source) => Ok(source),
             FileBacking::Properties(_) => Err(ProjectionError::NotSourceFile {
                 component: self.component,
@@ -410,9 +416,9 @@ pub enum ProjectionError {
 mod test_support {
     use http::{HeaderMap, StatusCode};
     use zadt::{
-        AdtResponse, AdtUri, JsonObjectProperties, JsonObjectPropertiesQuery, ObjectProperties,
-        ObjectPropertiesQuery, ObjectRef, ObjectType, Operation, OperationResponse, ReadProperties,
-        Ready, RepositoryContentQuery, RepositoryObjectEntry,
+        AdtObject, AdtObjectQuery, AdtResponse, AdtUri, ObjectPropertiesQuery, ObjectRef,
+        ObjectType, Operation, OperationResponse, Ready, RepositoryContentQuery,
+        RepositoryObjectEntry,
     };
 
     pub fn repository_entry(name: &str, object_type: &str, uri: &str) -> RepositoryObjectEntry {
@@ -445,9 +451,9 @@ mod test_support {
         media_type: &'static str,
         etag: &'static str,
         body: &[u8],
-    ) -> ObjectProperties<T::Properties>
+    ) -> AdtObject<T::Properties>
     where
-        T: ReadProperties,
+        T: ObjectType,
     {
         let mut headers = HeaderMap::new();
         headers.insert(http::header::CONTENT_TYPE, media_type.parse().unwrap());
@@ -467,9 +473,9 @@ mod test_support {
         media_type: &'static str,
         etag: &'static str,
         body: &[u8],
-    ) -> JsonObjectProperties
+    ) -> AdtObject
     where
-        T: ReadProperties,
+        T: ObjectType,
     {
         let reference = reference.erase();
         let query = reference.query().unwrap();
@@ -478,7 +484,7 @@ mod test_support {
         headers.insert(http::header::ETAG, etag.parse().unwrap());
         let response = AdtResponse::new(StatusCode::OK, headers, body.to_vec());
         let target = reference.uri().clone();
-        <JsonObjectPropertiesQuery as Operation<Ready>>::decode(
+        <AdtObjectQuery as Operation<Ready>>::decode(
             &query,
             OperationResponse::new(response, target),
         )
@@ -490,9 +496,14 @@ mod test_support {
 mod tests {
     use zadt::{
         Class, ClassPropertiesVersion, DataElement, EntityTag, Include, ObjectType, Program,
+        ProgramPropertiesVersion,
     };
 
     use super::*;
+
+    const CLASS_XML: &[u8] =
+        include_bytes!("../../zadt/tests/fixtures/class-cl-adt-uri-mapper-v4.xml");
+    const PROGRAM_XML: &[u8] = include_bytes!("../../zadt/tests/fixtures/program-z-test.xml");
 
     #[test]
     fn registry_maps_supported_repository_types() {
@@ -596,22 +607,25 @@ mod tests {
 
     #[test]
     fn resolved_class_sources_bind_through_their_descriptors() {
-        let reference =
-            test_support::reference::<Class>("ZCL_EXAMPLE", "/sap/bc/adt/oo/classes/zcl_example");
-        let object = reference.erase();
+        let reference = test_support::reference::<Class>(
+            "CL_ADT_URI_MAPPER",
+            "/sap/bc/adt/oo/classes/cl_adt_uri_mapper",
+        );
+        let object = test_support::properties(
+            &reference,
+            ClassPropertiesVersion::V4.media_type(),
+            "class-etag",
+            CLASS_XML,
+        );
 
         for (file_name, expected_uri) in [
             (
-                "zcl_example.clas.abap",
-                "/sap/bc/adt/oo/classes/zcl_example/source/main",
+                "cl_adt_uri_mapper.clas.abap",
+                "/sap/bc/adt/oo/classes/cl_adt_uri_mapper/source/main",
             ),
             (
-                "zcl_example.clas.testclasses.abap",
-                "/sap/bc/adt/oo/classes/zcl_example/includes/testclasses",
-            ),
-            (
-                "zcl_example.clas.locals.abap",
-                "/sap/bc/adt/oo/classes/zcl_example/includes/localtypes",
+                "cl_adt_uri_mapper.clas.testclasses.abap",
+                "/sap/bc/adt/oo/classes/cl_adt_uri_mapper/includes/testclasses",
             ),
         ] {
             let backing = resolve_file_name(file_name).unwrap().bind(&object).unwrap();
@@ -621,33 +635,55 @@ mod tests {
             assert_eq!(source.uri.as_str(), expected_uri);
             assert_eq!(source.object.uri(), reference.uri());
         }
+
+        assert!(matches!(
+            resolve_file_name("cl_adt_uri_mapper.clas.locals.abap")
+                .unwrap()
+                .bind(&object),
+            Err(ProjectionError::UnsupportedFileComponent { .. })
+        ));
     }
 
     #[test]
     fn language_properties_are_not_reported_as_source_files() {
-        let entry = test_support::repository_entry(
-            "ZCL_EXAMPLE",
-            Class::WORKBENCH_TYPE.as_str(),
-            "/sap/bc/adt/oo/classes/zcl_example",
+        let reference = test_support::reference::<Class>(
+            "CL_ADT_URI_MAPPER",
+            "/sap/bc/adt/oo/classes/cl_adt_uri_mapper",
         );
-        let resolved = resolve_file_name("zcl_example.clas.texts.en.properties").unwrap();
+        let object = test_support::properties(
+            &reference,
+            ClassPropertiesVersion::V4.media_type(),
+            "class-etag",
+            CLASS_XML,
+        );
+        let resolved = resolve_file_name("cl_adt_uri_mapper.clas.texts.en.properties").unwrap();
 
         assert!(matches!(
-            resolved.source_ref(&entry),
+            resolved.source_ref(&object),
             Err(ProjectionError::NotSourceFile { .. })
         ));
     }
 
     #[test]
     fn bindings_reject_the_wrong_name_and_object_family() {
-        let class =
-            test_support::reference::<Class>("ZCL_BOUND", "/sap/bc/adt/oo/classes/zcl_bound")
-                .erase();
-        let program = test_support::reference::<Program>(
-            "ZCL_BOUND",
-            "/sap/bc/adt/programs/programs/zcl_bound",
-        )
-        .erase();
+        let class_reference = test_support::reference::<Class>(
+            "CL_ADT_URI_MAPPER",
+            "/sap/bc/adt/oo/classes/cl_adt_uri_mapper",
+        );
+        let class = test_support::properties(
+            &class_reference,
+            ClassPropertiesVersion::V4.media_type(),
+            "class-etag",
+            CLASS_XML,
+        );
+        let program_reference =
+            test_support::reference::<Program>("Z_TEST", "/sap/bc/adt/programs/programs/z_test");
+        let program = test_support::properties(
+            &program_reference,
+            ProgramPropertiesVersion::V3.media_type(),
+            "program-etag",
+            PROGRAM_XML,
+        );
 
         assert!(matches!(
             resolve_file_name("zcl_other.clas.abap")
@@ -656,7 +692,7 @@ mod tests {
             Err(ProjectionError::BindingNameMismatch { .. })
         ));
         assert!(matches!(
-            resolve_file_name("zcl_bound.clas.abap")
+            resolve_file_name("z_test.clas.abap")
                 .unwrap()
                 .bind(&program),
             Err(ProjectionError::BindingTypeMismatch { .. })
@@ -679,8 +715,6 @@ mod tests {
 
     #[test]
     fn projected_metadata_uses_the_runtime_properties_codec() {
-        const CLASS_XML: &[u8] =
-            include_bytes!("../../zadt/tests/fixtures/class-cl-adt-uri-mapper-v4.xml");
         let reference = test_support::reference::<Class>(
             "CL_ADT_URI_MAPPER",
             "/sap/bc/adt/oo/classes/cl_adt_uri_mapper",
@@ -691,7 +725,7 @@ mod tests {
             "class-etag",
             CLASS_XML,
         );
-        let projection = project(&reference.erase()).unwrap();
+        let projection = project(&properties).unwrap();
         let metadata = projection
             .files
             .iter()
@@ -710,10 +744,10 @@ mod tests {
             merged.etag.as_ref().map(EntityTag::as_str),
             Some("class-etag")
         );
-        assert_eq!(merged.payload["@adtcore:description"], "Updated class");
+        assert_eq!(merged.properties["@adtcore:description"], "Updated class");
         assert_eq!(
-            merged.payload["adtcore:packageRef"],
-            properties.payload["adtcore:packageRef"]
+            merged.properties["adtcore:packageRef"],
+            properties.properties["adtcore:packageRef"]
         );
 
         let other = test_support::reference::<Class>("CL_OTHER", "/sap/bc/adt/oo/classes/cl_other");

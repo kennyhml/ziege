@@ -101,6 +101,12 @@ pub enum ObjectError {
     #[error("invalid object properties JSON: {0}")]
     InvalidPropertiesJson(#[source] serde_json::Error),
 
+    #[error("object type `{object_type}` does not support properties media type `{media_type}`")]
+    UnsupportedPropertiesMediaType {
+        object_type: GlobalWorkbenchType,
+        media_type: String,
+    },
+
     #[error("object link `{href}` could not be resolved: {source}")]
     InvalidLink { href: String, source: AdtUriError },
 

@@ -2,7 +2,8 @@ use std::fmt;
 
 use serde::{Serialize, de::DeserializeOwned};
 use zadt::{
-    Erased, GlobalWorkbenchType, JsonObjectProperties, ObjectRef, PropertyModel, SourceRef,
+    AdtObject, Class, DataElement, GlobalWorkbenchType, Include, ObjectRef, Package, Program,
+    PropertyModel, SourceRef,
 };
 
 use crate::{ProjectionError, registry};
@@ -142,7 +143,7 @@ impl FileSpec {
 
     pub(crate) fn bind(
         self,
-        object: &ObjectRef<Erased>,
+        object: &dyn ProjectionObject,
         language: Option<&str>,
     ) -> Result<Option<FileBacking>, ProjectionError> {
         self.descriptor.bind(object, language)
@@ -165,7 +166,7 @@ impl fmt::Debug for FileSpec {
 #[non_exhaustive]
 pub enum FileBacking {
     Source(SourceRef),
-    Properties(ObjectRef<Erased>),
+    Properties(ObjectRef<()>),
 }
 
 /// One materializable AFF file bound to its originating repository object.
@@ -206,10 +207,7 @@ impl ProjectedFile {
     }
 
     /// Renders runtime ADT properties through this file's AFF codec.
-    pub fn render_properties(
-        &self,
-        properties: &JsonObjectProperties,
-    ) -> Result<String, ProjectionError> {
+    pub fn render_properties(&self, properties: &AdtObject) -> Result<String, ProjectionError> {
         let FileBacking::Properties(object) = &self.backing else {
             return Err(ProjectionError::NotPropertiesFile {
                 component: self.component,
@@ -227,9 +225,9 @@ impl ProjectedFile {
     /// Merges edited AFF content into the original runtime ADT properties.
     pub fn merge_properties(
         &self,
-        original: &JsonObjectProperties,
+        original: &AdtObject,
         edited: &str,
-    ) -> Result<JsonObjectProperties, ProjectionError> {
+    ) -> Result<AdtObject, ProjectionError> {
         let FileBacking::Properties(object) = &self.backing else {
             return Err(ProjectionError::NotPropertiesFile {
                 component: self.component,
@@ -246,16 +244,16 @@ impl ProjectedFile {
 }
 
 fn ensure_properties_owner(
-    expected: &ObjectRef<Erased>,
-    properties: &JsonObjectProperties,
+    expected: &ObjectRef<()>,
+    properties: &AdtObject,
 ) -> Result<(), ProjectionError> {
-    if properties.resource().uri() != expected.uri()
-        || properties.resource().name() != expected.name()
-        || properties.resource().object_type() != expected.object_type()
+    if properties.reference().uri() != expected.uri()
+        || properties.reference().name() != expected.name()
+        || properties.reference().object_type() != expected.object_type()
     {
         return Err(ProjectionError::PropertiesBindingMismatch {
             expected: expected.uri().to_string(),
-            actual: properties.resource().uri().to_string(),
+            actual: properties.reference().uri().to_string(),
         });
     }
     Ok(())
@@ -282,7 +280,7 @@ pub(crate) trait FileDescriptor: fmt::Debug + Sync {
     fn component(&self) -> ComponentId;
     fn bind(
         &self,
-        object: &ObjectRef<Erased>,
+        object: &dyn ProjectionObject,
         language: Option<&str>,
     ) -> Result<Option<FileBacking>, ProjectionError>;
 
@@ -295,13 +293,114 @@ pub(crate) trait FileDescriptor: fmt::Debug + Sync {
     }
 }
 
+#[doc(hidden)]
+pub trait ProjectionObject {
+    fn reference(&self) -> ObjectRef<()>;
+    fn object_type(&self) -> &GlobalWorkbenchType;
+    fn source(&self) -> Result<Option<SourceRef>, zadt::ObjectError>;
+    fn source_component(&self, name: &str) -> Result<Option<SourceRef>, zadt::ObjectError>;
+}
+
+macro_rules! impl_source_projection_object {
+    ($($object:ty),+ $(,)?) => {
+        $(
+            impl ProjectionObject for $object {
+                fn reference(&self) -> ObjectRef<()> {
+                    self.reference().clone()
+                }
+
+                fn object_type(&self) -> &GlobalWorkbenchType {
+                    self.reference().object_type()
+                }
+
+                fn source(&self) -> Result<Option<SourceRef>, zadt::ObjectError> {
+                    <$object>::source(self).map(Some)
+                }
+
+                fn source_component(
+                    &self,
+                    _name: &str,
+                ) -> Result<Option<SourceRef>, zadt::ObjectError> {
+                    Ok(None)
+                }
+            }
+        )+
+    };
+}
+
+macro_rules! impl_sourceless_projection_object {
+    ($($object:ty),+ $(,)?) => {
+        $(
+            impl ProjectionObject for $object {
+                fn reference(&self) -> ObjectRef<()> {
+                    self.reference().clone()
+                }
+
+                fn object_type(&self) -> &GlobalWorkbenchType {
+                    self.reference().object_type()
+                }
+
+                fn source(&self) -> Result<Option<SourceRef>, zadt::ObjectError> {
+                    Ok(None)
+                }
+
+                fn source_component(
+                    &self,
+                    _name: &str,
+                ) -> Result<Option<SourceRef>, zadt::ObjectError> {
+                    Ok(None)
+                }
+            }
+        )+
+    };
+}
+
+impl ProjectionObject for AdtObject {
+    fn reference(&self) -> ObjectRef<()> {
+        self.reference().clone()
+    }
+
+    fn object_type(&self) -> &GlobalWorkbenchType {
+        self.reference().object_type()
+    }
+
+    fn source(&self) -> Result<Option<SourceRef>, zadt::ObjectError> {
+        match <AdtObject<serde_json::Value>>::source(self) {
+            Ok(source) => Ok(Some(source)),
+            Err(zadt::ObjectError::MissingRelation { relation: "source" }) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn source_component(&self, name: &str) -> Result<Option<SourceRef>, zadt::ObjectError> {
+        <AdtObject<serde_json::Value>>::source_component(self, name)
+    }
+}
+
+impl ProjectionObject for Class {
+    fn reference(&self) -> ObjectRef<()> {
+        self.reference().clone()
+    }
+
+    fn object_type(&self) -> &GlobalWorkbenchType {
+        self.reference().object_type()
+    }
+
+    fn source(&self) -> Result<Option<SourceRef>, zadt::ObjectError> {
+        Class::source(self).map(Some)
+    }
+
+    fn source_component(&self, name: &str) -> Result<Option<SourceRef>, zadt::ObjectError> {
+        Class::source_component(self, name)
+    }
+}
+
+impl_source_projection_object!(Include, Program);
+impl_sourceless_projection_object!(DataElement, Package);
+
 pub(crate) trait PropertiesCodec: fmt::Debug + Sync {
-    fn render(&self, properties: &JsonObjectProperties) -> Result<String, ProjectionError>;
-    fn merge(
-        &self,
-        original: &JsonObjectProperties,
-        edited: &str,
-    ) -> Result<JsonObjectProperties, ProjectionError>;
+    fn render(&self, properties: &AdtObject) -> Result<String, ProjectionError>;
+    fn merge(&self, original: &AdtObject, edited: &str) -> Result<AdtObject, ProjectionError>;
 }
 
 #[derive(Debug)]
@@ -333,18 +432,14 @@ impl FileDescriptor for SourceFileDescriptor {
 
     fn bind(
         &self,
-        object: &ObjectRef<Erased>,
+        object: &dyn ProjectionObject,
         _language: Option<&str>,
     ) -> Result<Option<FileBacking>, ProjectionError> {
         let source = match self.source_component {
             Some(component) => object.source_component(component),
             None => object.source(),
-        }
-        .ok_or_else(|| ProjectionError::UnsupportedFileComponent {
-            object_type: object.object_type().clone(),
-            component: self.component,
-        })?;
-        Ok(Some(FileBacking::Source(source)))
+        }?;
+        Ok(source.map(FileBacking::Source))
     }
 
     fn is_source(&self) -> bool {
@@ -370,7 +465,7 @@ impl FileDescriptor for UnbackedFileDescriptor {
 
     fn bind(
         &self,
-        _object: &ObjectRef<Erased>,
+        _object: &dyn ProjectionObject,
         _language: Option<&str>,
     ) -> Result<Option<FileBacking>, ProjectionError> {
         Ok(None)
@@ -378,7 +473,7 @@ impl FileDescriptor for UnbackedFileDescriptor {
 }
 
 pub(crate) fn decode_properties<P>(
-    properties: &JsonObjectProperties,
+    properties: &AdtObject,
     object_type: &'static str,
 ) -> Result<P, ProjectionError>
 where
@@ -390,18 +485,18 @@ where
             media_type: properties.media_type().to_owned(),
         });
     }
-    let payload: P = serde_json::from_value(properties.payload.clone()).map_err(|source| {
+    let payload: P = serde_json::from_value(properties.properties.clone()).map_err(|source| {
         ProjectionError::InvalidAdtProperties {
             object_type,
             source,
         }
     })?;
-    if payload.object_name() != properties.resource().name()
-        || payload.object_type() != properties.resource().object_type()
+    if payload.object_name() != properties.reference().name()
+        || payload.object_type() != properties.reference().object_type()
     {
         return Err(ProjectionError::InvalidPropertiesIdentity {
             object_type,
-            expected: properties.resource().to_string(),
+            expected: properties.reference().to_string(),
             actual: format!("{} ({})", payload.object_name(), payload.object_type()),
         });
     }
@@ -409,15 +504,15 @@ where
 }
 
 pub(crate) fn encode_properties<P>(
-    original: &JsonObjectProperties,
+    original: &AdtObject,
     payload: P,
     object_type: &'static str,
-) -> Result<JsonObjectProperties, ProjectionError>
+) -> Result<AdtObject, ProjectionError>
 where
     P: Serialize,
 {
     let mut merged = original.clone();
-    merged.payload =
+    merged.properties =
         serde_json::to_value(payload).map_err(|source| ProjectionError::InvalidAdtProperties {
             object_type,
             source,

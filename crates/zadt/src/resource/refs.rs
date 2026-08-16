@@ -1,6 +1,6 @@
 use std::{fmt, marker::PhantomData};
 
-use crate::{AdtUri, ObjectRef};
+use crate::{AdtUri, ObjectError, ObjectRef, resource::resolve_href};
 
 /// A typed related-resource location and the object that advertised it.
 ///
@@ -24,16 +24,6 @@ pub struct OwnedResourceRef<T> {
     pub etag: Option<String>,
 
     marker: PhantomData<fn() -> T>,
-}
-
-impl OwnedResourceRef<kind::Source> {
-    pub(crate) fn from_object_path(object: ObjectRef, path: &[&str]) -> Self {
-        let uri = object
-            .uri()
-            .append_segments(path)
-            .expect("static source path forms a valid ADT URI");
-        Self::new(object, uri)
-    }
 }
 
 impl<T> OwnedResourceRef<T> {
@@ -122,3 +112,17 @@ pub type ParserRef = OwnedResourceRef<kind::Parser>;
 /// relationship to validate an [`ObjectLock`](crate::ObjectLock) before creating
 /// the update operation.
 pub type SourceRef = OwnedResourceRef<kind::Source>;
+
+pub(crate) fn source_from_href(
+    object: ObjectRef<()>,
+    href: &str,
+) -> Result<SourceRef, ObjectError> {
+    let resolved = resolve_href(object.uri(), href).map_err(|source| ObjectError::InvalidLink {
+        href: href.to_owned(),
+        source,
+    })?;
+    let mut reference = SourceRef::new(object, resolved.target);
+    reference.query = resolved.query;
+    reference.fragment = resolved.fragment;
+    Ok(reference)
+}

@@ -1,7 +1,9 @@
 use serde::{Serialize, de::DeserializeOwned};
 
-use super::{GlobalWorkbenchType, ObjectType};
-use crate::{compatibility::media_types_match, target::TemplateTarget, vocabulary::CategoryId};
+use super::{GlobalWorkbenchType, ObjectRef, ObjectType};
+use crate::{
+    ObjectError, compatibility::media_types_match, target::TemplateTarget, vocabulary::CategoryId,
+};
 
 /// Marks an object capable of being executed immediately (not a job).
 ///
@@ -36,14 +38,19 @@ impl RunCapability {
     }
 }
 
-/// Marks an object as having a readable primary source resource.
+/// An object with a readable primary source resource.
 ///
 /// Usually, that source lives at `source/main`. Classes have multiple
-/// source components, but that is not covered by a marker trait capability
-/// as it is the exception.
-pub trait HasSource: ObjectType {
-    /// The primary source path relative to the object resource.
-    const SOURCE_PATH: &'static [&'static str] = &["source", "main"];
+/// source components, but that is the exception.
+pub trait Source: ObjectType {
+    #[doc(hidden)]
+    fn source_uri(properties: &Self::Properties) -> Option<&str>;
+}
+
+/// An object with source components advertised by its loaded properties.
+pub trait SourceComponents: Source {
+    #[doc(hidden)]
+    fn source_component_uri<'a>(properties: &'a Self::Properties, name: &str) -> Option<&'a str>;
 }
 
 /// A serializable ADT properties payload and its media-version vocabulary.
@@ -68,12 +75,6 @@ pub trait PropertyModel: std::fmt::Debug + DeserializeOwned + Serialize + Send +
     }
 }
 
-/// Marks an object as having readable typed properties.
-#[doc(hidden)]
-pub trait ReadProperties: ObjectType {
-    type Properties: PropertyModel;
-}
-
 /// Marks an object's properties as being updateable. The same payload
 /// is used for updating as is returned by the initial object query.
 ///
@@ -81,4 +82,37 @@ pub trait ReadProperties: ObjectType {
 /// can actually be changed effectively. ADT will simply disregard changes
 /// to fields that do not support modification through this API.
 #[doc(hidden)]
-pub trait UpdateProperties: ReadProperties {}
+pub trait UpdateProperties: ObjectType {
+    #[doc(hidden)]
+    fn properties_to_xml(
+        object: &ObjectRef<()>,
+        properties: serde_json::Value,
+    ) -> Result<String, ObjectError> {
+        let properties: Self::Properties =
+            serde_json::from_value(properties).map_err(ObjectError::InvalidPropertiesJson)?;
+        if properties.object_name() != object.name() {
+            return Err(ObjectError::UnexpectedObjectReference {
+                expected: object.to_string(),
+                actual: format!(
+                    "{} ({})",
+                    properties.object_name(),
+                    properties.object_type()
+                ),
+            });
+        }
+        if properties.object_type() != object.object_type() {
+            return Err(ObjectError::UnexpectedObjectType {
+                expected: object.object_type().clone(),
+                actual: properties.object_type().clone(),
+            });
+        }
+        Self::Properties::XML_NAMESPACES
+            .iter()
+            .fold(
+                serde_xml_rs::SerdeXml::new(),
+                |serializer, &(prefix, namespace)| serializer.namespace(prefix, namespace),
+            )
+            .to_string(&properties)
+            .map_err(ObjectError::InvalidRequest)
+    }
+}

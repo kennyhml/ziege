@@ -1,9 +1,10 @@
+use std::marker::PhantomData;
+
 use super::{
-    Class, DataElement, Erased, GlobalWorkbenchType, Include, ObjectRef, ObjectVersion, Package,
-    Program, PropertyModel, ReadProperties, RunCapability, UpdateProperties,
+    AdtObject, Class, DataElement, GlobalWorkbenchType, Include, ObjectRef, ObjectType,
+    ObjectVersion, Package, Program, PropertyModel, RunCapability,
 };
 use crate::{
-    JsonObjectProperties,
     client::{Client, Ready},
     error::{ObjectError, OperationError, ResponseError},
     operation::{Operation, OperationResponse},
@@ -17,37 +18,172 @@ pub(crate) trait RuntimeObjectTypeDescriptor: std::fmt::Debug + Sync {
 
     fn category(&self) -> CategoryId;
 
-    fn source_path(&self) -> Option<&'static [&'static str]>;
-
-    fn source_component_paths(&self) -> &'static [&'static [&'static str]];
-
     fn run(&self) -> Option<RunCapability>;
 
-    // Type erased access to building the properties request, this allows us
-    // to reuse the typed media version in the request
+    fn source(
+        &self,
+        object: &ObjectRef<()>,
+        properties: &serde_json::Value,
+    ) -> Result<Option<crate::SourceRef>, ObjectError>;
+
+    fn source_component(
+        &self,
+        object: &ObjectRef<()>,
+        properties: &serde_json::Value,
+        name: &str,
+    ) -> Result<Option<crate::SourceRef>, ObjectError>;
+
     fn properties_request(
         &self,
-        object: &ObjectRef<Erased>,
+        object: &ObjectRef<()>,
         version: Option<ObjectVersion>,
         client: &Client<Ready>,
     ) -> Result<AdtRequest, OperationError>;
 
-    // Convert the property response into a JSON payload. Through erasure, this
-    // will still go through the typed deserizalization it normally would.
     fn properties_to_json(
         &self,
-        object: &ObjectRef<Erased>,
+        object: &ObjectRef<()>,
         response: OperationResponse,
-    ) -> Result<JsonObjectProperties, ResponseError>;
+    ) -> Result<AdtObject, ResponseError>;
 
-    // Convert the properties from a generic JSON blob into the XML payload.
-    // Still go through the typed deserizalization it normally would.
     fn properties_to_xml(
         &self,
-        object: &ObjectRef<Erased>,
-        media_type: &'static str,
-        payload: serde_json::Value,
+        object: &ObjectRef<()>,
+        media_type: &str,
+        properties: serde_json::Value,
     ) -> Result<String, ObjectError>;
+
+    fn properties_media_type(&self, media_type: &str) -> Option<&'static str>;
+}
+
+pub(crate) trait RuntimeObjectType: ObjectType {
+    fn run() -> Option<RunCapability>;
+
+    fn source_uri(_properties: &Self::Properties) -> Option<&str> {
+        None
+    }
+
+    fn source_component_uri<'a>(_properties: &'a Self::Properties, _name: &str) -> Option<&'a str> {
+        None
+    }
+
+    fn properties_to_xml(
+        object: &ObjectRef<()>,
+        media_type: &str,
+        properties: serde_json::Value,
+    ) -> Result<String, ObjectError>;
+}
+
+pub(crate) struct ObjectTypeDescriptor<T>(PhantomData<fn() -> T>);
+
+impl<T> ObjectTypeDescriptor<T> {
+    pub(crate) const fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<T> std::fmt::Debug for ObjectTypeDescriptor<T> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_tuple("ObjectTypeDescriptor")
+            .field(&std::any::type_name::<T>())
+            .finish()
+    }
+}
+
+impl<T> RuntimeObjectTypeDescriptor for ObjectTypeDescriptor<T>
+where
+    T: RuntimeObjectType,
+{
+    fn object_type(&self) -> GlobalWorkbenchType {
+        T::WORKBENCH_TYPE
+    }
+
+    fn category(&self) -> CategoryId {
+        T::CATEGORY
+    }
+
+    fn run(&self) -> Option<RunCapability> {
+        T::run()
+    }
+
+    fn source(
+        &self,
+        object: &ObjectRef<()>,
+        properties: &serde_json::Value,
+    ) -> Result<Option<crate::SourceRef>, ObjectError> {
+        let properties: T::Properties = serde_json::from_value(properties.clone())
+            .map_err(ObjectError::InvalidPropertiesJson)?;
+        T::source_uri(&properties)
+            .map(|href| crate::resource::refs::source_from_href(object.clone(), href))
+            .transpose()
+    }
+
+    fn source_component(
+        &self,
+        object: &ObjectRef<()>,
+        properties: &serde_json::Value,
+        name: &str,
+    ) -> Result<Option<crate::SourceRef>, ObjectError> {
+        let properties: T::Properties = serde_json::from_value(properties.clone())
+            .map_err(ObjectError::InvalidPropertiesJson)?;
+        T::source_component_uri(&properties, name)
+            .map(|href| crate::resource::refs::source_from_href(object.clone(), href))
+            .transpose()
+    }
+
+    fn properties_request(
+        &self,
+        object: &ObjectRef<()>,
+        version: Option<ObjectVersion>,
+        client: &Client<Ready>,
+    ) -> Result<AdtRequest, OperationError> {
+        let resource = object.typed::<T>().ok_or_else(|| {
+            OperationError::Object(ObjectError::UnexpectedObjectType {
+                expected: T::WORKBENCH_TYPE,
+                actual: object.object_type().clone(),
+            })
+        })?;
+        let mut query = resource.query();
+        if let Some(version) = version {
+            query = query.version(version);
+        }
+        query.request(client)
+    }
+
+    fn properties_to_json(
+        &self,
+        object: &ObjectRef<()>,
+        response: OperationResponse,
+    ) -> Result<AdtObject, ResponseError> {
+        let resource = object
+            .typed::<T>()
+            .ok_or_else(|| ObjectError::UnexpectedObjectType {
+                expected: T::WORKBENCH_TYPE,
+                actual: object.object_type().clone(),
+            })?;
+        let loaded = resource.query().decode(response)?;
+        let (_reference, media_type, etag, properties) = loaded.into_parts();
+        Ok(AdtObject::new(
+            object.clone(),
+            media_type,
+            etag,
+            serde_json::to_value(properties)?,
+        ))
+    }
+
+    fn properties_to_xml(
+        &self,
+        object: &ObjectRef<()>,
+        media_type: &str,
+        properties: serde_json::Value,
+    ) -> Result<String, ObjectError> {
+        T::properties_to_xml(object, media_type, properties)
+    }
+
+    fn properties_media_type(&self, media_type: &str) -> Option<&'static str> {
+        T::Properties::version_from_media_type(media_type).map(T::Properties::media_type)
+    }
 }
 
 static OBJECT_TYPES: &[&dyn RuntimeObjectTypeDescriptor] = &[
@@ -74,88 +210,10 @@ pub(crate) fn unsupported_update(object_type: GlobalWorkbenchType) -> ObjectErro
     }
 }
 
-pub(crate) fn properties_request<T>(
-    object: &ObjectRef<Erased>,
-    version: Option<ObjectVersion>,
-    client: &Client<Ready>,
-) -> Result<AdtRequest, OperationError>
-where
-    T: ReadProperties,
-{
-    let resource = object.typed::<T>().ok_or_else(|| {
-        OperationError::Object(ObjectError::UnexpectedObjectType {
-            expected: T::WORKBENCH_TYPE,
-            actual: object.object_type().clone(),
-        })
-    })?;
-    let mut query = resource.query();
-    if let Some(version) = version {
-        query = query.version(version);
-    }
-    query.request(client)
-}
-
-pub(crate) fn properties_to_json<T>(
-    object: &ObjectRef<Erased>,
-    response: OperationResponse,
-) -> Result<JsonObjectProperties, ResponseError>
-where
-    T: ReadProperties,
-{
-    let resource = object
-        .typed::<T>()
-        .ok_or_else(|| ObjectError::UnexpectedObjectType {
-            expected: T::WORKBENCH_TYPE,
-            actual: object.object_type().clone(),
-        })?;
-    let properties = resource.query().decode(response)?;
-    Ok(JsonObjectProperties {
-        resource: object.clone(),
-        media_type: T::Properties::media_type(properties.media_version),
-        etag: properties.etag,
-        payload: serde_json::to_value(properties.payload)?,
-    })
-}
-
-pub(crate) fn properties_to_xml<T>(
-    object: &ObjectRef<Erased>,
-    _media_type: &'static str,
-    payload: serde_json::Value,
-) -> Result<String, ObjectError>
-where
-    T: UpdateProperties,
-{
-    let properties: T::Properties =
-        serde_json::from_value(payload).map_err(ObjectError::InvalidPropertiesJson)?;
-    if properties.object_name() != object.name() {
-        return Err(ObjectError::UnexpectedObjectReference {
-            expected: object.to_string(),
-            actual: format!(
-                "{} ({})",
-                properties.object_name(),
-                properties.object_type()
-            ),
-        });
-    }
-    if properties.object_type() != object.object_type() {
-        return Err(ObjectError::UnexpectedObjectType {
-            expected: object.object_type().clone(),
-            actual: properties.object_type().clone(),
-        });
-    }
-    T::Properties::XML_NAMESPACES
-        .iter()
-        .fold(
-            serde_xml_rs::SerdeXml::new(),
-            |serializer, &(prefix, namespace)| serializer.namespace(prefix, namespace),
-        )
-        .to_string(&properties)
-        .map_err(ObjectError::InvalidRequest)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{AdtUri, ClassProperties};
 
     #[test]
     fn registered_object_types_are_unique() {
@@ -168,5 +226,29 @@ mod tests {
                 "registered `{object_type}` more than once"
             );
         }
+    }
+
+    #[test]
+    fn runtime_source_resolution_uses_registered_properties() {
+        let properties: ClassProperties = serde_xml_rs::from_str(include_str!(
+            "../../tests/fixtures/class-cl-adt-uri-mapper-v4.xml"
+        ))
+        .unwrap();
+        let properties = serde_json::to_value(properties).unwrap();
+        let object = ObjectRef::<Class>::new(
+            "CL_ADT_URI_MAPPER".to_owned(),
+            AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
+        )
+        .erase();
+
+        let source = Class::DESCRIPTOR
+            .source(&object, &properties)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            source.uri.as_str(),
+            "/sap/bc/adt/oo/classes/cl_adt_uri_mapper/source/main"
+        );
     }
 }

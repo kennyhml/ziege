@@ -6,7 +6,7 @@ use serde::Deserialize;
 use crate::{
     client::{Client, ClientState},
     error::{ObjectError, OperationError, ResponseError},
-    objects::{Erased, ObjectRef, ObjectType},
+    objects::{AdtObject, ObjectRef},
     operation::{Operation, OperationResponse, Stateful, UserSessionId},
     protocol::{AdtRequest, AdtResponse},
     vocabulary::{PostAction, media_type, query_parameter},
@@ -197,8 +197,7 @@ impl fmt::Debug for ObjectLock {
     }
 }
 
-// Every statically identified object supports locking.
-impl<T: ObjectType> ObjectRef<T> {
+impl<T> ObjectRef<T> {
     /// Creates an object-lock operation.
     pub fn lock(&self, access_mode: AccessMode) -> LockRequest {
         LockRequest::new(self.erase(), access_mode)
@@ -216,17 +215,17 @@ impl<T: ObjectType> ObjectRef<T> {
     }
 }
 
-impl ObjectRef<Erased> {
+impl<P> AdtObject<P> {
     /// Creates an object-lock operation.
     pub fn lock(&self, access_mode: AccessMode) -> LockRequest {
-        LockRequest::new(self.clone(), access_mode)
+        LockRequest::new(self.reference().erase(), access_mode)
     }
 
     /// Creates an operation that releases this object's lock.
     pub fn unlock(&self, object_lock: ObjectLock) -> Result<UnlockRequest, ObjectError> {
-        if self.uri() != object_lock.object().uri() {
+        if self.reference().uri() != object_lock.object().uri() {
             return Err(ObjectError::ObjectLockMismatch {
-                expected: self.to_string(),
+                expected: self.reference().to_string(),
                 actual: object_lock.object().to_string(),
             });
         }

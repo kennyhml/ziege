@@ -1,22 +1,21 @@
 use serde::{Deserialize, Serialize};
 
+use crate::objects::macros::object_type;
 use crate::{AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType, PropertyModel};
-use zadt_macros::object_type;
 
-/// The ABAP Dictionary Data Element object type.
-#[object_type(
+object_type! {
+    /// The ABAP Dictionary Data Element object type.
+    pub type DataElement = DataElementProperties;
+
     workbench_type = "DTEL/DE",
     collection(
         scheme = "http://www.sap.com/wbobj/dictionary",
         term = "dtelde",
     ),
     capabilities(
-        ReadProperties(model = DataElementProperties),
         UpdateProperties,
     ),
-)]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct DataElement;
+}
 
 /// The SAP media-type version used to decode Data Element properties.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

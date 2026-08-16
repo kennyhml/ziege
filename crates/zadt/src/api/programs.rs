@@ -97,6 +97,13 @@ impl ObjectRef<Program> {
     }
 }
 
+impl Program {
+    /// Creates an operation that runs this loaded program.
+    pub fn run(&self) -> ProgramRun {
+        self.reference().retag::<Self>().run()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use async_trait::async_trait;
@@ -320,7 +327,7 @@ mod tests {
             .decode(program_properties_response(ProgramPropertiesVersion::V2))
             .unwrap();
         assert_eq!(representation.media_version(), ProgramPropertiesVersion::V2);
-        assert_eq!(representation.payload.name, "Z_TEST");
+        assert_eq!(representation.properties.name, "Z_TEST");
     }
 
     #[test]
@@ -329,7 +336,7 @@ mod tests {
             .decode(program_properties_response(ProgramPropertiesVersion::V3))
             .unwrap();
         assert_eq!(representation.media_version(), ProgramPropertiesVersion::V3);
-        assert_eq!(representation.payload.name, "Z_TEST");
+        assert_eq!(representation.properties.name, "Z_TEST");
     }
 
     #[test]
@@ -389,6 +396,20 @@ mod tests {
     }
 
     #[test]
+    fn loaded_program_revalidates_with_its_entity_tag() {
+        let program = program_properties_query()
+            .decode(program_properties_response(ProgramPropertiesVersion::V3))
+            .unwrap();
+        let request = program
+            .revalidate()
+            .unwrap()
+            .request(&ready_client(DISCOVERY_XML))
+            .unwrap();
+
+        assert_eq!(request.headers()[header::IF_NONE_MATCH], "program-etag");
+    }
+
+    #[test]
     fn rejects_not_modified_for_an_unconditional_program_properties_query() {
         let response = AdtResponse::new(StatusCode::NOT_MODIFIED, HeaderMap::new(), Vec::new());
         let error = program_properties_query()
@@ -411,7 +432,7 @@ mod tests {
         let representation = include_properties_query()
             .decode(operation_response(response))
             .unwrap();
-        assert_eq!(representation.payload.name, "ZTEST");
+        assert_eq!(representation.properties.name, "ZTEST");
         assert_eq!(
             representation.etag.as_ref().map(EntityTag::as_str),
             Some("include-etag")

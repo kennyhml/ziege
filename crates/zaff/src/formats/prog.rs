@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use zadt::{
-    Erased, GlobalWorkbenchType, Include, IncludeProperties, JsonObjectProperties, ObjectRef,
-    ObjectType, Program, ProgramProperties, PropertyModel,
+    AdtObject, GlobalWorkbenchType, Include, IncludeProperties, ObjectType, Program,
+    ProgramProperties, PropertyModel,
 };
 
 use crate::{
@@ -93,7 +93,7 @@ impl FileDescriptor for ProgramMetadata {
 
     fn bind(
         &self,
-        object: &ObjectRef<Erased>,
+        object: &dyn crate::format::ProjectionObject,
         _language: Option<&str>,
     ) -> Result<Option<FileBacking>, ProjectionError> {
         if object.object_type() != &Program::WORKBENCH_TYPE
@@ -104,7 +104,7 @@ impl FileDescriptor for ProgramMetadata {
                 component: self.component(),
             });
         }
-        Ok(Some(FileBacking::Properties(object.clone())))
+        Ok(Some(FileBacking::Properties(object.reference())))
     }
 
     fn properties_codec(&self) -> Option<&dyn PropertiesCodec> {
@@ -113,7 +113,7 @@ impl FileDescriptor for ProgramMetadata {
 }
 
 impl PropertiesCodec for ProgramMetadata {
-    fn render(&self, properties: &JsonObjectProperties) -> Result<String, ProjectionError> {
+    fn render(&self, properties: &AdtObject) -> Result<String, ProjectionError> {
         if ProgramProperties::version_from_media_type(properties.media_type()).is_some() {
             return render_program_properties(&decode_properties::<ProgramProperties>(
                 properties, "PROG",
@@ -122,11 +122,7 @@ impl PropertiesCodec for ProgramMetadata {
         render_include_properties(&decode_properties::<IncludeProperties>(properties, "PROG")?)
     }
 
-    fn merge(
-        &self,
-        original: &JsonObjectProperties,
-        edited: &str,
-    ) -> Result<JsonObjectProperties, ProjectionError> {
+    fn merge(&self, original: &AdtObject, edited: &str) -> Result<AdtObject, ProjectionError> {
         if ProgramProperties::version_from_media_type(original.media_type()).is_some() {
             let properties = decode_properties::<ProgramProperties>(original, "PROG")?;
             return encode_properties(
@@ -532,7 +528,7 @@ mod tests {
             "program-etag",
             PROGRAM_XML,
         )
-        .payload
+        .properties
     }
 
     fn include() -> IncludeProperties {
@@ -546,7 +542,7 @@ mod tests {
             "include-etag",
             INCLUDE_XML,
         )
-        .payload
+        .properties
     }
 
     #[test]

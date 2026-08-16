@@ -1,14 +1,17 @@
 use crate::vocabulary::CategoryId;
 
 mod capabilities;
-mod descriptors;
+pub(crate) mod descriptors;
 mod families;
+pub(crate) mod macros;
+mod object;
 mod reference;
 mod version;
 mod workbench;
 
-pub use capabilities::{HasSource, PropertyModel, ReadProperties, UpdateProperties};
 pub(crate) use capabilities::{ImmediateRun, RunCapability};
+pub use capabilities::{PropertyModel, Source, SourceComponents, UpdateProperties};
+pub(crate) use descriptors::ObjectTypeDescriptor;
 pub(crate) use descriptors::RuntimeObjectTypeDescriptor;
 pub use families::{
     Class, ClassProperties, ClassPropertiesVersion, ClassSourceComponent, ClassSourceProperties,
@@ -18,7 +21,8 @@ pub use families::{
     PackageUseAccess, Program, ProgramProperties, ProgramPropertiesVersion, SyntaxConfiguration,
     SyntaxLanguage,
 };
-pub use reference::{AdvertisedObjectReference, Erased, ObjectRef, ObjectReferences};
+pub use object::AdtObject;
+pub use reference::{AdvertisedObjectReference, ObjectRef, ObjectReferences};
 pub use version::ObjectVersion;
 pub use workbench::{GlobalWorkbenchType, InvalidWorkbenchType};
 
@@ -27,7 +31,10 @@ pub(crate) mod private {
 }
 
 /// Statically identified ADT object resource family.
-pub trait ObjectType: private::Sealed + Clone + Default + Send + Sync + Sized + 'static {
+pub trait ObjectType: private::Sealed + Send + Sync + Sized + 'static {
+    /// The complete properties payload loaded for this object family.
+    type Properties: PropertyModel;
+
     /// The object's global Workbench type.
     const WORKBENCH_TYPE: GlobalWorkbenchType;
 

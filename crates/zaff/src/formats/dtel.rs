@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use zadt::{
-    DataElement, DataElementDefinition, DataElementProperties, Erased, GlobalWorkbenchType,
-    JsonObjectProperties, ObjectRef, ObjectType,
+    AdtObject, DataElement, DataElementDefinition, DataElementProperties, GlobalWorkbenchType,
+    ObjectType,
 };
 
 use crate::{
@@ -62,7 +62,7 @@ impl FileDescriptor for DataElementMetadata {
 
     fn bind(
         &self,
-        object: &ObjectRef<Erased>,
+        object: &dyn crate::format::ProjectionObject,
         _language: Option<&str>,
     ) -> Result<Option<FileBacking>, ProjectionError> {
         if object.object_type() != &DataElement::WORKBENCH_TYPE {
@@ -71,7 +71,7 @@ impl FileDescriptor for DataElementMetadata {
                 component: self.component(),
             });
         }
-        Ok(Some(FileBacking::Properties(object.clone())))
+        Ok(Some(FileBacking::Properties(object.reference())))
     }
 
     fn properties_codec(&self) -> Option<&dyn PropertiesCodec> {
@@ -80,17 +80,13 @@ impl FileDescriptor for DataElementMetadata {
 }
 
 impl PropertiesCodec for DataElementMetadata {
-    fn render(&self, properties: &JsonObjectProperties) -> Result<String, ProjectionError> {
+    fn render(&self, properties: &AdtObject) -> Result<String, ProjectionError> {
         render_data_element_properties(&decode_properties::<DataElementProperties>(
             properties, "DTEL",
         )?)
     }
 
-    fn merge(
-        &self,
-        original: &JsonObjectProperties,
-        edited: &str,
-    ) -> Result<JsonObjectProperties, ProjectionError> {
+    fn merge(&self, original: &AdtObject, edited: &str) -> Result<AdtObject, ProjectionError> {
         let properties = decode_properties::<DataElementProperties>(original, "DTEL")?;
         encode_properties(
             original,
@@ -839,7 +835,7 @@ mod tests {
             "data-element-etag",
             DATA_ELEMENT_XML,
         )
-        .payload;
+        .properties;
         let properties_v2 = &mut properties;
         properties_v2.description = Some("Example data element".to_owned());
         properties_v2.master_language = Some("EN".to_owned());

@@ -30,8 +30,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let client = Client::new(transport).discover().await?;
 
-    let object = client.object::<Class>("ZZZZ")?;
+    let object = client
+        .object::<Class>("ZZZZ")?
+        .query()
+        .execute(&client)
+        .await?;
 
+    let source = object.source()?.query().execute(&client).await?;
     let res = object.activation().forced(false).execute(&client).await?;
 
     println!("{res:#?}");

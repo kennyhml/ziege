@@ -6,7 +6,7 @@ use stduritemplate::Value;
 use crate::{
     client::{Client, Ready},
     error::{ObjectError, OperationError, ResponseError},
-    objects::{Erased, GlobalWorkbenchType, ImmediateRun, ObjectRef, RunCapability},
+    objects::{AdtObject, GlobalWorkbenchType, ImmediateRun, ObjectRef, RunCapability},
     operation::{Operation, OperationResponse, Stateless},
     protocol::AdtRequest,
     vocabulary::{media_type, query_parameter},
@@ -121,7 +121,7 @@ impl Operation<Ready> for ObjectRun {
     }
 }
 
-impl ObjectRef<Erased> {
+impl ObjectRef<()> {
     /// Creates an immediate run operation when this object family supports it.
     pub fn run(&self) -> Result<ObjectRun, ObjectError> {
         let run = self
@@ -132,6 +132,13 @@ impl ObjectRef<Erased> {
                 capability: "immediate run",
             })?;
         Ok(ObjectRun::new(self.clone(), run))
+    }
+}
+
+impl AdtObject {
+    /// Creates an immediate run operation when this object family supports it.
+    pub fn run(&self) -> Result<ObjectRun, ObjectError> {
+        self.reference().erase().run()
     }
 }
 

@@ -5,7 +5,7 @@ use http::{Method, StatusCode};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
-    AdtRequest, AdtResponse, AdtUri, CategoryId, Client, Erased, GlobalWorkbenchType, ObjectError,
+    AdtRequest, AdtResponse, AdtUri, CategoryId, Client, GlobalWorkbenchType, ObjectError,
     ObjectRef, ObjectType, Operation, OperationError, OperationResponse, Package, Ready,
     RepositoryError, ResponseError, Stateless,
     resource::{AdvertisedLink, Relations},
@@ -211,7 +211,7 @@ pub struct RepositoryObjectEntry {
     pub version: Option<String>,
     pub package: String,
     /// A validated, type-erased reference to the ADT object resource.
-    pub reference: ObjectRef<Erased>,
+    pub reference: ObjectRef<()>,
     /// The corresponding virtual Workbench URI, when supplied by SAP.
     pub virtual_workbench_uri: Option<String>,
     pub expandable: bool,
@@ -255,7 +255,7 @@ impl<T: ObjectType> TryFrom<&RepositoryObjectEntry> for ObjectRef<T> {
 
 impl RepositoryObjectEntry {
     /// Returns the runtime-typed object reference advertised by RIS.
-    pub fn repository_object(&self) -> ObjectRef<Erased> {
+    pub fn repository_object(&self) -> ObjectRef<()> {
         self.reference.clone()
     }
 }
@@ -1281,10 +1281,6 @@ mod tests {
 
         assert_eq!(object, entry.reference);
         assert_eq!(object.typed::<Class>().unwrap().name(), entry.name);
-        assert_eq!(
-            object.source().unwrap().uri.as_str(),
-            "/sap/bc/adt/oo/classes/zcl_demo/source/main"
-        );
         assert_eq!(object.lock(AccessMode::Modify).object, entry.reference);
     }
 

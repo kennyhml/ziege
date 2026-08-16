@@ -30,8 +30,7 @@ pub use api::packages::{
 };
 pub use api::programs::{ProgramRun, ProgramRunResult};
 pub use api::properties::{
-    JsonObjectProperties, JsonObjectPropertiesQuery, JsonObjectPropertiesUpdate, ObjectProperties,
-    ObjectPropertiesQuery, ObjectPropertiesUpdate,
+    AdtObjectQuery, AdtObjectUpdate, ObjectPropertiesQuery, ObjectPropertiesUpdate,
 };
 pub use api::repository::{
     RepositoryContent, RepositoryContentOperation, RepositoryContentQuery,
@@ -63,14 +62,14 @@ pub use error::{
     OperationError, RepositoryError, ResponseError, TransportError,
 };
 pub use objects::{
-    AdvertisedObjectReference, Class, ClassProperties, ClassPropertiesVersion,
+    AdtObject, AdvertisedObjectReference, Class, ClassProperties, ClassPropertiesVersion,
     ClassSourceComponent, ClassSourceProperties, DataElement, DataElementDefinition,
-    DataElementProperties, DataElementPropertiesVersion, Erased, GlobalWorkbenchType, HasSource,
-    Include, IncludeProperties, IncludePropertyVersion, InvalidWorkbenchType, ObjectRef,
-    ObjectReferences, ObjectType, ObjectVersion, Package, PackageAssignment, PackageAttributes,
-    PackageProperties, PackagePropertiesVersion, PackageTransport, PackageUseAccess, Program,
-    ProgramProperties, ProgramPropertiesVersion, PropertyModel, ReadProperties,
-    SyntaxConfiguration, SyntaxLanguage, UpdateProperties,
+    DataElementProperties, DataElementPropertiesVersion, GlobalWorkbenchType, Include,
+    IncludeProperties, IncludePropertyVersion, InvalidWorkbenchType, ObjectRef, ObjectReferences,
+    ObjectType, ObjectVersion, Package, PackageAssignment, PackageAttributes, PackageProperties,
+    PackagePropertiesVersion, PackageTransport, PackageUseAccess, Program, ProgramProperties,
+    ProgramPropertiesVersion, PropertyModel, Source, SourceComponents, SyntaxConfiguration,
+    SyntaxLanguage, UpdateProperties,
 };
 pub use operation::{
     BatchError, BatchKey, BatchOperation, BatchResponses, Batched, Execute, IfNoneMatch, Operation,

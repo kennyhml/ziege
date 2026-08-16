@@ -97,7 +97,7 @@ async fn data_element_properties_use_one_read_write_representation() {
         Some("data-element-etag")
     );
     assert_eq!(
-        response.payload.definition.type_name.as_deref(),
+        response.properties.definition.type_name.as_deref(),
         Some("CHAR0008")
     );
 
@@ -204,8 +204,8 @@ async fn runtime_data_element_update_reuses_json_properties_in_the_lock_session(
     let reference = client.object::<DataElement>("ZTFRWTFRT").unwrap();
     let object = reference.erase();
     let mut properties = object.query().unwrap().execute(&client).await.unwrap();
-    assert_eq!(properties.resource(), &object);
-    properties.payload["@adtcore:description"] = "Updated description".into();
+    assert_eq!(&properties.reference().erase(), &object);
+    properties.properties["@adtcore:description"] = "Updated description".into();
     let session = client.create_user_session();
     let object_lock = object
         .lock(AccessMode::Modify)
@@ -237,7 +237,7 @@ async fn runtime_data_element_update_reuses_json_properties_in_the_lock_session(
         canonical.etag.as_ref().map(|etag| etag.as_str()),
         Some("data-element-etag-2")
     );
-    assert_eq!(canonical.payload["@adtcore:description"], "tfarFAR");
+    assert_eq!(canonical.properties["@adtcore:description"], "tfarFAR");
     logon.assert_async().await;
     discovery.assert_async().await;
     csrf.assert_async().await;

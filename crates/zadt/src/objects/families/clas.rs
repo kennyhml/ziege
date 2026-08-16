@@ -1,34 +1,43 @@
-use super::super::{AdvertisedObjectReference, GlobalWorkbenchType, ObjectRef, PropertyModel};
-use crate::resource::{AdvertisedLink, SourceRef};
+use super::super::{
+    AdvertisedObjectReference, GlobalWorkbenchType, ObjectRef, PropertyModel, Source,
+    SourceComponents,
+};
+use crate::objects::macros::object_type;
+use crate::resource::AdvertisedLink;
 use serde::{Deserialize, Serialize};
-use zadt_macros::object_type;
 
-/// An ABAP class object.
-#[object_type(
+object_type! {
+    /// An ABAP global class object.
+    ///
+    /// Classes are one of the more special objects ADT provides, because the main
+    /// global class include that ADT lets us edit is, in reality, a projection of
+    /// individual includes. Each method, the declaration, testclasses, and more
+    /// have their own include under the hood.
+    ///
+    /// In ADT, only a small subset of the includes matter for us - such as the main
+    /// source, local types and the testclasses. [`ClassSourceComponent`] describes
+    /// the full list of possible source includes. Which includes are available also
+    /// differs based on how old the class is. Legacy classes follow a different layout.
+    pub type Class = ClassProperties;
+
     workbench_type = "CLAS/OC",
     collection(
         scheme = "http://www.sap.com/adt/categories/oo",
         term = "classes",
     ),
     capabilities(
-        HasSource,
-        SourceComponents(ClassSourceComponent),
+        Source,
+        SourceComponents,
         Run,
-        ReadProperties(model = ClassProperties),
         UpdateProperties,
     ),
-)]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Class;
+}
 
-/// The SAP media-type version used to decode class properties.
+/// The media-type version used to decode class properties.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ClassPropertiesVersion {
-    /// Class properties V2.
     V2,
-    /// Class properties V3.
     V3,
-    /// Class properties V4.
     V4,
 }
 
@@ -42,7 +51,14 @@ impl ClassPropertiesVersion {
     }
 }
 
-/// The currently modeled class-properties payload.
+/// The properties describing a class. Contains editable information, such
+/// as `description` and `shared-memory-enabled`.
+///
+/// The same payload is used for updating as is retrieved when reading the
+/// properties initially.
+///
+/// Despite ADT advertising several different versions of the media, they
+/// all seem to contain the same fields.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename = "class:abapClass", deny_unknown_fields)]
 pub struct ClassProperties {
@@ -179,6 +195,26 @@ impl PropertyModel for ClassProperties {
     }
 }
 
+impl Source for Class {
+    fn source_uri(properties: &Self::Properties) -> Option<&str> {
+        properties
+            .sources
+            .iter()
+            .find(|source| source.include_type == "main")
+            .map(|source| source.source_uri.as_str())
+    }
+}
+
+impl SourceComponents for Class {
+    fn source_component_uri<'a>(properties: &'a Self::Properties, name: &str) -> Option<&'a str> {
+        properties
+            .sources
+            .iter()
+            .find(|source| source.include_type == name)
+            .map(|source| source.source_uri.as_str())
+    }
+}
+
 /// The syntax configuration embedded in a class-properties payload.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -243,8 +279,7 @@ pub struct ClassSourceProperties {
 ///
 /// Local class includes are ADT resources beneath the class object rather than
 /// independent repository objects.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, zadt_macros::SourceComponent)]
-#[source_component(prefix = "includes")]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ClassSourceComponent {
     Definitions,
     Implementations,
@@ -253,12 +288,38 @@ pub enum ClassSourceComponent {
     LocalTypes,
 }
 
-impl ObjectRef<Class> {
-    /// Resolves one of the secondary source resources owned by this class.
-    pub fn component_source(&self, component: ClassSourceComponent) -> SourceRef {
-        SourceRef::from_object_path(self.erase(), component.path())
+impl ClassSourceComponent {
+    /// Returns the component name used by ADT.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Definitions => "definitions",
+            Self::Implementations => "implementations",
+            Self::Macros => "macros",
+            Self::TestClasses => "testclasses",
+            Self::LocalTypes => "localtypes",
+        }
     }
 
+    /// Parses a component name used by ADT.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "definitions" => Some(Self::Definitions),
+            "implementations" => Some(Self::Implementations),
+            "macros" => Some(Self::Macros),
+            "testclasses" => Some(Self::TestClasses),
+            "localtypes" => Some(Self::LocalTypes),
+            _ => None,
+        }
+    }
+}
+
+impl AsRef<str> for ClassSourceComponent {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl ObjectRef<Class> {
     #[cfg(test)]
     pub(crate) fn for_test(name: &str, uri: crate::AdtUri) -> Self {
         Self::new(name.to_ascii_uppercase(), uri)
@@ -275,6 +336,22 @@ mod tests {
 
     fn parse(body: &str) -> Result<ClassProperties, serde_xml_rs::Error> {
         serde_xml_rs::from_str(body)
+    }
+
+    #[test]
+    fn source_component_names_round_trip() {
+        for component in [
+            ClassSourceComponent::Definitions,
+            ClassSourceComponent::Implementations,
+            ClassSourceComponent::Macros,
+            ClassSourceComponent::TestClasses,
+            ClassSourceComponent::LocalTypes,
+        ] {
+            assert_eq!(
+                ClassSourceComponent::from_name(component.as_str()),
+                Some(component)
+            );
+        }
     }
 
     #[test]
