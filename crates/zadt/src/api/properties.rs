@@ -1,4 +1,4 @@
-use http::{Method, StatusCode, header};
+use http::{Method, StatusCode};
 
 use crate::{
     AdtObject, ObjectError, ObjectLock, TransportNumber,
@@ -166,9 +166,13 @@ where
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        decode_optional_response(response, |response| {
-            decode_properties::<T>(&self.resource.erase(), response)
-        })
+        if !response.status().is_success() {
+            return Err(ResponseError::unexpected_status(response.response()));
+        }
+        if response.body().is_empty() {
+            return Ok(None);
+        }
+        decode_properties::<T>(&self.resource.erase(), response).map(Some)
     }
 }
 
@@ -228,13 +232,19 @@ where
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        decode_optional_response(response, |response| {
-            let descriptor = self.resource.descriptor().ok_or_else(|| {
-                self.resource
-                    .unsupported_capability("object properties update")
-            })?;
-            descriptor.properties_to_json(&self.resource, response)
-        })
+        if !response.status().is_success() {
+            return Err(ResponseError::unexpected_status(response.response()));
+        }
+        if response.body().is_empty() {
+            return Ok(None);
+        }
+        let descriptor = self.resource.descriptor().ok_or_else(|| {
+            self.resource
+                .unsupported_capability("object properties update")
+        })?;
+        descriptor
+            .properties_to_json(&self.resource, response)
+            .map(Some)
     }
 }
 
@@ -285,50 +295,14 @@ where
     if response.status() != StatusCode::OK && !response.status().is_success() {
         return Err(ResponseError::unexpected_status(response.response()));
     }
-    let content_type = response
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .ok_or(ResponseError::MissingContentType {
-            category: T::CATEGORY,
-        })?;
-    let media_version = T::Properties::version_from_media_type(content_type).ok_or_else(|| {
-        ResponseError::UnsupportedContentType {
-            category: T::CATEGORY,
-            content_type: content_type.to_owned(),
-            supported: T::Properties::SUPPORTED_VERSIONS
-                .iter()
-                .map(|version| T::Properties::media_type(*version).to_owned())
-                .collect(),
-        }
-    })?;
+    let content_type = response.content_type(T::CATEGORY)?;
+    let media_version = T::Properties::require_version_from_media_type(content_type, T::CATEGORY)?;
     let etag = response.entity_tag();
-    let payload: T::Properties =
-        serde_xml_rs::from_reader(response.body()).map_err(ObjectError::InvalidResponse)?;
-    if !payload.belongs_to(resource) {
-        return Err(ObjectError::UnexpectedObjectReference {
-            expected: resource.to_string(),
-            actual: format!("{} ({})", payload.object_name(), payload.object_type()),
-        }
-        .into());
-    }
+    let payload = T::Properties::from_xml_for(response.body(), resource)?;
     Ok(AdtObject::new(
         resource.clone(),
         T::Properties::media_type(media_version),
         etag,
         payload,
     ))
-}
-
-pub(crate) fn decode_optional_response<P>(
-    response: OperationResponse,
-    decode: impl FnOnce(OperationResponse) -> Result<P, ResponseError>,
-) -> Result<Option<P>, ResponseError> {
-    if !response.status().is_success() {
-        return Err(ResponseError::unexpected_status(response.response()));
-    }
-    if response.body().is_empty() || response.status() == StatusCode::NO_CONTENT {
-        return Ok(None);
-    }
-    decode(response).map(Some)
 }

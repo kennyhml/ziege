@@ -1,7 +1,7 @@
 use std::{borrow::Cow, fmt};
 
 use derive_builder::Builder;
-use http::{Method, StatusCode, header};
+use http::{Method, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -1198,15 +1198,7 @@ impl Operation<Ready> for TransportCheck {
             return Err(CtsError::MissingTransportCheckResponse.into());
         }
 
-        let Some(content_type) = response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-        else {
-            return Err(ResponseError::MissingContentType {
-                category: TRANSPORT_CHECKS_CATEGORY,
-            });
-        };
+        let content_type = response.content_type(TRANSPORT_CHECKS_CATEGORY)?;
 
         if !media_types_match(TRANSPORT_CHECK_MEDIA_TYPE, content_type) {
             return Err(ResponseError::UnsupportedContentType {
@@ -1307,15 +1299,7 @@ impl Operation<Ready> for TransportsQuery {
             return Ok(TransportRequests::default());
         }
 
-        let Some(content_type) = response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-        else {
-            return Err(ResponseError::MissingContentType {
-                category: TRANSPORTS_CATEGORY,
-            });
-        };
+        let content_type = response.content_type(TRANSPORTS_CATEGORY)?;
 
         if !media_types_match(TRANSPORT_REQUESTS_MEDIA_TYPE, content_type) {
             return Err(ResponseError::UnsupportedContentType {
@@ -1381,15 +1365,7 @@ impl Operation<Ready> for TransportPropertiesQuery {
             return Ok(None);
         }
 
-        let Some(content_type) = response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-        else {
-            return Err(ResponseError::MissingContentType {
-                category: TRANSPORTS_CATEGORY,
-            });
-        };
+        let content_type = response.content_type(TRANSPORTS_CATEGORY)?;
 
         if !media_types_match(TRANSPORT_REQUEST_MEDIA_TYPE, content_type) {
             return Err(ResponseError::UnsupportedContentType {
@@ -1481,15 +1457,7 @@ impl Operation<Ready> for TransportCreate {
             return Err(CtsError::MissingTransportCreationResponse.into());
         }
 
-        let Some(content_type) = response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-        else {
-            return Err(ResponseError::MissingContentType {
-                category: TRANSPORTS_CATEGORY,
-            });
-        };
+        let content_type = response.content_type(TRANSPORTS_CATEGORY)?;
 
         if media_types_match(TRANSPORT_CREATE_RESULT_MEDIA_TYPE, content_type) {
             TransportCreation::parse(response.body()).map_err(Into::into)

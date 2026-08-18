@@ -6,8 +6,8 @@ use secrecy::{ExposeSecret, SecretString};
 use uuid::Uuid;
 
 use crate::{
-    AdtRequest, AdtResponse, AdtUri, Client, ClientState, EntityTag, OperationError, Ready,
-    ResponseError, TransportError, target::CORE_DISCOVERY,
+    AdtRequest, AdtResponse, AdtUri, CategoryId, Client, ClientState, EntityTag, OperationError,
+    Ready, ResponseError, TransportError, target::CORE_DISCOVERY,
 };
 
 mod batch;
@@ -160,6 +160,14 @@ impl OperationResponse {
     /// Returns the response body.
     pub fn body(&self) -> &[u8] {
         self.response.body()
+    }
+
+    /// Returns the response Content-Type header as text.
+    pub fn content_type(&self, category: CategoryId) -> Result<&str, ResponseError> {
+        self.headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .ok_or(ResponseError::MissingContentType { category })
     }
 
     /// Returns the response entity tag when its header value is valid text.

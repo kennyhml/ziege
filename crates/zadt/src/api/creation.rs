@@ -1,14 +1,14 @@
 use http::Method;
 
 use crate::{
-    AdtObject, AdtRequest, Client, ObjectError, ObjectRef, Operation, OperationError,
+    AdtObject, AdtRequest, CategoryId, Client, ObjectError, ObjectRef, Operation, OperationError,
     OperationResponse, PropertyModel, Ready, ResponseError, Stateless, TransportNumber,
-    objects::{Create, CreationPropertyModel, RuntimeObjectTypeDescriptor},
+    objects::{Create, CreationPropertyModel},
     target::CollectionTarget,
     vocabulary::query_parameter,
 };
 
-use super::properties::{decode_optional_response, decode_properties};
+use super::properties::decode_properties;
 
 /// Creates a repository object from a family-specific creation payload.
 ///
@@ -16,9 +16,8 @@ use super::properties::{decode_optional_response, decode_properties};
 /// families that return their properties decode to a loaded object.
 ///
 /// The operation supports both typed and generic JSON payloads. In a typed
-/// context, the response can also be decoded correctly. Otherwise, it can
-/// be parsed through the object descriptor but is then normalized to the
-/// JSON response.
+/// context, the response is also typed. Otherwise, it is parsed through
+/// the object descriptor but is then normalized to the JSON response.
 ///
 /// No single handler can be named, because each object type implements
 /// its own handler. This also causes the inconsistency in responses.
@@ -38,25 +37,14 @@ impl<T, P> CreateObjectRequest<T, P> {
         self
     }
 
-    /// Gets the descriptor for the object type we are creating. Because the
-    ///
-    /// operation has no constraints on `T` to support both JSON and typed
-    /// objects, the descriptor is used in either case.
-    fn descriptor(&self) -> Result<&'static dyn RuntimeObjectTypeDescriptor, ObjectError> {
-        self.reference
-            .descriptor()
-            .ok_or_else(|| ObjectError::UnsupportedObjectType {
-                object_type: self.reference.object_type().clone(),
-            })
-    }
-
     /// Creates the request and attaches the normalized body bytes.
-    fn request_with_body(
+    fn build_request(
         &self,
         client: &Client<Ready>,
+        object_category: CategoryId,
         body: Vec<u8>,
     ) -> Result<AdtRequest, OperationError> {
-        let target = CollectionTarget::new(self.descriptor()?.category());
+        let target = CollectionTarget::new(object_category);
         let mut request = target.request(client, Method::POST)?;
         request.set_content_type(self.media_type);
         request.set_body(body);
@@ -77,13 +65,21 @@ where
     type Response = Option<AdtObject<T::Properties>>;
 
     fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        self.request_with_body(client, self.payload.to_xml_for(&self.reference)?)
+        self.build_request(
+            client,
+            T::CATEGORY,
+            self.payload.to_xml_for(&self.reference)?,
+        )
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        decode_optional_response(response, |response| {
-            decode_properties::<T>(&self.reference.erase(), response)
-        })
+        if !response.status().is_success() {
+            return Err(ResponseError::unexpected_status(response.response()));
+        }
+        if response.body().is_empty() {
+            return Ok(None);
+        }
+        decode_properties::<T>(&self.reference.erase(), response).map(Some)
     }
 }
 
@@ -93,17 +89,25 @@ impl Operation<Ready> for CreateObjectRequest<(), serde_json::Value> {
     type Response = Option<AdtObject>;
 
     fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        let body = self
-            .descriptor()?
-            .creation_properties_to_xml(&self.reference, self.payload.clone())?;
-        self.request_with_body(client, body)
+        let descriptor = self.reference.require_descriptor()?;
+        self.build_request(
+            client,
+            descriptor.category(),
+            descriptor.creation_properties_to_xml(&self.reference, self.payload.clone())?,
+        )
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        decode_optional_response(response, |response| {
-            self.descriptor()?
-                .properties_to_json(&self.reference, response)
-        })
+        if !response.status().is_success() {
+            return Err(ResponseError::unexpected_status(response.response()));
+        }
+        if response.body().is_empty() {
+            return Ok(None);
+        }
+        self.reference
+            .require_descriptor()?
+            .properties_to_json(&self.reference, response)
+            .map(Some)
     }
 }
 
@@ -112,6 +116,12 @@ impl<T> ObjectRef<T>
 where
     T: Create,
 {
+    /// Creates a typed [`CreateObjectRequest`] for this object.
+    ///
+    /// The properties to create the object with should be set prior
+    /// to calling this method. Identitify related properties, such as
+    /// name and object type, are set from the identify of the object
+    /// reference the method is called on.
     pub fn create(
         &self,
         mut payload: T::CreateProperties,
@@ -128,6 +138,12 @@ where
 
 /// Implementation for untyped objects
 impl ObjectRef<()> {
+    /// Creates a runtime [`CreateObjectRequest`] for this object.
+    ///
+    /// The properties to create the object with should be set prior
+    /// to calling this method. Identitify related properties, such as
+    /// name and object type, are set from the identify of the object
+    /// reference the method is called on when the request is built.
     pub fn create(
         &self,
         payload: serde_json::Value,

@@ -2,7 +2,8 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use super::{GlobalWorkbenchType, ObjectRef, ObjectType};
 use crate::{
-    ObjectError, compatibility::media_types_match, target::TemplateTarget, vocabulary::CategoryId,
+    ObjectError, ResponseError, compatibility::media_types_match, target::TemplateTarget,
+    vocabulary::CategoryId,
 };
 
 /// Marks an object capable of being executed immediately (not a job).
@@ -61,16 +62,44 @@ pub trait PropertyModel: std::fmt::Debug + DeserializeOwned + Serialize + Send +
     const SUPPORTED_VERSIONS: &'static [Self::Version];
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[];
 
+    /// Gets the media type of the provided object version
     fn media_type(version: Self::Version) -> &'static str;
 
+    /// The name of the object these properties belong to
     fn object_name(&self) -> &str;
 
+    /// The workbench object type these properties belong to
     fn object_type(&self) -> &GlobalWorkbenchType;
 
+    /// Verifies whether the properties belong to the given object.
+    ///
+    /// This is to prevent accidents where one objects properties are written to another.
     fn belongs_to<T>(&self, reference: &ObjectRef<T>) -> bool {
         self.object_name() == reference.name() && self.object_type() == reference.object_type()
     }
 
+    /// Deserializes properties and verifies that they belong to the given object.
+    fn from_xml_for<T>(body: &[u8], reference: &ObjectRef<T>) -> Result<Self, ObjectError> {
+        let properties: Self =
+            serde_xml_rs::from_reader(body).map_err(ObjectError::InvalidResponse)?;
+        if !properties.belongs_to(reference) {
+            return Err(ObjectError::UnexpectedObjectReference {
+                expected: reference.to_string(),
+                actual: format!(
+                    "{} ({})",
+                    properties.object_name(),
+                    properties.object_type()
+                ),
+            });
+        }
+        Ok(properties)
+    }
+
+    /// A helper function that serializes the payload while verifying that the properties
+    /// truly belong to the given object.
+    ///
+    /// The serialization also takes into account the xml namespaces used for the properties
+    /// of this object type.
     fn to_xml_for<T>(&self, reference: &ObjectRef<T>) -> Result<Vec<u8>, ObjectError> {
         if !self.belongs_to(reference) {
             return Err(ObjectError::UnexpectedObjectReference {
@@ -95,6 +124,23 @@ pub trait PropertyModel: std::fmt::Debug + DeserializeOwned + Serialize + Send +
             .copied()
             .find(|version| media_types_match(Self::media_type(*version), media_type))
     }
+
+    /// Resolves a supported media version or reports the complete expected contract.
+    fn require_version_from_media_type(
+        media_type: &str,
+        category: CategoryId,
+    ) -> Result<Self::Version, ResponseError> {
+        Self::version_from_media_type(media_type).ok_or_else(|| {
+            ResponseError::UnsupportedContentType {
+                category,
+                content_type: media_type.to_owned(),
+                supported: Self::SUPPORTED_VERSIONS
+                    .iter()
+                    .map(|version| Self::media_type(*version).to_owned())
+                    .collect(),
+            }
+        })
+    }
 }
 
 /// A creation payload whose object identity is supplied by its reference.
@@ -114,18 +160,8 @@ pub trait Create: ObjectType {
     #[doc(hidden)]
     fn creation_properties_to_xml(
         reference: &ObjectRef<()>,
-        mut properties: serde_json::Value,
+        properties: serde_json::Value,
     ) -> Result<Vec<u8>, ObjectError> {
-        if let serde_json::Value::Object(values) = &mut properties {
-            values.insert(
-                "@adtcore:name".to_owned(),
-                serde_json::Value::String(reference.name().to_owned()),
-            );
-            values.insert(
-                "@adtcore:type".to_owned(),
-                serde_json::Value::String(reference.object_type().to_string()),
-            );
-        }
         let mut properties: Self::CreateProperties =
             serde_json::from_value(properties).map_err(ObjectError::InvalidPropertiesJson)?;
         properties.set_identity(reference);

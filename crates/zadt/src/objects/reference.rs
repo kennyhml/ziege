@@ -60,6 +60,15 @@ impl<T> ObjectRef<T> {
         descriptors::object_type_descriptor(&self.object_type)
     }
 
+    pub(crate) fn require_descriptor(
+        &self,
+    ) -> Result<&'static dyn descriptors::RuntimeObjectTypeDescriptor, ObjectError> {
+        self.descriptor()
+            .ok_or_else(|| ObjectError::UnsupportedObjectType {
+                object_type: self.object_type().clone(),
+            })
+    }
+
     pub(crate) fn same_identity<U>(&self, other: &ObjectRef<U>) -> bool {
         self.uri == other.uri && self.name == other.name && self.object_type == other.object_type
     }
