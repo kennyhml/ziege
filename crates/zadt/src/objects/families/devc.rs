@@ -4,12 +4,13 @@ use zadt_macros::object_type;
 use crate::{AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType, PropertyModel};
 
 #[object_type(
+    properties = PackageProperties,
     workbench_type = "DEVC/K",
     collection(scheme = "http://www.sap.com/wbobj/packages", term = "devck",),
     capabilities()
 )]
 /// The package (devclass) object type.
-pub type Package = PackageProperties;
+pub struct Package;
 
 /// The SAP media-type version used to decode package properties.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

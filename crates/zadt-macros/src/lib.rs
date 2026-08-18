@@ -7,12 +7,12 @@ use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::{
-    Attribute, Data, DeriveInput, Error, Expr, Fields, GenericArgument, Ident, Item, ItemType,
+    Attribute, Data, DeriveInput, Error, Expr, Fields, GenericArgument, Ident, Item, ItemStruct,
     LitStr, Meta, PathArguments, Result, Token, Type, parenthesized,
 };
 
 #[proc_macro_attribute]
-/// Declares a loaded ADT object family and its static and runtime capabilities.
+/// Declares an ADT object-family marker and its static and runtime capabilities.
 pub fn object_type(attribute: TokenStream, item: TokenStream) -> TokenStream {
     expand_object_type(attribute.into(), item.into())
         .unwrap_or_else(Error::into_compile_error)
@@ -22,11 +22,11 @@ pub fn object_type(attribute: TokenStream, item: TokenStream) -> TokenStream {
 fn expand_object_type(attribute: TokenStream2, item: TokenStream2) -> Result<TokenStream2> {
     let arguments = syn::parse2::<ObjectTypeArguments>(attribute)?;
     let item = match syn::parse2::<Item>(item)? {
-        Item::Type(item) => item,
+        Item::Struct(item) => item,
         item => {
             return Err(Error::new_spanned(
                 item,
-                "`object_type` can only be applied to a type alias",
+                "`object_type` can only be applied to a unit struct",
             ));
         }
     };
@@ -34,22 +34,31 @@ fn expand_object_type(attribute: TokenStream2, item: TokenStream2) -> Result<Tok
     if !item.generics.params.is_empty() || item.generics.where_clause.is_some() {
         return Err(Error::new_spanned(
             &item.generics,
-            "`object_type` does not support generic type aliases",
+            "`object_type` does not support generic marker structs",
+        ));
+    }
+    if !matches!(item.fields, Fields::Unit) {
+        return Err(Error::new_spanned(
+            &item.fields,
+            "`object_type` marker structs cannot have fields",
         ));
     }
 
     expand_object_type_item(item, arguments)
 }
 
-fn expand_object_type_item(item: ItemType, arguments: ObjectTypeArguments) -> Result<TokenStream2> {
-    let ItemType {
+fn expand_object_type_item(
+    item: ItemStruct,
+    arguments: ObjectTypeArguments,
+) -> Result<TokenStream2> {
+    let ItemStruct {
         attrs,
         vis,
         ident: object,
-        ty: model,
         ..
     } = item;
     let ObjectTypeArguments {
+        properties: model,
         workbench_type,
         scheme,
         term,
@@ -158,10 +167,24 @@ fn expand_object_type_item(item: ItemType, arguments: ObjectTypeArguments) -> Re
 
     Ok(quote! {
         #(#attrs)*
-        #vis type #object = crate::objects::AdtObject<#model>;
+        #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+        #vis struct #object;
 
         #(#conditional_attrs)*
         impl crate::objects::private::Sealed for #object {}
+
+        #(#conditional_attrs)*
+        impl crate::objects::ObjectState for #object {
+            type Representation = #model;
+
+            fn validate_representation(
+                reference: &crate::objects::ObjectRef<Self>,
+                media_type: &str,
+                properties: &Self::Representation,
+            ) -> Result<(), crate::error::ObjectError> {
+                crate::objects::validate_typed_object::<Self>(reference, media_type, properties)
+            }
+        }
 
         #(#conditional_attrs)*
         impl crate::objects::ObjectType for #object {
@@ -224,6 +247,7 @@ fn expand_object_type_item(item: ItemType, arguments: ObjectTypeArguments) -> Re
 }
 
 struct ObjectTypeArguments {
+    properties: Type,
     workbench_type: LitStr,
     scheme: LitStr,
     term: LitStr,
@@ -232,13 +256,18 @@ struct ObjectTypeArguments {
 
 impl Parse for ObjectTypeArguments {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let mut properties = None;
         let mut workbench_type = None;
         let mut collection = None;
         let mut capabilities = None;
 
         while !input.is_empty() {
             let key = input.parse::<Ident>()?;
-            if key == "workbench_type" {
+            if key == "properties" {
+                reject_duplicate(&properties, &key, "properties")?;
+                input.parse::<Token![=]>()?;
+                properties = Some(input.parse::<Type>()?);
+            } else if key == "workbench_type" {
                 reject_duplicate(&workbench_type, &key, "workbench_type")?;
                 input.parse::<Token![=]>()?;
                 workbench_type = Some(input.parse::<LitStr>()?);
@@ -261,6 +290,9 @@ impl Parse for ObjectTypeArguments {
             input.parse::<Token![,]>()?;
         }
 
+        let properties = properties.ok_or_else(|| {
+            Error::new(Span::call_site(), "missing required `properties` argument")
+        })?;
         let workbench_type = workbench_type.ok_or_else(|| {
             Error::new(
                 Span::call_site(),
@@ -287,6 +319,7 @@ impl Parse for ObjectTypeArguments {
         }
 
         Ok(Self {
+            properties,
             workbench_type,
             scheme,
             term,
@@ -930,6 +963,7 @@ mod tests {
 
     fn object_arguments(capabilities: TokenStream2) -> TokenStream2 {
         quote! {
+            properties = ClassProperties,
             workbench_type = "CLAS/OC",
             collection(scheme = "category", term = "classes"),
             capabilities(#capabilities)
@@ -946,15 +980,17 @@ mod tests {
             object_arguments(quote!()),
             quote! {
                 /// A class.
-                pub type Class = ClassProperties;
+                pub struct Class;
             },
         )
         .unwrap()
         .to_string();
 
-        assert!(
-            expanded.contains("pub type Class = crate :: objects :: AdtObject < ClassProperties >")
-        );
+        assert!(expanded.contains("pub struct Class"));
+        assert!(expanded.contains("impl crate :: objects :: ObjectState for Class"));
+        assert!(expanded.contains("type Representation = ClassProperties"));
+        assert!(expanded.contains("type Properties = ClassProperties"));
+        assert!(!expanded.contains("AdtObject"));
         assert!(expanded.contains("capability : \"object creation\""));
         assert!(expanded.contains("crate :: objects :: descriptors :: unsupported_update"));
         assert!(!expanded.contains("impl crate :: objects :: Create for Class"));
@@ -971,7 +1007,7 @@ mod tests {
                 UpdateProperties,
             }),
             quote!(
-                pub type Class = ClassProperties;
+                pub struct Class;
             ),
         )
         .unwrap()

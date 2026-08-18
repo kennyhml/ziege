@@ -1,6 +1,6 @@
 use std::{fmt, hash::Hash, marker::PhantomData};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use super::{GlobalWorkbenchType, ObjectType, descriptors};
 use crate::{
@@ -14,7 +14,7 @@ use crate::{
 ///
 /// Typed references obtain capabilities from `T`. [`ObjectRef<()>`] retains the
 /// exact runtime Workbench type for runtime capability dispatch.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(bound = "")]
 pub struct ObjectRef<T = ()> {
     name: String,
@@ -22,6 +22,45 @@ pub struct ObjectRef<T = ()> {
     object_type: GlobalWorkbenchType,
     #[serde(skip)]
     marker: PhantomData<fn() -> T>,
+}
+
+#[derive(Deserialize)]
+struct ObjectRefRepresentation {
+    name: String,
+    uri: AdtUri,
+    object_type: GlobalWorkbenchType,
+}
+
+impl<'de> Deserialize<'de> for ObjectRef<()> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let reference = ObjectRefRepresentation::deserialize(deserializer)?;
+        Ok(Self::erased(
+            reference.name,
+            reference.uri,
+            reference.object_type,
+        ))
+    }
+}
+
+impl<'de, T: ObjectType> Deserialize<'de> for ObjectRef<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let reference = ObjectRefRepresentation::deserialize(deserializer)?;
+        if reference.object_type != T::WORKBENCH_TYPE {
+            return Err(serde::de::Error::custom(
+                ObjectError::UnexpectedObjectType {
+                    expected: T::WORKBENCH_TYPE,
+                    actual: reference.object_type,
+                },
+            ));
+        }
+        Ok(Self::new(reference.name, reference.uri))
+    }
 }
 
 impl<T> ObjectRef<T> {
@@ -283,6 +322,18 @@ mod tests {
         assert_eq!(object.object_type().as_str(), "PROG/P");
         assert_eq!(object.typed::<Program>(), Some(program));
         assert!(object.typed::<Include>().is_none());
+    }
+
+    #[test]
+    fn typed_reference_deserialization_validates_its_marker() {
+        let program = ObjectRef::<Program>::for_test(
+            "Z_TEST",
+            AdtUri::parse("/sap/bc/adt/programs/programs/Z_TEST").unwrap(),
+        );
+        let serialized = serde_json::to_value(&program).unwrap();
+
+        assert!(serde_json::from_value::<ObjectRef<Program>>(serialized.clone()).is_ok());
+        assert!(serde_json::from_value::<ObjectRef<crate::Class>>(serialized).is_err());
     }
 
     #[test]

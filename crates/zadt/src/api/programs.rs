@@ -2,7 +2,7 @@ use super::run::ObjectRun;
 use crate::{
     client::{Client, Ready},
     error::{OperationError, ResponseError},
-    objects::{ImmediateRun, ObjectRef, Program, RunCapability},
+    objects::{ImmediateRun, Object, ObjectRef, Program, RunCapability},
     operation::{Operation, OperationResponse, Stateless},
     protocol::AdtRequest,
     vocabulary::CategoryId,
@@ -97,10 +97,10 @@ impl ObjectRef<Program> {
     }
 }
 
-impl Program {
+impl Object<Program> {
     /// Creates an operation that runs this loaded program.
     pub fn run(&self) -> ProgramRun {
-        self.reference().retag::<Self>().run()
+        self.reference().run()
     }
 }
 

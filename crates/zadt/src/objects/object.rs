@@ -1,24 +1,56 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
-use super::{ObjectRef, ObjectType, PropertyModel};
+use super::{ObjectRef, ObjectState, ObjectType, PropertyModel};
 use crate::{EntityTag, ObjectError};
 
 /// A loaded ADT object representation and its transport metadata.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(bound(serialize = "P: Serialize", deserialize = "P: Deserialize<'de>"))]
-pub struct AdtObject<P = serde_json::Value> {
-    reference: ObjectRef<()>,
+#[derive(Debug, Serialize)]
+#[serde(bound(serialize = "T::Representation: Serialize"))]
+pub struct Object<T: ObjectState> {
+    reference: ObjectRef<T>,
     media_type: String,
     pub etag: Option<EntityTag>,
-    pub properties: P,
+    pub properties: T::Representation,
 }
 
-impl<P> AdtObject<P> {
+#[derive(Deserialize)]
+#[serde(bound(
+    deserialize = "ObjectRef<T>: Deserialize<'de>, T::Representation: Deserialize<'de>"
+))]
+struct ObjectRepresentation<T: ObjectState> {
+    reference: ObjectRef<T>,
+    media_type: String,
+    etag: Option<EntityTag>,
+    properties: T::Representation,
+}
+
+impl<'de, T> Deserialize<'de> for Object<T>
+where
+    T: ObjectState,
+    ObjectRef<T>: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let object = ObjectRepresentation::<T>::deserialize(deserializer)?;
+        T::validate_representation(&object.reference, &object.media_type, &object.properties)
+            .map_err(serde::de::Error::custom)?;
+        Ok(Self::new(
+            object.reference,
+            object.media_type,
+            object.etag,
+            object.properties,
+        ))
+    }
+}
+
+impl<T: ObjectState> Object<T> {
     pub(crate) fn new(
-        reference: ObjectRef<()>,
+        reference: ObjectRef<T>,
         media_type: impl Into<String>,
         etag: Option<EntityTag>,
-        properties: P,
+        properties: T::Representation,
     ) -> Self {
         Self {
             reference,
@@ -29,7 +61,7 @@ impl<P> AdtObject<P> {
     }
 
     /// Returns the reference identifying this loaded object.
-    pub fn reference(&self) -> &ObjectRef<()> {
+    pub fn reference(&self) -> &ObjectRef<T> {
         &self.reference
     }
 
@@ -38,63 +70,97 @@ impl<P> AdtObject<P> {
         &self.media_type
     }
 
-    pub(crate) fn into_parts(self) -> (ObjectRef<()>, String, Option<EntityTag>, P) {
+    pub(crate) fn into_parts(self) -> (ObjectRef<T>, String, Option<EntityTag>, T::Representation) {
         (self.reference, self.media_type, self.etag, self.properties)
     }
 }
 
-impl<P> AdtObject<P>
+impl<T> Clone for Object<T>
 where
-    P: PropertyModel,
+    T: ObjectState,
+    T::Representation: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            reference: self.reference.clone(),
+            media_type: self.media_type.clone(),
+            etag: self.etag.clone(),
+            properties: self.properties.clone(),
+        }
+    }
+}
+
+impl<T> Object<T>
+where
+    T: ObjectType,
 {
     /// Returns the negotiated media-type version of this representation.
-    pub fn media_version(&self) -> P::Version {
-        P::version_from_media_type(&self.media_type)
+    pub fn media_version(&self) -> <T::Properties as PropertyModel>::Version {
+        T::Properties::version_from_media_type(&self.media_type)
             .expect("typed ADT objects are constructed with a supported media type")
     }
 }
 
-impl AdtObject {
+impl Object<()> {
     /// Restores a concrete loaded object after validating its runtime representation.
-    pub fn try_into_typed<T>(self) -> Result<AdtObject<T::Properties>, ObjectError>
+    pub fn try_into_typed<T>(self) -> Result<Object<T>, ObjectError>
     where
         T: ObjectType,
     {
-        if self.reference.object_type() != &T::WORKBENCH_TYPE {
-            return Err(ObjectError::UnexpectedObjectType {
-                expected: T::WORKBENCH_TYPE,
-                actual: self.reference.object_type().clone(),
-            });
-        }
-        if T::Properties::version_from_media_type(&self.media_type).is_none() {
-            return Err(ObjectError::UnsupportedPropertiesMediaType {
-                object_type: T::WORKBENCH_TYPE,
-                media_type: self.media_type,
-            });
-        }
+        let reference =
+            self.reference
+                .typed::<T>()
+                .ok_or_else(|| ObjectError::UnexpectedObjectType {
+                    expected: T::WORKBENCH_TYPE,
+                    actual: self.reference.object_type().clone(),
+                })?;
         let properties: T::Properties =
             serde_json::from_value(self.properties).map_err(ObjectError::InvalidPropertiesJson)?;
-        if properties.object_name() != self.reference.name() {
-            return Err(ObjectError::UnexpectedObjectReference {
-                expected: self.reference.to_string(),
-                actual: format!(
-                    "{} ({})",
-                    properties.object_name(),
-                    properties.object_type()
-                ),
-            });
-        }
-        if properties.object_type() != self.reference.object_type() {
-            return Err(ObjectError::UnexpectedObjectType {
-                expected: self.reference.object_type().clone(),
-                actual: properties.object_type().clone(),
-            });
-        }
-        Ok(AdtObject::new(
-            self.reference,
+        validate_typed_object::<T>(&reference, &self.media_type, &properties)?;
+        Ok(Object::new(
+            reference,
             self.media_type,
             self.etag,
             properties,
         ))
     }
+}
+
+pub(crate) fn validate_typed_object<T>(
+    reference: &ObjectRef<T>,
+    media_type: &str,
+    properties: &T::Properties,
+) -> Result<(), ObjectError>
+where
+    T: ObjectType,
+{
+    if reference.object_type() != &T::WORKBENCH_TYPE {
+        return Err(ObjectError::UnexpectedObjectType {
+            expected: T::WORKBENCH_TYPE,
+            actual: reference.object_type().clone(),
+        });
+    }
+    if T::Properties::version_from_media_type(media_type).is_none() {
+        return Err(ObjectError::UnsupportedPropertiesMediaType {
+            object_type: T::WORKBENCH_TYPE,
+            media_type: media_type.to_owned(),
+        });
+    }
+    if properties.object_name() != reference.name() {
+        return Err(ObjectError::UnexpectedObjectReference {
+            expected: reference.to_string(),
+            actual: format!(
+                "{} ({})",
+                properties.object_name(),
+                properties.object_type()
+            ),
+        });
+    }
+    if properties.object_type() != reference.object_type() {
+        return Err(ObjectError::UnexpectedObjectType {
+            expected: reference.object_type().clone(),
+            actual: properties.object_type().clone(),
+        });
+    }
+    Ok(())
 }

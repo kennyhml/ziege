@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use thiserror::Error;
-use zadt::{AdtObject, GlobalWorkbenchType, SourceRef};
+use zadt::{GlobalWorkbenchType, Object, ObjectState, SourceRef};
 
 mod format;
 mod formats;
@@ -35,18 +35,18 @@ impl TryFrom<&GlobalWorkbenchType> for ObjectFormat {
     }
 }
 
-impl<P> TryFrom<&AdtObject<P>> for ObjectFormat {
+impl<T: ObjectState> TryFrom<&Object<T>> for ObjectFormat {
     type Error = ProjectionError;
 
-    fn try_from(object: &AdtObject<P>) -> Result<Self, Self::Error> {
+    fn try_from(object: &Object<T>) -> Result<Self, Self::Error> {
         Self::for_workbench_type(object.reference().object_type())
     }
 }
 
-/// Projects a runtime repository object into its currently materializable AFF files.
-pub fn project<P>(object: &AdtObject<P>) -> Result<Projection, ProjectionError>
+/// Projects a loaded repository object into its currently materializable AFF files.
+pub fn project<T: ObjectState>(object: &Object<T>) -> Result<Projection, ProjectionError>
 where
-    AdtObject<P>: ProjectionObject,
+    Object<T>: ProjectionObject,
 {
     let descriptor = registry::for_workbench_type(object.reference().object_type())?;
     let format = descriptor.format();
@@ -80,10 +80,10 @@ pub struct ResolvedFile {
 }
 
 impl ResolvedFile {
-    /// Binds this projected path to the runtime repository object that produced it.
-    pub fn bind<P>(&self, object: &AdtObject<P>) -> Result<FileBacking, ProjectionError>
+    /// Binds this projected path to the loaded repository object that produced it.
+    pub fn bind<T: ObjectState>(&self, object: &Object<T>) -> Result<FileBacking, ProjectionError>
     where
-        AdtObject<P>: ProjectionObject,
+        Object<T>: ProjectionObject,
     {
         if !self
             .object_name
@@ -120,9 +120,12 @@ impl ResolvedFile {
     }
 
     /// Resolves this projected file to its ADT source resource.
-    pub fn source_ref<P>(&self, object: &AdtObject<P>) -> Result<SourceRef, ProjectionError>
+    pub fn source_ref<T: ObjectState>(
+        &self,
+        object: &Object<T>,
+    ) -> Result<SourceRef, ProjectionError>
     where
-        AdtObject<P>: ProjectionObject,
+        Object<T>: ProjectionObject,
     {
         let source_backed = registry::by_format(self.format)
             .files()
@@ -416,7 +419,7 @@ pub enum ProjectionError {
 mod test_support {
     use http::{HeaderMap, StatusCode};
     use zadt::{
-        AdtObject, AdtResponse, AdtUri, ObjectPropertiesQuery, ObjectRef, ObjectType, Operation,
+        AdtResponse, AdtUri, Object, ObjectPropertiesQuery, ObjectRef, ObjectType, Operation,
         OperationResponse, Ready, RepositoryContentQuery, RepositoryObjectEntry,
     };
 
@@ -450,7 +453,7 @@ mod test_support {
         media_type: &'static str,
         etag: &'static str,
         body: &[u8],
-    ) -> AdtObject<T::Properties>
+    ) -> Object<T>
     where
         T: ObjectType,
     {
@@ -472,7 +475,7 @@ mod test_support {
         media_type: &'static str,
         etag: &'static str,
         body: &[u8],
-    ) -> AdtObject
+    ) -> Object<()>
     where
         T: ObjectType,
     {

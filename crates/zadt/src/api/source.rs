@@ -3,7 +3,7 @@ use http::{Method, StatusCode};
 use crate::{
     client::{Client, ClientState},
     error::{ObjectError, OperationError, ResponseError},
-    objects::{AdtObject, ObjectType, Source, SourceComponents},
+    objects::{Object, Source, SourceComponents},
     operation::{Operation, OperationResponse, Stateful, Stateless},
     protocol::{AdtRequest, EntityTag},
     resource::{SourceRef, refs::source_from_href},
@@ -93,37 +93,29 @@ impl<S: ClientState> Operation<S> for ObjectSourceQuery {
     }
 }
 
-impl<P> AdtObject<P>
-where
-    Self: Source + ObjectType<Properties = P>,
-{
+impl<T: Source> Object<T> {
     /// Resolves the primary source advertised by this loaded object.
     pub fn source(&self) -> Result<SourceRef, ObjectError> {
-        let href = <Self as Source>::source_uri(&self.properties)
+        let href = T::source_uri(&self.properties)
             .ok_or(ObjectError::MissingRelation { relation: "source" })?;
-        source_from_href(self.reference().clone(), href)
+        source_from_href(self.reference().erase(), href)
     }
 }
 
-impl<P> AdtObject<P>
-where
-    Self: SourceComponents + ObjectType<Properties = P>,
-{
+impl<T: SourceComponents> Object<T> {
     /// Resolves one named source component supported by this loaded object family.
     pub fn source_component(
         &self,
         name: impl AsRef<str>,
     ) -> Result<Option<SourceRef>, ObjectError> {
-        let Some(href) =
-            <Self as SourceComponents>::source_component_uri(&self.properties, name.as_ref())
-        else {
+        let Some(href) = T::source_component_uri(&self.properties, name.as_ref()) else {
             return Ok(None);
         };
-        source_from_href(self.reference().clone(), href).map(Some)
+        source_from_href(self.reference().erase(), href).map(Some)
     }
 }
 
-impl AdtObject {
+impl Object<()> {
     /// Resolves the primary source advertised by this runtime-typed object.
     pub fn source(&self) -> Result<SourceRef, ObjectError> {
         let Some(descriptor) = self.reference().descriptor() else {

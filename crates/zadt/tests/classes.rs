@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Class, ClassPropertiesVersion, Client, EntityTag, Logon, ObjectVersion, Operation, Ready,
-    ReqwestTransport, Revalidation,
+    Class, ClassPropertiesVersion, Client, EntityTag, Logon, Object, ObjectVersion, Operation,
+    Ready, ReqwestTransport, Revalidation,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -115,7 +115,7 @@ async fn repository_object_properties_forward_through_the_typed_query() {
         properties.etag.as_ref().map(EntityTag::as_str),
         Some("class-etag")
     );
-    let class: Class = properties.clone().try_into_typed::<Class>().unwrap();
+    let class: Object<Class> = properties.clone().try_into_typed::<Class>().unwrap();
     assert_eq!(class.properties.name, "CL_ADT_URI_MAPPER");
     assert_eq!(class.reference().uri(), object.uri());
     logon.assert_async().await;
@@ -199,8 +199,22 @@ async fn class_properties_query_converts_the_live_v4_manifest() {
         .await
         .unwrap();
     assert_eq!(response.media_version(), ClassPropertiesVersion::V4);
-    let cached = serde_json::to_string(&response).unwrap();
-    let response: Class = serde_json::from_str(&cached).unwrap();
+    let cached = serde_json::to_value(&response).unwrap();
+    assert!(cached.get("marker").is_none());
+
+    let mut wrong_type = cached.clone();
+    wrong_type["reference"]["object_type"] = serde_json::json!("PROG/P");
+    assert!(serde_json::from_value::<Object<Class>>(wrong_type).is_err());
+
+    let mut wrong_media_type = cached.clone();
+    wrong_media_type["media_type"] = serde_json::json!("application/xml");
+    assert!(serde_json::from_value::<Object<Class>>(wrong_media_type).is_err());
+
+    let mut wrong_name = cached.clone();
+    wrong_name["properties"]["@adtcore:name"] = serde_json::json!("OTHER_CLASS");
+    assert!(serde_json::from_value::<Object<Class>>(wrong_name).is_err());
+
+    let response: Object<Class> = serde_json::from_value(cached).unwrap();
     let class = &response.properties;
     let source_ref = response.source().unwrap();
     let source = source_ref.query().execute(&client).await.unwrap();

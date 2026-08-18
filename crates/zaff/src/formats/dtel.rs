@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use zadt::{
-    AdtObject, DataElement, DataElementDefinition, DataElementProperties, GlobalWorkbenchType,
+    DataElement, DataElementDefinition, DataElementProperties, GlobalWorkbenchType, Object,
     ObjectType,
 };
 
@@ -80,13 +80,13 @@ impl FileDescriptor for DataElementMetadata {
 }
 
 impl PropertiesCodec for DataElementMetadata {
-    fn render(&self, properties: &AdtObject) -> Result<String, ProjectionError> {
+    fn render(&self, properties: &Object<()>) -> Result<String, ProjectionError> {
         render_data_element_properties(&decode_properties::<DataElementProperties>(
             properties, "DTEL",
         )?)
     }
 
-    fn merge(&self, original: &AdtObject, edited: &str) -> Result<AdtObject, ProjectionError> {
+    fn merge(&self, original: &Object<()>, edited: &str) -> Result<Object<()>, ProjectionError> {
         let properties = decode_properties::<DataElementProperties>(original, "DTEL")?;
         encode_properties(
             original,

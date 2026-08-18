@@ -5,6 +5,7 @@ use super::super::{GlobalWorkbenchType, ObjectRef, PropertyModel, Source};
 use crate::{AdvertisedLink, AdvertisedObjectReference};
 
 #[object_type(
+    properties = ProgramProperties,
     workbench_type = "PROG/P",
     collection(
         scheme = "http://www.sap.com/adt/categories/programs",
@@ -13,9 +14,10 @@ use crate::{AdvertisedLink, AdvertisedObjectReference};
     capabilities(Source, Run, UpdateProperties)
 )]
 /// The ABAP program object type.
-pub type Program = ProgramProperties;
+pub struct Program;
 
 #[object_type(
+    properties = IncludeProperties,
     workbench_type = "PROG/I",
     collection(
         scheme = "http://www.sap.com/adt/categories/programs",
@@ -24,7 +26,7 @@ pub type Program = ProgramProperties;
     capabilities(Source, UpdateProperties)
 )]
 /// The standalone ABAP include object type.
-pub type Include = IncludeProperties;
+pub struct Include;
 
 impl ObjectRef<Program> {
     #[cfg(test)]

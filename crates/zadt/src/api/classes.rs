@@ -2,7 +2,7 @@ use super::run::ObjectRun;
 use crate::{
     AdtRequest, Client, Operation, OperationError, OperationResponse, Ready, ResponseError,
     Stateless,
-    objects::{Class, ImmediateRun, ObjectRef, RunCapability},
+    objects::{Class, ImmediateRun, Object, ObjectRef, RunCapability},
     vocabulary::CategoryId,
 };
 
@@ -76,9 +76,9 @@ impl ObjectRef<Class> {
     }
 }
 
-impl Class {
+impl Object<Class> {
     /// Creates an operation that runs this loaded class.
     pub fn run(&self) -> ClassRun {
-        self.reference().retag::<Self>().run()
+        self.reference().run()
     }
 }

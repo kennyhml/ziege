@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use zadt_macros::{CreateProperties, object_type};
 
 #[object_type(
+    properties = ClassProperties,
     workbench_type = "CLAS/OC",
     collection(scheme = "http://www.sap.com/adt/categories/oo", term = "classes",),
     capabilities(
@@ -28,7 +29,7 @@ use zadt_macros::{CreateProperties, object_type};
 /// source, local types and the testclasses. [`ClassSourceComponent`] describes
 /// the full list of possible source includes. Which includes are available also
 /// differs based on how old the class is. Legacy classes follow a different layout.
-pub type Class = ClassProperties;
+pub struct Class;
 
 /// The media-type version used to decode class properties.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

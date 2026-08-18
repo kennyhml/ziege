@@ -6,7 +6,7 @@ use stduritemplate::Value;
 use crate::{
     client::{Client, Ready},
     error::{ObjectError, OperationError, ResponseError},
-    objects::{AdtObject, GlobalWorkbenchType, ImmediateRun, ObjectRef, RunCapability},
+    objects::{GlobalWorkbenchType, ImmediateRun, Object, ObjectRef, RunCapability},
     operation::{Operation, OperationResponse, Stateless},
     protocol::AdtRequest,
     vocabulary::{media_type, query_parameter},
@@ -135,10 +135,10 @@ impl ObjectRef<()> {
     }
 }
 
-impl AdtObject {
+impl Object<()> {
     /// Creates an immediate run operation when this object family supports it.
     pub fn run(&self) -> Result<ObjectRun, ObjectError> {
-        self.reference().erase().run()
+        self.reference().run()
     }
 }
 

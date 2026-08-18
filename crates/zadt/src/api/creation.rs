@@ -1,7 +1,7 @@
 use http::Method;
 
 use crate::{
-    AdtObject, AdtRequest, CategoryId, Client, ObjectError, ObjectRef, Operation, OperationError,
+    AdtRequest, CategoryId, Client, Object, ObjectError, ObjectRef, Operation, OperationError,
     OperationResponse, PropertyModel, Ready, ResponseError, Stateless, TransportNumber,
     objects::{Create, CreationPropertyModel},
     target::CollectionTarget,
@@ -62,7 +62,7 @@ where
     P: PropertyModel,
 {
     type Kind = Stateless;
-    type Response = Option<AdtObject<T::Properties>>;
+    type Response = Option<Object<T>>;
 
     fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
         self.build_request(
@@ -79,14 +79,14 @@ where
         if response.body().is_empty() {
             return Ok(None);
         }
-        decode_properties::<T>(&self.reference.erase(), response).map(Some)
+        decode_properties(&self.reference, response).map(Some)
     }
 }
 
 /// Implementation for untyped objects
 impl Operation<Ready> for CreateObjectRequest<(), serde_json::Value> {
     type Kind = Stateless;
-    type Response = Option<AdtObject>;
+    type Response = Option<Object<()>>;
 
     fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
         let descriptor = self.reference.require_descriptor()?;

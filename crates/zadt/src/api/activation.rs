@@ -5,8 +5,8 @@ use serde::Deserialize;
 use stduritemplate::Value;
 
 use crate::{
-    AdtObject, AdtRequest, AdvertisedLink, AdvertisedObjectReference, CategoryId, Client,
-    ObjectError, ObjectRef, Operation, OperationError, OperationResponse, Ready, ResponseError,
+    AdtRequest, AdvertisedLink, AdvertisedObjectReference, CategoryId, Client, Object, ObjectError,
+    ObjectRef, ObjectState, Operation, OperationError, OperationResponse, Ready, ResponseError,
     Stateless,
     objects::ObjectReferences,
     target::{CollectionTarget, TemplateTarget},
@@ -153,7 +153,7 @@ where
     }
 }
 
-impl<P> AdtObject<P> {
+impl<T: ObjectState> Object<T> {
     /// Creates an activation run for this loaded object.
     pub fn activation(&self) -> ActivationRun {
         self.reference().activation()

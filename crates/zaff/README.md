@@ -46,7 +46,7 @@ sequenceDiagram
 ```
 
 Metadata files are properties-backed rather than source-backed. The consumer
-queries the projected `ObjectRef<Erased>` to obtain `JsonObjectProperties`, then
+queries the projected `ObjectRef<()>` to obtain `Object<()>`, then
 uses `ProjectedFile::render_properties` and `ProjectedFile::merge_properties`.
 The file's registered family codec validates and transforms the runtime JSON
 through its concrete ZADT property model. Merging retains the original media
@@ -62,7 +62,7 @@ registry only enumerates those descriptors.
 
 Path resolution identifies an AFF family and component, not a globally unique
 remote object. A consumer should retain the `RepositoryObjectEntry` from which
-the projected `ObjectRef<Erased>` originated. That index disambiguates
+the projected `ObjectRef<()>` originated. That index disambiguates
 representations such as `PROG/P` and `PROG/I`, which share the same `.prog.*`
 file layout, and keeps the SAP system, package, URI, and object version attached
 to edits.

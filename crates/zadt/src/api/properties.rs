@@ -1,7 +1,7 @@
 use http::{Method, StatusCode};
 
 use crate::{
-    AdtObject, ObjectError, ObjectLock, TransportNumber,
+    Object, ObjectError, ObjectLock, TransportNumber,
     client::{Client, ClientState, Ready},
     error::{OperationError, ResponseError},
     objects::{
@@ -58,7 +58,7 @@ impl<T> Operation<Ready> for ObjectPropertiesQuery<T>
 where
     T: ObjectType,
 {
-    type Response = AdtObject<T::Properties>;
+    type Response = Object<T>;
     type Kind = Stateless;
 
     fn request(&self, _client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
@@ -66,7 +66,7 @@ where
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        decode_properties::<T>(&self.resource.erase(), response)
+        decode_properties(&self.resource, response)
     }
 }
 
@@ -79,21 +79,17 @@ where
     }
 }
 
-impl<P> AdtObject<P>
-where
-    Self: ObjectType<Properties = P>,
-    P: PropertyModel,
-{
+impl<T: ObjectType> Object<T> {
     /// Creates a conditional query using this representation's entity tag.
-    pub fn revalidate(&self) -> Option<IfNoneMatch<ObjectPropertiesQuery<Self>>> {
+    pub fn revalidate(&self) -> Option<IfNoneMatch<ObjectPropertiesQuery<T>>> {
         self.etag
             .clone()
-            .map(|etag| self.reference().retag::<Self>().query().if_none_match(etag))
+            .map(|etag| self.reference().query().if_none_match(etag))
     }
 }
 
 impl Operation<Ready> for ObjectPropertiesQuery<()> {
-    type Response = AdtObject;
+    type Response = Object<()>;
     type Kind = Stateless;
 
     fn request(&self, _client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
@@ -158,7 +154,7 @@ where
     S: ClientState,
     T: ObjectType,
 {
-    type Response = Option<AdtObject<T::Properties>>;
+    type Response = Option<Object<T>>;
     type Kind = Stateful;
 
     fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
@@ -172,7 +168,7 @@ where
         if response.body().is_empty() {
             return Ok(None);
         }
-        decode_properties::<T>(&self.resource.erase(), response).map(Some)
+        decode_properties(&self.resource, response).map(Some)
     }
 }
 
@@ -183,18 +179,17 @@ where
     pub fn update(
         &self,
         object_lock: &ObjectLock,
-        properties: AdtObject<T::Properties>,
+        properties: Object<T>,
     ) -> Result<ObjectPropertiesUpdate<T>, ObjectError> {
-        let erased = self.erase();
-        if !erased.same_identity(properties.reference()) {
+        if !self.same_identity(properties.reference()) {
             return Err(ObjectError::UnexpectedObjectReference {
-                expected: erased.to_string(),
+                expected: self.to_string(),
                 actual: properties.reference().to_string(),
             });
         }
-        object_lock.validate_modification_for(&erased)?;
+        object_lock.validate_modification_for(self)?;
         let media_type = T::Properties::media_type(properties.media_version());
-        let body = properties.properties.to_xml_for(&erased)?;
+        let body = properties.properties.to_xml_for(self)?;
         Ok(ObjectPropertiesUpdate {
             resource: self.clone(),
             object_lock: object_lock.clone(),
@@ -205,18 +200,14 @@ where
     }
 }
 
-impl<P> AdtObject<P>
-where
-    Self: UpdateProperties<Properties = P>,
-    P: PropertyModel,
-{
+impl<T: UpdateProperties> Object<T> {
     /// Replaces this loaded object's properties under the supplied lock.
     pub fn update(
         self,
         object_lock: &ObjectLock,
-    ) -> Result<ObjectPropertiesUpdate<Self>, ObjectError> {
+    ) -> Result<ObjectPropertiesUpdate<T>, ObjectError> {
         let reference = self.reference().clone();
-        reference.retag::<Self>().update(object_lock, self)
+        reference.update(object_lock, self)
     }
 }
 
@@ -224,7 +215,7 @@ impl<S> Operation<S> for ObjectPropertiesUpdate<()>
 where
     S: ClientState,
 {
-    type Response = Option<AdtObject>;
+    type Response = Option<Object<()>>;
     type Kind = Stateful;
 
     fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
@@ -252,7 +243,7 @@ impl ObjectRef<()> {
     pub fn update(
         &self,
         object_lock: &ObjectLock,
-        properties: AdtObject,
+        properties: Object<()>,
     ) -> Result<ObjectPropertiesUpdate<()>, ObjectError> {
         if !self.same_identity(properties.reference()) {
             return Err(ObjectError::UnexpectedObjectReference {
@@ -283,9 +274,9 @@ impl ObjectRef<()> {
 
 /// A helper function to decode the object properties from an [`OperationResponse`]
 pub(crate) fn decode_properties<T>(
-    resource: &ObjectRef<()>,
+    resource: &ObjectRef<T>,
     response: OperationResponse,
-) -> Result<AdtObject<T::Properties>, ResponseError>
+) -> Result<Object<T>, ResponseError>
 where
     T: ObjectType,
 {
@@ -299,7 +290,7 @@ where
     let media_version = T::Properties::require_version_from_media_type(content_type, T::CATEGORY)?;
     let etag = response.entity_tag();
     let payload = T::Properties::from_xml_for(response.body(), resource)?;
-    Ok(AdtObject::new(
+    Ok(Object::new(
         resource.clone(),
         T::Properties::media_type(media_version),
         etag,

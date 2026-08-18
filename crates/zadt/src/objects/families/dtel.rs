@@ -4,12 +4,13 @@ use zadt_macros::object_type;
 use crate::{AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType, PropertyModel};
 
 #[object_type(
+    properties = DataElementProperties,
     workbench_type = "DTEL/DE",
     collection(scheme = "http://www.sap.com/wbobj/dictionary", term = "dtelde",),
     capabilities(UpdateProperties)
 )]
 /// The ABAP Dictionary Data Element object type.
-pub type DataElement = DataElementProperties;
+pub struct DataElement;
 
 /// The SAP media-type version used to decode Data Element properties.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

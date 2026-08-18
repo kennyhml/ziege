@@ -6,7 +6,7 @@ use serde::Deserialize;
 use crate::{
     client::{Client, ClientState},
     error::{ObjectError, OperationError, ResponseError},
-    objects::{AdtObject, ObjectRef},
+    objects::{Object, ObjectRef, ObjectState},
     operation::{Operation, OperationResponse, Stateful, UserSessionId},
     protocol::{AdtRequest, AdtResponse},
     vocabulary::{PostAction, media_type, query_parameter},
@@ -231,7 +231,7 @@ impl<T> ObjectRef<T> {
     }
 }
 
-impl<P> AdtObject<P> {
+impl<T: ObjectState> Object<T> {
     /// Creates an object-lock operation.
     pub fn lock(&self, access_mode: AccessMode) -> LockRequest {
         LockRequest::new(self.reference().erase(), access_mode)

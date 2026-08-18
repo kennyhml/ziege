@@ -3,8 +3,8 @@ use std::marker::PhantomData;
 use http::Method;
 
 use super::{
-    AdtObject, Class, DataElement, GlobalWorkbenchType, Include, ObjectRef, ObjectType,
-    ObjectVersion, Package, Program, PropertyModel, RunCapability,
+    Class, DataElement, GlobalWorkbenchType, Include, Object, ObjectRef, ObjectType, ObjectVersion,
+    Package, Program, PropertyModel, RunCapability,
 };
 use crate::{
     error::{ObjectError, OperationError, ResponseError},
@@ -52,7 +52,7 @@ pub(crate) trait RuntimeObjectTypeDescriptor: std::fmt::Debug + Sync {
         &self,
         object: &ObjectRef<()>,
         response: OperationResponse,
-    ) -> Result<AdtObject, ResponseError>;
+    ) -> Result<Object<()>, ResponseError>;
 
     fn properties_to_xml(
         &self,
@@ -188,7 +188,7 @@ where
         &self,
         object: &ObjectRef<()>,
         response: OperationResponse,
-    ) -> Result<AdtObject, ResponseError> {
+    ) -> Result<Object<()>, ResponseError> {
         let resource = object
             .typed::<T>()
             .ok_or_else(|| ObjectError::UnexpectedObjectType {
@@ -197,8 +197,8 @@ where
             })?;
         let loaded = resource.query().decode(response)?;
         let (_reference, media_type, etag, properties) = loaded.into_parts();
-        Ok(AdtObject::new(
-            object.clone(),
+        Ok(Object::new(
+            resource.erase(),
             media_type,
             etag,
             serde_json::to_value(properties)?,
