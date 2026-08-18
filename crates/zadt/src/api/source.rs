@@ -10,10 +10,7 @@ use crate::{
     vocabulary::{media_type, query_parameter},
 };
 
-use super::{
-    locking::{AccessMode, ObjectLock},
-    transports::TransportNumber,
-};
+use super::{locking::ObjectLock, transports::TransportNumber};
 
 /// A fetched source representation and its attached metadata.
 #[derive(Debug)]
@@ -232,15 +229,7 @@ impl SourceRef {
         object_lock: &ObjectLock,
         content: impl Into<String>,
     ) -> Result<ObjectSourceUpdate, ObjectError> {
-        if &self.object != object_lock.object() {
-            return Err(ObjectError::ObjectLockMismatch {
-                expected: self.object.to_string(),
-                actual: object_lock.object().to_string(),
-            });
-        }
-        if object_lock.access_mode() != AccessMode::Modify {
-            return Err(ObjectError::ObjectLockNotModifiable);
-        }
+        object_lock.validate_modification_for(&self.object)?;
         Ok(ObjectSourceUpdate {
             source: self.clone(),
             object_lock: object_lock.clone(),
@@ -256,7 +245,7 @@ mod tests {
     use async_trait::async_trait;
     use http::{HeaderMap, HeaderValue, header};
 
-    use crate::{AdtResponse, AdtUri, Class, Initial, ObjectRef, Program, Transport};
+    use crate::{AccessMode, AdtResponse, AdtUri, Class, Initial, ObjectRef, Program, Transport};
 
     struct UnusedTransport;
 

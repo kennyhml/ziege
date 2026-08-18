@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use zadt::{
-    AdtObject, AdvertisedObjectReference, Class, ClassProperties, GlobalWorkbenchType, ObjectType,
+    AbapLanguageVersion, AdtObject, AdvertisedObjectReference, Class, ClassCategory,
+    ClassProperties, GlobalWorkbenchType, ObjectType,
 };
 
 use crate::{
@@ -178,8 +179,8 @@ pub enum AffClassAbapLanguageVersion {
 }
 
 impl AffClassAbapLanguageVersion {
-    fn from_adt(value: Option<&str>) -> Result<Self, ProjectionError> {
-        match value {
+    fn from_adt(value: Option<&AbapLanguageVersion>) -> Result<Self, ProjectionError> {
+        match value.map(AbapLanguageVersion::as_str) {
             None | Some("" | " " | "X") => Ok(Self::Standard),
             Some("2") => Ok(Self::KeyUser),
             Some("5") => Ok(Self::CloudDevelopment),
@@ -190,12 +191,12 @@ impl AffClassAbapLanguageVersion {
         }
     }
 
-    fn adt_value(self, original: Option<&str>) -> Option<String> {
+    fn adt_value(self, original: Option<&AbapLanguageVersion>) -> Option<AbapLanguageVersion> {
         match self {
             Self::Standard if original.is_none() => None,
-            Self::Standard => Some("X".to_owned()),
-            Self::KeyUser => Some("2".to_owned()),
-            Self::CloudDevelopment => Some("5".to_owned()),
+            Self::Standard => Some(AbapLanguageVersion::StandardX),
+            Self::KeyUser => Some(AbapLanguageVersion::KeyUser),
+            Self::CloudDevelopment => Some(AbapLanguageVersion::CloudDevelopment),
         }
     }
 
@@ -390,10 +391,10 @@ pub(crate) fn merge_class_properties(
         properties.abap_language_version = edited
             .header
             .abap_language_version
-            .adt_value(original_language_version.as_deref());
+            .adt_value(original_language_version.as_ref());
     }
     if edited.category != original_document.category {
-        properties.category = edited.category.adt_value().to_owned();
+        properties.category = ClassCategory::from(edited.category.adt_value());
     }
     if edited.fix_point_arithmetic != original_document.fix_point_arithmetic {
         properties.fix_point_arithmetic = edited.fix_point_arithmetic;
@@ -418,10 +419,10 @@ fn document_from_properties(properties: &ClassProperties) -> Result<AffClass, Pr
                 "header.originalLanguage",
             )?,
             abap_language_version: AffClassAbapLanguageVersion::from_adt(
-                properties.abap_language_version.as_deref(),
+                properties.abap_language_version.as_ref(),
             )?,
         },
-        category: AffClassCategory::from_adt(&properties.category)?,
+        category: AffClassCategory::from_adt(properties.category.as_str())?,
         fix_point_arithmetic: properties.fix_point_arithmetic,
         message_class: properties
             .message_class
@@ -590,8 +591,11 @@ mod tests {
 
         assert_eq!(merged.description, "Updated class");
         assert_eq!(merged.master_language, "6N");
-        assert_eq!(merged.abap_language_version.as_deref(), Some("2"));
-        assert_eq!(merged.category, "businessClass");
+        assert_eq!(
+            merged.abap_language_version,
+            Some(AbapLanguageVersion::KeyUser)
+        );
+        assert_eq!(merged.category.as_str(), "businessClass");
         assert!(!merged.fix_point_arithmetic);
         assert_eq!(
             merged

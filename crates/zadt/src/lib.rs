@@ -20,6 +20,7 @@ pub use api::activation::{
     InactiveCtsObjectTransport, InactiveCtsObjects, InactiveCtsObjectsQuery, InactiveObjectsQuery,
 };
 pub use api::classes::{ClassRun, ClassRunResult};
+pub use api::creation::CreateObjectRequest;
 pub use api::discovery::{
     Capabilities, Category, Collection, CoreDiscoveryQuery, DiscoveryQuery, TemplateLink, Workspace,
 };
@@ -29,9 +30,7 @@ pub use api::packages::{
     PackageTree, PackageTreeKind, PackageTreeNode, PackageTreeQuery,
 };
 pub use api::programs::{ProgramRun, ProgramRunResult};
-pub use api::properties::{
-    AdtObjectQuery, AdtObjectUpdate, ObjectPropertiesQuery, ObjectPropertiesUpdate,
-};
+pub use api::properties::{ObjectPropertiesQuery, ObjectPropertiesUpdate};
 pub use api::repository::{
     RepositoryContent, RepositoryContentOperation, RepositoryContentQuery,
     RepositoryContentQueryBuilder, RepositoryContentQueryBuilderError, RepositoryFacet,
@@ -62,14 +61,16 @@ pub use error::{
     OperationError, RepositoryError, ResponseError, TransportError,
 };
 pub use objects::{
-    AdtObject, AdvertisedObjectReference, Class, ClassProperties, ClassPropertiesVersion,
-    ClassSourceComponent, ClassSourceProperties, DataElement, DataElementDefinition,
-    DataElementProperties, DataElementPropertiesVersion, GlobalWorkbenchType, Include,
-    IncludeProperties, IncludePropertyVersion, InvalidWorkbenchType, ObjectRef, ObjectReferences,
-    ObjectType, ObjectVersion, Package, PackageAssignment, PackageAttributes, PackageProperties,
-    PackagePropertiesVersion, PackageTransport, PackageUseAccess, Program, ProgramProperties,
-    ProgramPropertiesVersion, PropertyModel, Source, SourceComponents, SyntaxConfiguration,
-    SyntaxLanguage, UpdateProperties,
+    AbapLanguageVersion, AdtObject, AdvertisedObjectReference, Class, ClassCategory,
+    ClassCreateProperties, ClassCreatePropertiesBuilder, ClassCreatePropertiesBuilderError,
+    ClassProperties, ClassPropertiesVersion, ClassSourceComponent, ClassSourceProperties,
+    ClassTemplate, ClassTemplateProperty, Create, CreationPropertyModel, DataElement,
+    DataElementDefinition, DataElementProperties, DataElementPropertiesVersion,
+    GlobalWorkbenchType, Include, IncludeProperties, IncludePropertyVersion, InvalidWorkbenchType,
+    ObjectRef, ObjectReferences, ObjectType, ObjectVersion, Package, PackageAssignment,
+    PackageAttributes, PackageProperties, PackagePropertiesVersion, PackageTransport,
+    PackageUseAccess, Program, ProgramProperties, ProgramPropertiesVersion, PropertyModel, Source,
+    SourceComponents, SyntaxConfiguration, SyntaxLanguage, UpdateProperties,
 };
 pub use operation::{
     BatchError, BatchKey, BatchOperation, BatchResponses, Batched, Execute, IfNoneMatch, Operation,

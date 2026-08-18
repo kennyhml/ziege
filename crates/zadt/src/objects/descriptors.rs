@@ -1,15 +1,16 @@
 use std::marker::PhantomData;
 
+use http::Method;
+
 use super::{
     AdtObject, Class, DataElement, GlobalWorkbenchType, Include, ObjectRef, ObjectType,
     ObjectVersion, Package, Program, PropertyModel, RunCapability,
 };
 use crate::{
-    client::{Client, Ready},
     error::{ObjectError, OperationError, ResponseError},
     operation::{Operation, OperationResponse},
     protocol::AdtRequest,
-    vocabulary::CategoryId,
+    vocabulary::{CategoryId, query_parameter},
 };
 
 /// Runtime capabilities for one modeled ADT object type.
@@ -17,6 +18,14 @@ pub(crate) trait RuntimeObjectTypeDescriptor: std::fmt::Debug + Sync {
     fn object_type(&self) -> GlobalWorkbenchType;
 
     fn category(&self) -> CategoryId;
+
+    fn create_media_type(&self) -> Option<&'static str>;
+
+    fn creation_properties_to_xml(
+        &self,
+        reference: &ObjectRef<()>,
+        properties: serde_json::Value,
+    ) -> Result<Vec<u8>, ObjectError>;
 
     fn run(&self) -> Option<RunCapability>;
 
@@ -37,7 +46,6 @@ pub(crate) trait RuntimeObjectTypeDescriptor: std::fmt::Debug + Sync {
         &self,
         object: &ObjectRef<()>,
         version: Option<ObjectVersion>,
-        client: &Client<Ready>,
     ) -> Result<AdtRequest, OperationError>;
 
     fn properties_to_json(
@@ -51,12 +59,19 @@ pub(crate) trait RuntimeObjectTypeDescriptor: std::fmt::Debug + Sync {
         object: &ObjectRef<()>,
         media_type: &str,
         properties: serde_json::Value,
-    ) -> Result<String, ObjectError>;
+    ) -> Result<Vec<u8>, ObjectError>;
 
     fn properties_media_type(&self, media_type: &str) -> Option<&'static str>;
 }
 
 pub(crate) trait RuntimeObjectType: ObjectType {
+    fn create_media_type() -> Option<&'static str>;
+
+    fn creation_properties_to_xml(
+        reference: &ObjectRef<()>,
+        properties: serde_json::Value,
+    ) -> Result<Vec<u8>, ObjectError>;
+
     fn run() -> Option<RunCapability>;
 
     fn source_uri(_properties: &Self::Properties) -> Option<&str> {
@@ -71,7 +86,7 @@ pub(crate) trait RuntimeObjectType: ObjectType {
         object: &ObjectRef<()>,
         media_type: &str,
         properties: serde_json::Value,
-    ) -> Result<String, ObjectError>;
+    ) -> Result<Vec<u8>, ObjectError>;
 }
 
 pub(crate) struct ObjectTypeDescriptor<T>(PhantomData<fn() -> T>);
@@ -101,6 +116,18 @@ where
 
     fn category(&self) -> CategoryId {
         T::CATEGORY
+    }
+
+    fn create_media_type(&self) -> Option<&'static str> {
+        T::create_media_type()
+    }
+
+    fn creation_properties_to_xml(
+        &self,
+        reference: &ObjectRef<()>,
+        properties: serde_json::Value,
+    ) -> Result<Vec<u8>, ObjectError> {
+        T::creation_properties_to_xml(reference, properties)
     }
 
     fn run(&self) -> Option<RunCapability> {
@@ -136,19 +163,25 @@ where
         &self,
         object: &ObjectRef<()>,
         version: Option<ObjectVersion>,
-        client: &Client<Ready>,
     ) -> Result<AdtRequest, OperationError> {
-        let resource = object.typed::<T>().ok_or_else(|| {
-            OperationError::Object(ObjectError::UnexpectedObjectType {
+        if object.object_type() != &T::WORKBENCH_TYPE {
+            return Err(ObjectError::UnexpectedObjectType {
                 expected: T::WORKBENCH_TYPE,
                 actual: object.object_type().clone(),
-            })
-        })?;
-        let mut query = resource.query();
-        if let Some(version) = version {
-            query = query.version(version);
+            }
+            .into());
         }
-        query.request(client)
+        let mut request = AdtRequest::new(Method::GET, object.uri().clone());
+        if let Some(version) = version {
+            request.push_query(query_parameter::VERSION, version.as_str());
+        }
+        let media_types = T::Properties::SUPPORTED_VERSIONS
+            .iter()
+            .map(|version| T::Properties::media_type(*version))
+            .collect::<Vec<_>>();
+        request.set_accepts(&media_types);
+        request.set_cache_revalidation(None);
+        Ok(request)
     }
 
     fn properties_to_json(
@@ -177,7 +210,7 @@ where
         object: &ObjectRef<()>,
         media_type: &str,
         properties: serde_json::Value,
-    ) -> Result<String, ObjectError> {
+    ) -> Result<Vec<u8>, ObjectError> {
         T::properties_to_xml(object, media_type, properties)
     }
 

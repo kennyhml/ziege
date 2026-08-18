@@ -1,7 +1,9 @@
 use std::{env, error::Error, io};
 
 use tracing_subscriber::EnvFilter;
-use zadt::{AccessMode, Class, Client, DataElement, Operation, ReqwestTransport, TransportExt};
+use zadt::{
+    Class, ClassCreateProperties, ClassTemplate, Client, Operation, ReqwestTransport, TransportExt,
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -30,16 +32,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let client = Client::new(transport).discover().await?;
 
+    let props = ClassCreateProperties::builder()
+        .description("this is a test")
+        .package("$TMP")
+        .template(ClassTemplate::new("CL_SMI_OA2C_CONFIG_SFSF"))
+        .build()?;
+
+    println!("{props:#?}");
+
     let object = client
-        .object::<Class>("ZZZZ")?
-        .query()
+        .object::<Class>("ZMYNEWCLASSV7")?
+        .create(props)
         .execute(&client)
         .await?;
 
-    let source = object.source()?.query().execute(&client).await?;
-    let res = object.activation().forced(false).execute(&client).await?;
-
-    println!("{res:#?}");
+    println!("{object:#?}");
 
     Ok(())
 }

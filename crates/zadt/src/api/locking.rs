@@ -107,6 +107,22 @@ impl ObjectLock {
         self.access_mode
     }
 
+    pub(crate) fn validate_modification_for<T>(
+        &self,
+        object: &ObjectRef<T>,
+    ) -> Result<(), ObjectError> {
+        if !object.same_identity(&self.object) {
+            return Err(ObjectError::ObjectLockMismatch {
+                expected: object.to_string(),
+                actual: self.object.to_string(),
+            });
+        }
+        if self.access_mode != AccessMode::Modify {
+            return Err(ObjectError::ObjectLockNotModifiable);
+        }
+        Ok(())
+    }
+
     /// Returns whether changes to this object are transport relevant.
     pub fn is_transport_relevant(&self) -> bool {
         self.transport_relevant

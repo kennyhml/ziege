@@ -416,9 +416,8 @@ pub enum ProjectionError {
 mod test_support {
     use http::{HeaderMap, StatusCode};
     use zadt::{
-        AdtObject, AdtObjectQuery, AdtResponse, AdtUri, ObjectPropertiesQuery, ObjectRef,
-        ObjectType, Operation, OperationResponse, Ready, RepositoryContentQuery,
-        RepositoryObjectEntry,
+        AdtObject, AdtResponse, AdtUri, ObjectPropertiesQuery, ObjectRef, ObjectType, Operation,
+        OperationResponse, Ready, RepositoryContentQuery, RepositoryObjectEntry,
     };
 
     pub fn repository_entry(name: &str, object_type: &str, uri: &str) -> RepositoryObjectEntry {
@@ -484,7 +483,7 @@ mod test_support {
         headers.insert(http::header::ETAG, etag.parse().unwrap());
         let response = AdtResponse::new(StatusCode::OK, headers, body.to_vec());
         let target = reference.uri().clone();
-        <AdtObjectQuery as Operation<Ready>>::decode(
+        <ObjectPropertiesQuery<()> as Operation<Ready>>::decode(
             &query,
             OperationResponse::new(response, target),
         )

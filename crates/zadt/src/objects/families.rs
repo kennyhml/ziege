@@ -4,7 +4,9 @@ mod dtel;
 mod prog;
 
 pub use clas::{
-    Class, ClassProperties, ClassPropertiesVersion, ClassSourceComponent, ClassSourceProperties,
+    Class, ClassCategory, ClassCreateProperties, ClassCreatePropertiesBuilder,
+    ClassCreatePropertiesBuilderError, ClassProperties, ClassPropertiesVersion,
+    ClassSourceComponent, ClassSourceProperties, ClassTemplate, ClassTemplateProperty,
 };
 pub use devc::{
     Package, PackageAssignment, PackageAttributes, PackageProperties, PackagePropertiesVersion,

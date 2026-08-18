@@ -1,39 +1,30 @@
 use serde::{Deserialize, Serialize};
+use zadt_macros::object_type;
 
 use super::super::{GlobalWorkbenchType, ObjectRef, PropertyModel, Source};
-use crate::objects::macros::object_type;
 use crate::{AdvertisedLink, AdvertisedObjectReference};
 
-object_type! {
-    /// The ABAP program object type.
-    pub type Program = ProgramProperties;
-
+#[object_type(
     workbench_type = "PROG/P",
     collection(
         scheme = "http://www.sap.com/adt/categories/programs",
         term = "programs",
     ),
-    capabilities(
-        Source,
-        Run,
-        UpdateProperties,
-    ),
-}
+    capabilities(Source, Run, UpdateProperties)
+)]
+/// The ABAP program object type.
+pub type Program = ProgramProperties;
 
-object_type! {
-    /// The standalone ABAP include object type.
-    pub type Include = IncludeProperties;
-
+#[object_type(
     workbench_type = "PROG/I",
     collection(
         scheme = "http://www.sap.com/adt/categories/programs",
         term = "includes",
     ),
-    capabilities(
-        Source,
-        UpdateProperties,
-    ),
-}
+    capabilities(Source, UpdateProperties)
+)]
+/// The standalone ABAP include object type.
+pub type Include = IncludeProperties;
 
 impl ObjectRef<Program> {
     #[cfg(test)]
@@ -418,13 +409,16 @@ mod tests {
             crate::AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
             Program::WORKBENCH_TYPE,
         );
-        let xml = Program::DESCRIPTOR
-            .properties_to_xml(
-                &object,
-                ProgramPropertiesVersion::V3.media_type(),
-                serde_json::to_value(&program).unwrap(),
-            )
-            .unwrap();
+        let xml = String::from_utf8(
+            Program::DESCRIPTOR
+                .properties_to_xml(
+                    &object,
+                    ProgramPropertiesVersion::V3.media_type(),
+                    serde_json::to_value(&program).unwrap(),
+                )
+                .unwrap(),
+        )
+        .unwrap();
 
         assert!(xml.contains("<program:abapProgram"));
         assert!(xml.contains("xmlns:program=\"http://www.sap.com/adt/programs/programs\""));
@@ -448,13 +442,16 @@ mod tests {
             crate::AdtUri::parse("/sap/bc/adt/programs/includes/ztest").unwrap(),
             Include::WORKBENCH_TYPE,
         );
-        let xml = Include::DESCRIPTOR
-            .properties_to_xml(
-                &object,
-                IncludePropertyVersion::V2.media_type(),
-                serde_json::to_value(&include).unwrap(),
-            )
-            .unwrap();
+        let xml = String::from_utf8(
+            Include::DESCRIPTOR
+                .properties_to_xml(
+                    &object,
+                    IncludePropertyVersion::V2.media_type(),
+                    serde_json::to_value(&include).unwrap(),
+                )
+                .unwrap(),
+        )
+        .unwrap();
 
         assert!(xml.contains("<include:abapInclude"));
         assert!(xml.contains("xmlns:include=\"http://www.sap.com/adt/programs/includes\""));

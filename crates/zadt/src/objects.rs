@@ -3,24 +3,28 @@ use crate::vocabulary::CategoryId;
 mod capabilities;
 pub(crate) mod descriptors;
 mod families;
-pub(crate) mod macros;
+mod language_version;
 mod object;
 mod reference;
 mod version;
 mod workbench;
 
+pub use capabilities::{
+    Create, CreationPropertyModel, PropertyModel, Source, SourceComponents, UpdateProperties,
+};
 pub(crate) use capabilities::{ImmediateRun, RunCapability};
-pub use capabilities::{PropertyModel, Source, SourceComponents, UpdateProperties};
 pub(crate) use descriptors::ObjectTypeDescriptor;
 pub(crate) use descriptors::RuntimeObjectTypeDescriptor;
 pub use families::{
-    Class, ClassProperties, ClassPropertiesVersion, ClassSourceComponent, ClassSourceProperties,
-    DataElement, DataElementDefinition, DataElementProperties, DataElementPropertiesVersion,
-    Include, IncludeProperties, IncludePropertyVersion, Package, PackageAssignment,
-    PackageAttributes, PackageProperties, PackagePropertiesVersion, PackageTransport,
-    PackageUseAccess, Program, ProgramProperties, ProgramPropertiesVersion, SyntaxConfiguration,
-    SyntaxLanguage,
+    Class, ClassCategory, ClassCreateProperties, ClassCreatePropertiesBuilder,
+    ClassCreatePropertiesBuilderError, ClassProperties, ClassPropertiesVersion,
+    ClassSourceComponent, ClassSourceProperties, ClassTemplate, ClassTemplateProperty, DataElement,
+    DataElementDefinition, DataElementProperties, DataElementPropertiesVersion, Include,
+    IncludeProperties, IncludePropertyVersion, Package, PackageAssignment, PackageAttributes,
+    PackageProperties, PackagePropertiesVersion, PackageTransport, PackageUseAccess, Program,
+    ProgramProperties, ProgramPropertiesVersion, SyntaxConfiguration, SyntaxLanguage,
 };
+pub use language_version::AbapLanguageVersion;
 pub use object::AdtObject;
 pub use reference::{AdvertisedObjectReference, ObjectRef, ObjectReferences};
 pub use version::ObjectVersion;

@@ -67,11 +67,69 @@ pub trait PropertyModel: std::fmt::Debug + DeserializeOwned + Serialize + Send +
 
     fn object_type(&self) -> &GlobalWorkbenchType;
 
+    fn belongs_to<T>(&self, reference: &ObjectRef<T>) -> bool {
+        self.object_name() == reference.name() && self.object_type() == reference.object_type()
+    }
+
+    fn to_xml_for<T>(&self, reference: &ObjectRef<T>) -> Result<Vec<u8>, ObjectError> {
+        if !self.belongs_to(reference) {
+            return Err(ObjectError::UnexpectedObjectReference {
+                expected: reference.to_string(),
+                actual: format!("{} ({})", self.object_name(), self.object_type()),
+            });
+        }
+        Self::XML_NAMESPACES
+            .iter()
+            .fold(
+                serde_xml_rs::SerdeXml::new(),
+                |serializer, &(prefix, namespace)| serializer.namespace(prefix, namespace),
+            )
+            .to_string(&self)
+            .map(String::into_bytes)
+            .map_err(ObjectError::InvalidRequest)
+    }
+
     fn version_from_media_type(media_type: &str) -> Option<Self::Version> {
         Self::SUPPORTED_VERSIONS
             .iter()
             .copied()
             .find(|version| media_types_match(Self::media_type(*version), media_type))
+    }
+}
+
+/// A creation payload whose object identity is supplied by its reference.
+#[doc(hidden)]
+pub trait CreationPropertyModel: PropertyModel {
+    fn set_identity<T>(&mut self, reference: &ObjectRef<T>);
+}
+
+/// An object family that can be created through its collection resource.
+pub trait Create: ObjectType {
+    /// The sparse properties representation accepted during creation.
+    type CreateProperties: CreationPropertyModel;
+
+    /// The media version used to serialize the creation payload.
+    const CREATE_VERSION: <Self::CreateProperties as PropertyModel>::Version;
+
+    #[doc(hidden)]
+    fn creation_properties_to_xml(
+        reference: &ObjectRef<()>,
+        mut properties: serde_json::Value,
+    ) -> Result<Vec<u8>, ObjectError> {
+        if let serde_json::Value::Object(values) = &mut properties {
+            values.insert(
+                "@adtcore:name".to_owned(),
+                serde_json::Value::String(reference.name().to_owned()),
+            );
+            values.insert(
+                "@adtcore:type".to_owned(),
+                serde_json::Value::String(reference.object_type().to_string()),
+            );
+        }
+        let mut properties: Self::CreateProperties =
+            serde_json::from_value(properties).map_err(ObjectError::InvalidPropertiesJson)?;
+        properties.set_identity(reference);
+        properties.to_xml_for(reference)
     }
 }
 
@@ -87,32 +145,9 @@ pub trait UpdateProperties: ObjectType {
     fn properties_to_xml(
         object: &ObjectRef<()>,
         properties: serde_json::Value,
-    ) -> Result<String, ObjectError> {
+    ) -> Result<Vec<u8>, ObjectError> {
         let properties: Self::Properties =
             serde_json::from_value(properties).map_err(ObjectError::InvalidPropertiesJson)?;
-        if properties.object_name() != object.name() {
-            return Err(ObjectError::UnexpectedObjectReference {
-                expected: object.to_string(),
-                actual: format!(
-                    "{} ({})",
-                    properties.object_name(),
-                    properties.object_type()
-                ),
-            });
-        }
-        if properties.object_type() != object.object_type() {
-            return Err(ObjectError::UnexpectedObjectType {
-                expected: object.object_type().clone(),
-                actual: properties.object_type().clone(),
-            });
-        }
-        Self::Properties::XML_NAMESPACES
-            .iter()
-            .fold(
-                serde_xml_rs::SerdeXml::new(),
-                |serializer, &(prefix, namespace)| serializer.namespace(prefix, namespace),
-            )
-            .to_string(&properties)
-            .map_err(ObjectError::InvalidRequest)
+        properties.to_xml_for(object)
     }
 }

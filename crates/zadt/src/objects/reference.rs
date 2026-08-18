@@ -59,6 +59,17 @@ impl<T> ObjectRef<T> {
     ) -> Option<&'static dyn descriptors::RuntimeObjectTypeDescriptor> {
         descriptors::object_type_descriptor(&self.object_type)
     }
+
+    pub(crate) fn same_identity<U>(&self, other: &ObjectRef<U>) -> bool {
+        self.uri == other.uri && self.name == other.name && self.object_type == other.object_type
+    }
+
+    pub(crate) fn unsupported_capability(&self, capability: &'static str) -> ObjectError {
+        ObjectError::UnsupportedCapability {
+            object_type: self.object_type.clone(),
+            capability,
+        }
+    }
 }
 
 impl<T: ObjectType> ObjectRef<T> {
@@ -164,6 +175,21 @@ impl<T> From<&ObjectRef<T>> for AdvertisedObjectReference {
             name: Some(value.name.clone()),
             ..Default::default()
         }
+    }
+}
+
+impl From<String> for AdvertisedObjectReference {
+    fn from(name: String) -> Self {
+        Self {
+            name: Some(name),
+            ..Default::default()
+        }
+    }
+}
+
+impl From<&str> for AdvertisedObjectReference {
+    fn from(name: &str) -> Self {
+        name.to_owned().into()
     }
 }
 
