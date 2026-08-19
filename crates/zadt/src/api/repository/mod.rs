@@ -13,7 +13,9 @@ pub use content::{
 pub use facets::{
     RepositoryFacetDefinition, RepositoryFacetValuesLink, RepositoryFacets, RepositoryFacetsQuery,
 };
-pub use favorites::FavoriteObjectsQuery;
+pub use favorites::{
+    FavoriteObject, FavoriteObjectList, FavoriteObjectsQuery, FavoriteObjectsUpdate,
+};
 pub use object_properties::{
     RepositoryObjectProperties, RepositoryObjectPropertiesQuery,
     RepositoryObjectPropertiesQueryBuilder, RepositoryObjectPropertiesQueryBuilderError,

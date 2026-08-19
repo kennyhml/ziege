@@ -126,7 +126,7 @@ fn repository_content_response_decodes_one_layer() {
 #[test]
 fn favorite_objects_response_decodes_objects() {
     let client = ready_client(REPOSITORY_DISCOVERY_XML);
-    let query = FavoriteObjectsQuery::new(None);
+    let query = FavoriteObjectsQuery::new();
     let request = query.request(&client).unwrap();
     assert_eq!(
         request.target().as_str(),
@@ -169,7 +169,44 @@ fn favorite_objects_response_decodes_objects() {
     );
     assert_eq!(favorites.objects[0].object_type.as_str(), "PROG/P");
     assert_eq!(favorites.objects[0].name, "Z_TEST");
-    assert_eq!(favorites.objects[0].list, "$");
+    assert_eq!(favorites.objects[0].list.as_deref(), Some("$"));
+}
+
+#[test]
+fn favorite_objects_update_serializes_transactions() {
+    let client = ready_client(REPOSITORY_DISCOVERY_XML);
+    let object = ObjectRef::<Program>::for_test(
+        "Z_TEST",
+        AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
+    )
+    .erase();
+    let mut update = FavoriteObjectsUpdate::new("TEAM");
+    update.add(&object).remove(&object);
+
+    let request = update.request(&client).unwrap();
+    let body = std::str::from_utf8(request.body()).unwrap();
+
+    assert_eq!(request.method(), Method::POST);
+    assert_eq!(
+        request.target().as_str(),
+        "/sap/bc/adt/repository/informationsystem/virtualfolders/favorites/lists/TEAM"
+    );
+    assert_eq!(
+        request.headers().get(header::ACCEPT).unwrap(),
+        media_type::REPOSITORY_FAVORITES_COMPLETE
+    );
+    assert_eq!(
+        request.headers().get(header::CONTENT_TYPE).unwrap(),
+        media_type::REPOSITORY_FAVORITES_MODIFY
+    );
+    assert!(body.contains("xmlns:vf=\"http://www.sap.com/adt/ris/virtualFolders\""));
+    assert!(body.contains("xmlns:adtcore=\"http://www.sap.com/adt/core\""));
+    assert!(body.contains("adtcore:uri=\"/sap/bc/adt/programs/programs/z_test\""));
+    assert!(body.contains("adtcore:type=\"PROG/P\""));
+    assert!(body.contains("adtcore:name=\"Z_TEST\""));
+    assert!(body.contains("listId=\"TEAM\""));
+    assert!(body.contains("operation=\"A\""));
+    assert!(body.contains("operation=\"R\""));
 }
 
 #[test]
