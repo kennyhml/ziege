@@ -144,6 +144,7 @@ fn expand_object_type_item(
             }
         }
     };
+    let has_object_structure = capabilities.structure.is_some();
     let properties_to_xml = if capabilities.update_properties.is_some() {
         quote! {
             {
@@ -233,6 +234,10 @@ fn expand_object_type_item(
                 name: &str,
             ) -> Option<&'a str> {
                 #source_component_uri
+            }
+
+            fn has_object_structure() -> bool {
+                #has_object_structure
             }
 
             fn properties_to_xml(
@@ -399,6 +404,7 @@ struct Capabilities {
     create: Option<CreateCapability>,
     source: Option<Span>,
     source_components: Option<Span>,
+    structure: Option<Span>,
     run: Option<Span>,
     update_properties: Option<Span>,
 }
@@ -441,6 +447,9 @@ fn parse_capabilities(input: ParseStream<'_>) -> Result<Capabilities> {
         } else if capability == "SourceComponents" {
             reject_capability_arguments(&content, &capability)?;
             set_capability(&mut capabilities.source_components, capability)?;
+        } else if capability == "Structure" {
+            reject_capability_arguments(&content, &capability)?;
+            set_capability(&mut capabilities.structure, capability)?;
         } else if capability == "Run" {
             reject_capability_arguments(&content, &capability)?;
             set_capability(&mut capabilities.run, capability)?;

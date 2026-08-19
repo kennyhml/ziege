@@ -1,0 +1,53 @@
+use std::{env, error::Error, io};
+
+use zadt::{Class, ClassCreateProperties, Client, Object, Operation, ReqwestTransport};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    let transport = ReqwestTransport::builder()
+        .destination(required_env("SAP_DESTINATION")?)
+        .sap_client(required_env("SAP_CLIENT")?)
+        .language(env::var("SAP_LANGUAGE").unwrap_or_else(|_| "EN".to_owned()))
+        .basic_auth(required_env("SAP_USERNAME")?, required_env("SAP_PASSWORD")?)
+        .build()?;
+    let client = Client::new(transport).discover().await?;
+
+    let mut arguments = env::args().skip(1);
+    let usage = "usage: object_creation <class> <package> [transport]";
+    let name = arguments
+        .next()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, usage))?;
+    let package = arguments
+        .next()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, usage))?;
+    let transport = arguments.next();
+    if arguments.next().is_some() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, usage).into());
+    }
+
+    let properties = ClassCreateProperties::builder()
+        .description("Hello from ZADT!")
+        .package(package.as_str())
+        .is_final(true)
+        .build()?;
+
+    let mut request = client.object::<Class>(&name)?.create(properties);
+
+    if let Some(transport) = transport {
+        request.transport(transport.into());
+    }
+
+    let result: Option<Object<Class>> = request.execute(&client).await?;
+    println!("{result:#?}");
+
+    Ok(())
+}
+
+fn required_env(name: &str) -> Result<String, io::Error> {
+    env::var(name).map_err(|source| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("missing required environment variable `{name}`: {source}"),
+        )
+    })
+}

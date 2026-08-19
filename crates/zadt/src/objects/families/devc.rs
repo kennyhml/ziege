@@ -117,6 +117,10 @@ impl PropertyModel for PackageProperties {
     fn object_type(&self) -> &GlobalWorkbenchType {
         &self.object_type
     }
+
+    fn links(&self) -> &[AdvertisedLink] {
+        &self.links
+    }
 }
 
 /// Package behavior and editor capability flags.

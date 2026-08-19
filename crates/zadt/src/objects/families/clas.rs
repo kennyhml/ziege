@@ -1,23 +1,11 @@
 use super::super::{
     AbapLanguageVersion, AdvertisedObjectReference, GlobalWorkbenchType, ObjectRef, ObjectType,
-    PropertyModel, Source, SourceComponents,
+    PropertyModel, Source, SourceComponents, Structure,
 };
 use crate::resource::AdvertisedLink;
 use serde::{Deserialize, Serialize};
 use zadt_macros::{CreateProperties, object_type};
 
-#[object_type(
-    properties = ClassProperties,
-    workbench_type = "CLAS/OC",
-    collection(scheme = "http://www.sap.com/adt/categories/oo", term = "classes",),
-    capabilities(
-        Create(ClassCreateProperties, ClassPropertiesVersion::V4),
-        Source,
-        SourceComponents,
-        Run,
-        UpdateProperties,
-    )
-)]
 /// An ABAP global class object.
 ///
 /// Classes are one of the more special objects ADT provides, because the main
@@ -29,6 +17,19 @@ use zadt_macros::{CreateProperties, object_type};
 /// source, local types and the testclasses. [`ClassSourceComponent`] describes
 /// the full list of possible source includes. Which includes are available also
 /// differs based on how old the class is. Legacy classes follow a different layout.
+#[object_type(
+    properties = ClassProperties,
+    workbench_type = "CLAS/OC",
+    collection(scheme = "http://www.sap.com/adt/categories/oo", term = "classes",),
+    capabilities(
+        Create(ClassCreateProperties, ClassPropertiesVersion::V4),
+        Source,
+        SourceComponents,
+        Structure,
+        Run,
+        UpdateProperties,
+    )
+)]
 pub struct Class;
 
 /// The media-type version used to decode class properties.
@@ -231,6 +232,10 @@ impl PropertyModel for ClassProperties {
     fn object_type(&self) -> &GlobalWorkbenchType {
         &self.object_type
     }
+
+    fn links(&self) -> &[AdvertisedLink] {
+        &self.links
+    }
 }
 
 /// Semantic category assigned to an ABAP class.
@@ -394,6 +399,8 @@ impl SourceComponents for Class {
             .map(|source| source.source_uri.as_str())
     }
 }
+
+impl Structure for Class {}
 
 /// The syntax configuration embedded in a class-properties payload.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

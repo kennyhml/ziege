@@ -1,6 +1,10 @@
 use std::{fmt, marker::PhantomData};
 
-use crate::{AdtUri, ObjectError, ObjectRef, resource::resolve_href};
+use crate::{
+    AdtUri, ObjectError, ObjectRef,
+    resource::{AdvertisedLink, resolve_href},
+    vocabulary::relation,
+};
 
 /// A typed related-resource location and the object that advertised it.
 ///
@@ -85,6 +89,32 @@ pub type SourceVersionsRef = OwnedResourceRef<kind::SourceVersions>;
 
 /// The structural representation advertised for an ADT object.
 pub type ObjectStructureRef = OwnedResourceRef<kind::ObjectStructure>;
+
+impl ObjectStructureRef {
+    pub(crate) fn from_relations(
+        object: ObjectRef<()>,
+        links: &[AdvertisedLink],
+    ) -> Result<Option<Self>, ObjectError> {
+        links
+            .iter()
+            .find(|link| link.relation.as_deref() == Some(relation::OBJECT_STRUCTURE))
+            .map(|link| Self::from_relation(object, link))
+            .transpose()
+    }
+
+    fn from_relation(object: ObjectRef<()>, link: &AdvertisedLink) -> Result<Self, ObjectError> {
+        let resolved =
+            resolve_href(object.uri(), &link.href).map_err(|source| ObjectError::InvalidLink {
+                href: link.href.clone(),
+                source,
+            })?;
+        let mut reference = Self::new(object, resolved.target);
+        reference.query = resolved.query;
+        reference.fragment = resolved.fragment;
+        reference.etag = link.etag.clone();
+        Ok(reference)
+    }
+}
 
 /// The text-elements resource advertised for an ADT object.
 pub type TextElementsRef = OwnedResourceRef<kind::TextElements>;

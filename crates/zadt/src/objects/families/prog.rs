@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use zadt_macros::object_type;
 
-use super::super::{GlobalWorkbenchType, ObjectRef, PropertyModel, Source};
+use super::super::{GlobalWorkbenchType, ObjectRef, PropertyModel, Source, Structure};
 use crate::{AdvertisedLink, AdvertisedObjectReference};
 
 #[object_type(
@@ -11,7 +11,7 @@ use crate::{AdvertisedLink, AdvertisedObjectReference};
         scheme = "http://www.sap.com/adt/categories/programs",
         term = "programs",
     ),
-    capabilities(Source, Run, UpdateProperties)
+    capabilities(Source, Structure, Run, UpdateProperties)
 )]
 /// The ABAP program object type.
 pub struct Program;
@@ -214,6 +214,10 @@ impl PropertyModel for ProgramProperties {
     fn object_type(&self) -> &GlobalWorkbenchType {
         &self.object_type
     }
+
+    fn links(&self) -> &[AdvertisedLink] {
+        &self.links
+    }
 }
 
 impl Source for Program {
@@ -221,6 +225,8 @@ impl Source for Program {
         Some(&properties.source_uri)
     }
 }
+
+impl Structure for Program {}
 
 /// The complete standalone ABAP include-properties payload.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -324,6 +330,10 @@ impl PropertyModel for IncludeProperties {
 
     fn object_type(&self) -> &GlobalWorkbenchType {
         &self.object_type
+    }
+
+    fn links(&self) -> &[AdvertisedLink] {
+        &self.links
     }
 }
 

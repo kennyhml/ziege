@@ -34,6 +34,347 @@ const TRANSPORT_CREATE_RESULT_MEDIA_TYPE: &str =
     "application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.CorrectionRequestResult";
 const PLAIN_TEXT_MEDIA_TYPE: &str = "text/plain";
 
+/// Checks whether and where a repository operation must be recorded in CTS.
+///
+/// The backend maps the ADT resource URI to a CTS object key and returns
+/// candidate requests, existing locks, and diagnostic messages. Link-up mode
+/// enables the multi-request workflow used for compound objects such as ABAP
+/// classes.
+#[derive(Builder, Clone, Debug)]
+#[builder(pattern = "owned", setter(into))]
+pub struct TransportCheck {
+    /// The ADT resource being created or modified.
+    uri: AdtUri,
+
+    /// Whether the resource is being inserted or modified.
+    operation: TransportCheckOperation,
+
+    /// Optional package context (`DEVCLASS`).
+    #[builder(default, setter(strip_option))]
+    package: Option<String>,
+
+    /// Optional super-package context used while creating packages.
+    #[builder(default, setter(strip_option))]
+    super_package: Option<String>,
+
+    /// Explicit package recording choice (`RECORD_CHANGES`).
+    #[builder(default, setter(strip_option))]
+    record_changes: Option<bool>,
+
+    /// Optional request link-up behavior.
+    #[builder(default, setter(strip_option))]
+    link_up_mode: Option<TransportCheckLinkUpMode>,
+}
+
+impl TransportCheck {
+    const TARGET: CollectionTarget = CollectionTarget::new(TRANSPORT_CHECKS_CATEGORY);
+
+    /// Creates a transport check for one repository operation.
+    pub fn new(uri: AdtUri, operation: TransportCheckOperation) -> Self {
+        Self {
+            uri,
+            operation,
+            package: None,
+            super_package: None,
+            record_changes: None,
+            link_up_mode: None,
+        }
+    }
+
+    /// Creates a configurable transport-check builder.
+    pub fn builder() -> TransportCheckBuilder {
+        TransportCheckBuilder::default()
+    }
+}
+
+impl Operation<Ready> for TransportCheck {
+    type Response = TransportCheckResult;
+    type Kind = Stateless;
+
+    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
+        let body = TransportCheckRequest::new(
+            &self.uri,
+            self.operation.as_str(),
+            self.package.as_deref(),
+            self.super_package.as_deref(),
+            self.record_changes.unwrap_or_default(),
+        )
+        .serialize()?;
+
+        let mut request = Self::TARGET.request(client, Method::POST)?;
+        if let Some(link_up_mode) = self.link_up_mode {
+            request.push_query("linkUpMode", link_up_mode.as_str());
+        }
+        request.set_accept(TRANSPORT_CHECK_MEDIA_TYPE);
+        request.set_content_type(TRANSPORT_CHECK_MEDIA_TYPE);
+        request.set_body(body);
+        Ok(request)
+    }
+
+    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+        if response.status() != StatusCode::OK {
+            return Err(ResponseError::unexpected_status(response.response()));
+        }
+        if response.body().is_empty() {
+            return Err(CtsError::MissingTransportCheckResponse.into());
+        }
+
+        let content_type = response.content_type(TRANSPORT_CHECKS_CATEGORY)?;
+
+        if !media_types_match(TRANSPORT_CHECK_MEDIA_TYPE, content_type) {
+            return Err(ResponseError::UnsupportedContentType {
+                category: TRANSPORT_CHECKS_CATEGORY,
+                content_type: content_type.to_owned(),
+                supported: vec![TRANSPORT_CHECK_MEDIA_TYPE.to_owned()],
+            });
+        }
+
+        TransportCheckResult::parse(response.body()).map_err(Into::into)
+    }
+}
+
+/// Queries transports given a user and a transport kind.
+///
+/// This sends an `_action=FIND` GET request to the transports endpoint,
+/// the response type is custom ABAP ASX.
+///
+/// If the user is omitted, the current user is used by the backend.
+///
+/// Backend handler: `CL_CTS_ADT_RES_OBJ_RECORD`
+#[derive(Clone, Debug, Builder)]
+#[builder(pattern = "owned", setter(into), default)]
+pub struct TransportsQuery {
+    /// The transport owner. The backend uses the current user when omitted.
+    #[builder(setter(strip_option))]
+    user: Option<String>,
+
+    /// The transport functions to include.
+    kind: QueryTransportKind,
+}
+
+impl Default for TransportsQuery {
+    fn default() -> Self {
+        Self {
+            user: None,
+            kind: QueryTransportKind::Kind(TransportKind::Workbench),
+        }
+    }
+}
+
+impl TransportsQuery {
+    const TARGET: CollectionTarget = CollectionTarget::new(TRANSPORTS_CATEGORY);
+
+    /// Creates a query for the current user's Workbench transports.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates a configurable transport query.
+    pub fn builder() -> TransportsQueryBuilder {
+        TransportsQueryBuilder::default()
+    }
+}
+
+impl Operation<Ready> for TransportsQuery {
+    type Response = TransportRequests;
+    type Kind = Stateless;
+
+    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
+        let mut request = Self::TARGET.request(client, Method::GET)?;
+        request.push_query(query_parameter::ACTION, PostAction::Find.as_str());
+        if let Some(user) = &self.user {
+            request.push_query("user", user);
+        }
+        request.push_query("trfunction", self.kind.as_str());
+        request.set_accept(TRANSPORT_REQUESTS_MEDIA_TYPE);
+        Ok(request)
+    }
+
+    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+        if response.status() != StatusCode::OK {
+            return Err(ResponseError::unexpected_status(response.response()));
+        }
+        if response.body().is_empty() {
+            return Ok(TransportRequests::default());
+        }
+
+        let content_type = response.content_type(TRANSPORTS_CATEGORY)?;
+
+        if !media_types_match(TRANSPORT_REQUESTS_MEDIA_TYPE, content_type) {
+            return Err(ResponseError::UnsupportedContentType {
+                category: TRANSPORTS_CATEGORY,
+                content_type: content_type.to_owned(),
+                supported: vec![TRANSPORT_REQUESTS_MEDIA_TYPE.to_owned()],
+            });
+        }
+
+        TransportRequests::parse(response.body()).map_err(Into::into)
+    }
+}
+
+/// Fetches one CTS transport request by its transport number.
+///
+/// The backend returns an empty `200 OK` response when the transport does not
+/// exist, represented by `None` in the operation response. This is handled
+/// by the same endpoint as [`TransportsQuery`].
+///
+/// Backend handler: `CL_CTS_ADT_RES_OBJ_RECORD`
+#[derive(Clone, Debug)]
+pub struct TransportPropertiesQuery {
+    transport_number: TransportNumber,
+}
+
+impl TransportPropertiesQuery {
+    const TARGET: CollectionTarget = CollectionTarget::new(TRANSPORTS_CATEGORY);
+
+    /// Creates a query for one transport request.
+    pub fn new(transport_number: impl Into<TransportNumber>) -> Self {
+        Self {
+            transport_number: transport_number.into(),
+        }
+    }
+
+    /// Returns the requested transport number.
+    pub fn transport_number(&self) -> &TransportNumber {
+        &self.transport_number
+    }
+}
+
+impl Operation<Ready> for TransportPropertiesQuery {
+    type Response = Option<TransportRequest>;
+    type Kind = Stateless;
+
+    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
+        let collection = Self::TARGET.collection(client)?;
+        let target = collection
+            .target()
+            .map_err(ObjectError::InvalidTarget)?
+            .append_segments([self.transport_number.as_str()])
+            .map_err(ObjectError::InvalidTarget)?;
+        let mut request = AdtRequest::new(Method::GET, target);
+        request.set_accept(TRANSPORT_REQUEST_MEDIA_TYPE);
+        Ok(request)
+    }
+
+    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+        if response.status() != StatusCode::OK {
+            return Err(ResponseError::unexpected_status(response.response()));
+        }
+        if response.body().is_empty() {
+            return Ok(None);
+        }
+
+        let content_type = response.content_type(TRANSPORTS_CATEGORY)?;
+
+        if !media_types_match(TRANSPORT_REQUEST_MEDIA_TYPE, content_type) {
+            return Err(ResponseError::UnsupportedContentType {
+                category: TRANSPORTS_CATEGORY,
+                content_type: content_type.to_owned(),
+                supported: vec![TRANSPORT_REQUEST_MEDIA_TYPE.to_owned()],
+            });
+        }
+
+        TransportRequest::parse(response.body())
+            .map(Some)
+            .map_err(Into::into)
+    }
+}
+
+impl TransportRequest {
+    /// Creates a query that refreshes this transport request's properties.
+    pub fn properties_query(&self) -> TransportPropertiesQuery {
+        TransportPropertiesQuery::new(self.number.clone())
+    }
+}
+
+/// Creates a CTS transport request.
+///
+/// The modern ASX contract is preferred when advertised by discovery, with a
+/// fallback to the legacy contract. The backend determines whether the created
+/// request is Workbench or Customizing from the referenced object.
+///
+/// Backend handler: `CL_CTS_ADT_RES_OBJ_RECORD`
+#[derive(Builder, Clone, Debug)]
+#[builder(setter(into))]
+pub struct TransportCreate {
+    /// The transport description.
+    description: String,
+
+    /// The package (`DEVCLASS`) used to determine the transport target.
+    #[builder(default, setter(strip_option))]
+    package: Option<String>,
+
+    /// An optional ADT resource that determines the request type and package.
+    #[builder(default, setter(strip_option))]
+    reference: Option<AdtUri>,
+
+    /// A transport layer used when creating a transport for a new package.
+    #[builder(default, setter(strip_option))]
+    transport_layer: Option<String>,
+}
+
+impl TransportCreate {
+    const TARGET: CollectionTarget = CollectionTarget::new(TRANSPORTS_CATEGORY);
+
+    /// Creates a configurable transport request builder.
+    pub fn builder() -> TransportCreateBuilder {
+        TransportCreateBuilder::default()
+    }
+}
+
+impl Operation<Ready> for TransportCreate {
+    type Response = TransportCreation;
+    type Kind = Stateless;
+
+    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
+        let collection = Self::TARGET.collection(client)?;
+        let media_version =
+            TransportCreateMediaVersion::from_accepted(collection.accepted_media_types())?;
+        let body = TransportCreateRequest::new(
+            self.package.as_deref(),
+            &self.description,
+            self.reference.as_ref(),
+        )
+        .serialize()?;
+
+        let target = collection.target().map_err(ObjectError::InvalidTarget)?;
+        let mut request = AdtRequest::new(Method::POST, target);
+        if let Some(transport_layer) = &self.transport_layer {
+            request.push_query("transportLayer", transport_layer);
+        }
+        request.set_accept(media_version.response_media_type());
+        request.set_content_type(media_version.media_type());
+        request.set_body(body);
+        Ok(request)
+    }
+
+    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+        if !response.status().is_success() {
+            return Err(ResponseError::unexpected_status(response.response()));
+        }
+        if response.body().is_empty() {
+            return Err(CtsError::MissingTransportCreationResponse.into());
+        }
+
+        let content_type = response.content_type(TRANSPORTS_CATEGORY)?;
+
+        if media_types_match(TRANSPORT_CREATE_RESULT_MEDIA_TYPE, content_type) {
+            TransportCreation::parse(response.body()).map_err(Into::into)
+        } else if media_types_match(PLAIN_TEXT_MEDIA_TYPE, content_type) {
+            TransportCreation::parse_legacy(response.body()).map_err(Into::into)
+        } else {
+            Err(ResponseError::UnsupportedContentType {
+                category: TRANSPORTS_CATEGORY,
+                content_type: content_type.to_owned(),
+                supported: vec![
+                    TRANSPORT_CREATE_RESULT_MEDIA_TYPE.to_owned(),
+                    PLAIN_TEXT_MEDIA_TYPE.to_owned(),
+                ],
+            })
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum TransportCreateMediaVersion {
     V1,
@@ -1113,105 +1454,6 @@ impl TransportCheckLinkUpMode {
     }
 }
 
-/// Checks whether and where a repository operation must be recorded in CTS.
-///
-/// The backend maps the ADT resource URI to a CTS object key and returns
-/// candidate requests, existing locks, and diagnostic messages. Link-up mode
-/// enables the multi-request workflow used for compound objects such as ABAP
-/// classes.
-#[derive(Builder, Clone, Debug)]
-#[builder(pattern = "owned", setter(into))]
-pub struct TransportCheck {
-    /// The ADT resource being created or modified.
-    uri: AdtUri,
-
-    /// Whether the resource is being inserted or modified.
-    operation: TransportCheckOperation,
-
-    /// Optional package context (`DEVCLASS`).
-    #[builder(default, setter(strip_option))]
-    package: Option<String>,
-
-    /// Optional super-package context used while creating packages.
-    #[builder(default, setter(strip_option))]
-    super_package: Option<String>,
-
-    /// Explicit package recording choice (`RECORD_CHANGES`).
-    #[builder(default, setter(strip_option))]
-    record_changes: Option<bool>,
-
-    /// Optional request link-up behavior.
-    #[builder(default, setter(strip_option))]
-    link_up_mode: Option<TransportCheckLinkUpMode>,
-}
-
-impl TransportCheck {
-    const TARGET: CollectionTarget = CollectionTarget::new(TRANSPORT_CHECKS_CATEGORY);
-
-    /// Creates a transport check for one repository operation.
-    pub fn new(uri: AdtUri, operation: TransportCheckOperation) -> Self {
-        Self {
-            uri,
-            operation,
-            package: None,
-            super_package: None,
-            record_changes: None,
-            link_up_mode: None,
-        }
-    }
-
-    /// Creates a configurable transport-check builder.
-    pub fn builder() -> TransportCheckBuilder {
-        TransportCheckBuilder::default()
-    }
-}
-
-impl Operation<Ready> for TransportCheck {
-    type Response = TransportCheckResult;
-    type Kind = Stateless;
-
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        let body = TransportCheckRequest::new(
-            &self.uri,
-            self.operation.as_str(),
-            self.package.as_deref(),
-            self.super_package.as_deref(),
-            self.record_changes.unwrap_or_default(),
-        )
-        .serialize()?;
-
-        let mut request = Self::TARGET.request(client, Method::POST)?;
-        if let Some(link_up_mode) = self.link_up_mode {
-            request.push_query("linkUpMode", link_up_mode.as_str());
-        }
-        request.set_accept(TRANSPORT_CHECK_MEDIA_TYPE);
-        request.set_content_type(TRANSPORT_CHECK_MEDIA_TYPE);
-        request.set_body(body);
-        Ok(request)
-    }
-
-    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        if response.status() != StatusCode::OK {
-            return Err(ResponseError::unexpected_status(response.response()));
-        }
-        if response.body().is_empty() {
-            return Err(CtsError::MissingTransportCheckResponse.into());
-        }
-
-        let content_type = response.content_type(TRANSPORT_CHECKS_CATEGORY)?;
-
-        if !media_types_match(TRANSPORT_CHECK_MEDIA_TYPE, content_type) {
-            return Err(ResponseError::UnsupportedContentType {
-                category: TRANSPORT_CHECKS_CATEGORY,
-                content_type: content_type.to_owned(),
-                supported: vec![TRANSPORT_CHECK_MEDIA_TYPE.to_owned()],
-            });
-        }
-
-        TransportCheckResult::parse(response.body()).map_err(Into::into)
-    }
-}
-
 /// Transport functions included in a transport query.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum QueryTransportKind {
@@ -1231,248 +1473,6 @@ impl QueryTransportKind {
 impl From<TransportKind> for QueryTransportKind {
     fn from(kind: TransportKind) -> Self {
         Self::Kind(kind)
-    }
-}
-
-/// Queries transports given a user and a transport kind.
-///
-/// This sends an `_action=FIND` GET request to the transports endpoint,
-/// the response type is custom ABAP ASX.
-///
-/// If the user is omitted, the current user is used by the backend.
-///
-/// Backend handler: `CL_CTS_ADT_RES_OBJ_RECORD`
-#[derive(Clone, Debug, Builder)]
-#[builder(pattern = "owned", setter(into), default)]
-pub struct TransportsQuery {
-    /// The transport owner. The backend uses the current user when omitted.
-    #[builder(setter(strip_option))]
-    user: Option<String>,
-
-    /// The transport functions to include.
-    kind: QueryTransportKind,
-}
-
-impl Default for TransportsQuery {
-    fn default() -> Self {
-        Self {
-            user: None,
-            kind: QueryTransportKind::Kind(TransportKind::Workbench),
-        }
-    }
-}
-
-impl TransportsQuery {
-    const TARGET: CollectionTarget = CollectionTarget::new(TRANSPORTS_CATEGORY);
-
-    /// Creates a query for the current user's Workbench transports.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Creates a configurable transport query.
-    pub fn builder() -> TransportsQueryBuilder {
-        TransportsQueryBuilder::default()
-    }
-}
-
-impl Operation<Ready> for TransportsQuery {
-    type Response = TransportRequests;
-    type Kind = Stateless;
-
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        let mut request = Self::TARGET.request(client, Method::GET)?;
-        request.push_query(query_parameter::ACTION, PostAction::Find.as_str());
-        if let Some(user) = &self.user {
-            request.push_query("user", user);
-        }
-        request.push_query("trfunction", self.kind.as_str());
-        request.set_accept(TRANSPORT_REQUESTS_MEDIA_TYPE);
-        Ok(request)
-    }
-
-    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        if response.status() != StatusCode::OK {
-            return Err(ResponseError::unexpected_status(response.response()));
-        }
-        if response.body().is_empty() {
-            return Ok(TransportRequests::default());
-        }
-
-        let content_type = response.content_type(TRANSPORTS_CATEGORY)?;
-
-        if !media_types_match(TRANSPORT_REQUESTS_MEDIA_TYPE, content_type) {
-            return Err(ResponseError::UnsupportedContentType {
-                category: TRANSPORTS_CATEGORY,
-                content_type: content_type.to_owned(),
-                supported: vec![TRANSPORT_REQUESTS_MEDIA_TYPE.to_owned()],
-            });
-        }
-
-        TransportRequests::parse(response.body()).map_err(Into::into)
-    }
-}
-
-/// Fetches one CTS transport request by its transport number.
-///
-/// The backend returns an empty `200 OK` response when the transport does not
-/// exist, represented by `None` in the operation response. This is handled
-/// by the same endpoint as [`TransportsQuery`].
-///
-/// Backend handler: `CL_CTS_ADT_RES_OBJ_RECORD`
-#[derive(Clone, Debug)]
-pub struct TransportPropertiesQuery {
-    transport_number: TransportNumber,
-}
-
-impl TransportPropertiesQuery {
-    const TARGET: CollectionTarget = CollectionTarget::new(TRANSPORTS_CATEGORY);
-
-    /// Creates a query for one transport request.
-    pub fn new(transport_number: impl Into<TransportNumber>) -> Self {
-        Self {
-            transport_number: transport_number.into(),
-        }
-    }
-
-    /// Returns the requested transport number.
-    pub fn transport_number(&self) -> &TransportNumber {
-        &self.transport_number
-    }
-}
-
-impl Operation<Ready> for TransportPropertiesQuery {
-    type Response = Option<TransportRequest>;
-    type Kind = Stateless;
-
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        let collection = Self::TARGET.collection(client)?;
-        let target = collection
-            .target()
-            .map_err(ObjectError::InvalidTarget)?
-            .append_segments([self.transport_number.as_str()])
-            .map_err(ObjectError::InvalidTarget)?;
-        let mut request = AdtRequest::new(Method::GET, target);
-        request.set_accept(TRANSPORT_REQUEST_MEDIA_TYPE);
-        Ok(request)
-    }
-
-    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        if response.status() != StatusCode::OK {
-            return Err(ResponseError::unexpected_status(response.response()));
-        }
-        if response.body().is_empty() {
-            return Ok(None);
-        }
-
-        let content_type = response.content_type(TRANSPORTS_CATEGORY)?;
-
-        if !media_types_match(TRANSPORT_REQUEST_MEDIA_TYPE, content_type) {
-            return Err(ResponseError::UnsupportedContentType {
-                category: TRANSPORTS_CATEGORY,
-                content_type: content_type.to_owned(),
-                supported: vec![TRANSPORT_REQUEST_MEDIA_TYPE.to_owned()],
-            });
-        }
-
-        TransportRequest::parse(response.body())
-            .map(Some)
-            .map_err(Into::into)
-    }
-}
-
-impl TransportRequest {
-    /// Creates a query that refreshes this transport request's properties.
-    pub fn properties_query(&self) -> TransportPropertiesQuery {
-        TransportPropertiesQuery::new(self.number.clone())
-    }
-}
-
-/// Creates a CTS transport request.
-///
-/// The modern ASX contract is preferred when advertised by discovery, with a
-/// fallback to the legacy contract. The backend determines whether the created
-/// request is Workbench or Customizing from the referenced object.
-///
-/// Backend handler: `CL_CTS_ADT_RES_OBJ_RECORD`
-#[derive(Builder, Clone, Debug)]
-#[builder(setter(into))]
-pub struct TransportCreate {
-    /// The transport description.
-    description: String,
-
-    /// The package (`DEVCLASS`) used to determine the transport target.
-    #[builder(default, setter(strip_option))]
-    package: Option<String>,
-
-    /// An optional ADT resource that determines the request type and package.
-    #[builder(default, setter(strip_option))]
-    reference: Option<AdtUri>,
-
-    /// A transport layer used when creating a transport for a new package.
-    #[builder(default, setter(strip_option))]
-    transport_layer: Option<String>,
-}
-
-impl TransportCreate {
-    const TARGET: CollectionTarget = CollectionTarget::new(TRANSPORTS_CATEGORY);
-
-    /// Creates a configurable transport request builder.
-    pub fn builder() -> TransportCreateBuilder {
-        TransportCreateBuilder::default()
-    }
-}
-
-impl Operation<Ready> for TransportCreate {
-    type Response = TransportCreation;
-    type Kind = Stateless;
-
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        let collection = Self::TARGET.collection(client)?;
-        let media_version =
-            TransportCreateMediaVersion::from_accepted(collection.accepted_media_types())?;
-        let body = TransportCreateRequest::new(
-            self.package.as_deref(),
-            &self.description,
-            self.reference.as_ref(),
-        )
-        .serialize()?;
-
-        let target = collection.target().map_err(ObjectError::InvalidTarget)?;
-        let mut request = AdtRequest::new(Method::POST, target);
-        if let Some(transport_layer) = &self.transport_layer {
-            request.push_query("transportLayer", transport_layer);
-        }
-        request.set_accept(media_version.response_media_type());
-        request.set_content_type(media_version.media_type());
-        request.set_body(body);
-        Ok(request)
-    }
-
-    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        if !response.status().is_success() {
-            return Err(ResponseError::unexpected_status(response.response()));
-        }
-        if response.body().is_empty() {
-            return Err(CtsError::MissingTransportCreationResponse.into());
-        }
-
-        let content_type = response.content_type(TRANSPORTS_CATEGORY)?;
-
-        if media_types_match(TRANSPORT_CREATE_RESULT_MEDIA_TYPE, content_type) {
-            TransportCreation::parse(response.body()).map_err(Into::into)
-        } else if media_types_match(PLAIN_TEXT_MEDIA_TYPE, content_type) {
-            TransportCreation::parse_legacy(response.body()).map_err(Into::into)
-        } else {
-            Err(ResponseError::UnsupportedContentType {
-                category: TRANSPORTS_CATEGORY,
-                content_type: content_type.to_owned(),
-                supported: vec![
-                    TRANSPORT_CREATE_RESULT_MEDIA_TYPE.to_owned(),
-                    PLAIN_TEXT_MEDIA_TYPE.to_owned(),
-                ],
-            })
-        }
     }
 }
 

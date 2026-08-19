@@ -115,6 +115,10 @@ impl PropertyModel for DataElementProperties {
         &self.object_type
     }
 
+    fn links(&self) -> &[AdvertisedLink] {
+        &self.links
+    }
+
     fn media_type(version: Self::Version) -> &'static str {
         version.media_type()
     }

@@ -3,6 +3,7 @@ pub(crate) mod classes;
 pub(crate) mod creation;
 pub(crate) mod discovery;
 pub(crate) mod locking;
+pub(crate) mod objectstructure;
 pub(crate) mod packages;
 pub(crate) mod programs;
 pub(crate) mod properties;

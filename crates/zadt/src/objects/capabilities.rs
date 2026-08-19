@@ -2,8 +2,8 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use super::{GlobalWorkbenchType, ObjectRef, ObjectType};
 use crate::{
-    ObjectError, ResponseError, compatibility::media_types_match, target::TemplateTarget,
-    vocabulary::CategoryId,
+    ObjectError, ResponseError, compatibility::media_types_match, resource::AdvertisedLink,
+    target::TemplateTarget, vocabulary::CategoryId,
 };
 
 /// Marks an object capable of being executed immediately (not a job).
@@ -54,6 +54,9 @@ pub trait SourceComponents: Source {
     fn source_component_uri<'a>(properties: &'a Self::Properties, name: &str) -> Option<&'a str>;
 }
 
+/// An object whose loaded properties can advertise a structural representation.
+pub trait Structure: ObjectType {}
+
 /// A serializable ADT properties payload and its media-version vocabulary.
 #[doc(hidden)]
 pub trait PropertyModel: std::fmt::Debug + DeserializeOwned + Serialize + Send + Sync {
@@ -70,6 +73,11 @@ pub trait PropertyModel: std::fmt::Debug + DeserializeOwned + Serialize + Send +
 
     /// The workbench object type these properties belong to
     fn object_type(&self) -> &GlobalWorkbenchType;
+
+    /// Atom links advertised at the root of this properties representation.
+    fn links(&self) -> &[AdvertisedLink] {
+        &[]
+    }
 
     /// Verifies whether the properties belong to the given object.
     ///

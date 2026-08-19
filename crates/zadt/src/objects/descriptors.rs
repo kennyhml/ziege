@@ -42,6 +42,12 @@ pub(crate) trait RuntimeObjectTypeDescriptor: std::fmt::Debug + Sync {
         name: &str,
     ) -> Result<Option<crate::SourceRef>, ObjectError>;
 
+    fn object_structure(
+        &self,
+        object: &ObjectRef<()>,
+        properties: &serde_json::Value,
+    ) -> Result<Option<crate::ObjectStructureRef>, ObjectError>;
+
     fn properties_request(
         &self,
         object: &ObjectRef<()>,
@@ -80,6 +86,10 @@ pub(crate) trait RuntimeObjectType: ObjectType {
 
     fn source_component_uri<'a>(_properties: &'a Self::Properties, _name: &str) -> Option<&'a str> {
         None
+    }
+
+    fn has_object_structure() -> bool {
+        false
     }
 
     fn properties_to_xml(
@@ -157,6 +167,19 @@ where
         T::source_component_uri(&properties, name)
             .map(|href| crate::resource::refs::source_from_href(object.clone(), href))
             .transpose()
+    }
+
+    fn object_structure(
+        &self,
+        object: &ObjectRef<()>,
+        properties: &serde_json::Value,
+    ) -> Result<Option<crate::ObjectStructureRef>, ObjectError> {
+        let properties: T::Properties = serde_json::from_value(properties.clone())
+            .map_err(ObjectError::InvalidPropertiesJson)?;
+        if !T::has_object_structure() {
+            return Ok(None);
+        }
+        crate::ObjectStructureRef::from_relations(object.clone(), properties.links())
     }
 
     fn properties_request(

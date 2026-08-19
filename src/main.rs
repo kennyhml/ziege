@@ -32,21 +32,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let client = Client::new(transport).discover().await?;
 
-    let props = ClassCreateProperties::builder()
-        .description("this is a test")
-        .package("$TMP")
-        .template(ClassTemplate::new("CL_SMI_OA2C_CONFIG_SFSF"))
-        .build()?;
-
-    println!("{props:#?}");
-
-    let object = client
+    let res = client
         .object::<Class>("ZMYNEWCLASSV7")?
-        .create(props)
+        .query()
+        .execute(&client)
+        .await?
+        .object_structure()?
+        .short_descriptions(true)
         .execute(&client)
         .await?;
 
-    println!("{object:#?}");
+    println!("{res:#?}");
 
     Ok(())
 }

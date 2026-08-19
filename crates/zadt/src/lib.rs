@@ -25,6 +25,7 @@ pub use api::discovery::{
     Capabilities, Category, Collection, CoreDiscoveryQuery, DiscoveryQuery, TemplateLink, Workspace,
 };
 pub use api::locking::{AccessMode, LockRequest, ObjectLock, UnlockRequest};
+pub use api::objectstructure::{ObjectStructure, ObjectStructureElement, ObjectStructureQuery};
 pub use api::packages::{
     PackageInterfaceReference, PackageReference, PackageSettings, PackageSettingsQuery,
     PackageTree, PackageTreeKind, PackageTreeNode, PackageTreeQuery,
@@ -70,7 +71,7 @@ pub use objects::{
     ObjectReferences, ObjectState, ObjectType, ObjectVersion, Package, PackageAssignment,
     PackageAttributes, PackageProperties, PackagePropertiesVersion, PackageTransport,
     PackageUseAccess, Program, ProgramProperties, ProgramPropertiesVersion, PropertyModel, Source,
-    SourceComponents, SyntaxConfiguration, SyntaxLanguage, UpdateProperties,
+    SourceComponents, Structure, SyntaxConfiguration, SyntaxLanguage, UpdateProperties,
 };
 pub use operation::{
     BatchError, BatchKey, BatchOperation, BatchResponses, Batched, Execute, IfNoneMatch, Operation,

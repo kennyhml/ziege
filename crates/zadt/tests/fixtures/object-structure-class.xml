@@ -1,0 +1,67 @@
+<abapsource:objectStructureElement
+    xml:base="/sap/bc/adt/oo/classes/zmynewclassv7/objectstructure"
+    adtcore:name="ZMYNEWCLASSV7"
+    visibility="public"
+    final="true"
+    adtcore:type="CLAS/OC"
+    xmlns:adtcore="http://www.sap.com/adt/core"
+    xmlns:abapsource="http://www.sap.com/adt/abapsource"
+    xmlns:atom="http://www.w3.org/2005/Atom">
+    <atom:link
+        rel="http://www.sap.com/adt/relations/source/definitionIdentifier"
+        href="./source/main#start=1,6;end=1,19" />
+    <atom:link
+        rel="http://www.sap.com/adt/relations/source/implementationIdentifier"
+        href="./source/main#start=20,6;end=20,19" />
+    <atom:link
+        rel="http://www.sap.com/adt/relations/source/definitionBlock"
+        href="./source/main#start=1,0;end=16,8" />
+    <atom:link
+        rel="http://www.sap.com/adt/relations/source/implementationBlock"
+        href="./source/main#start=20,0;end=67,8" />
+    <abapsource:objectStructureElement
+        adtcore:type="CLAS/OR"
+        adtcore:name="IF_OA2C_CONFIG_EXTENSION">
+        <atom:link
+            rel="http://www.sap.com/adt/relations/source/definitionIdentifier"
+            href="./source/main#start=9,13;end=9,37" />
+        <atom:link
+            rel="http://www.sap.com/adt/relations/source/implementationIdentifier"
+            href="./source/main#start=23,9;end=23,57"
+            type="CLAS/OM" />
+    </abapsource:objectStructureElement>
+    <abapsource:objectStructureElement
+        adtcore:type="CLAS/OA"
+        constant="true"
+        adtcore:name="GC_COMPANY_ID"
+        level="static"
+        readOnly="true"
+        visibility="public">
+        <atom:link
+            rel="http://www.sap.com/adt/relations/source/definitionIdentifier"
+            href="./source/main#start=11,12;end=11,25" />
+    </abapsource:objectStructureElement>
+    <abapsource:objectStructureElement
+        clif_name="ZMYNEWCLASSV7"
+        adtcore:type="CLAS/OM"
+        adtcore:name="IF_OA2C_CONFIG_EXTENSION~GET_AC_AUTH_REQU_PARAMS"
+        level="instance"
+        visibility="public">
+        <atom:link
+            rel="http://www.sap.com/adt/relations/source/implementationIdentifier"
+            href="./source/main#start=23,9;end=23,57"
+            type="CLAS/OM" />
+        <atom:link
+            rel="http://www.sap.com/adt/relations/source/implementationBlock"
+            href="./source/main#start=23,2;end=25,11" />
+    </abapsource:objectStructureElement>
+    <abapsource:objectStructureElement
+        adtcore:type="CLAS/OCX"
+        adtcore:name="ZMYNEWCLASSV7"
+        isExternalRef="true"
+        description="Text Elements">
+        <atom:link
+            rel="http://www.sap.com/adt/relations/source/definitionIdentifier"
+            href="/sap/bc/adt/textelements/classes/zmynewclassv7" />
+    </abapsource:objectStructureElement>
+</abapsource:objectStructureElement>
