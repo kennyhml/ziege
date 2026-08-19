@@ -32,6 +32,7 @@ pub use api::packages::{
 };
 pub use api::programs::{ProgramRun, ProgramRunResult};
 pub use api::properties::{ObjectPropertiesQuery, ObjectPropertiesUpdate};
+pub use api::repository::FavoriteObjectsQuery;
 pub use api::repository::{
     RepositoryContent, RepositoryContentOperation, RepositoryContentQuery,
     RepositoryContentQueryBuilder, RepositoryContentQueryBuilderError, RepositoryFacet,

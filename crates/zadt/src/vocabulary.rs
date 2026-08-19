@@ -66,6 +66,10 @@ pub(crate) mod media_type {
         "application/vnd.sap.adt.repository.virtualfolders.request.v1+xml";
     pub const REPOSITORY_CONTENT_RESULT: &str =
         "application/vnd.sap.adt.repository.virtualfolders.result.v1+xml";
+    pub const REPOSITORY_FAVORITES_COMPLETE: &str =
+        "application/vnd.sap.adt.repository.favorites.v1+xml";
+    pub const REPOSITORY_FAVORITES_MODIFY: &str =
+        "application/vnd.sap.adt.repository.favorites.modify.v1+xml";
     pub const REPOSITORY_OBJECT_PROPERTIES: &str =
         "application/vnd.sap.adt.repository.objproperties.result.v1+xml";
     pub const SOURCE: &str = "text/plain";
