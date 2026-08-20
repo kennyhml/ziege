@@ -1,3 +1,5 @@
+use serde::Serialize;
+
 /// Version of a repository object.
 ///
 /// These values are the public URI vocabulary for `IF_ADT_URI_QUERY_PARAMETERS`.
@@ -52,6 +54,15 @@ impl ObjectVersion {
 impl std::fmt::Display for ObjectVersion {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(self.as_str())
+    }
+}
+
+impl Serialize for ObjectVersion {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
     }
 }
 

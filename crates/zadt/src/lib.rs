@@ -16,8 +16,10 @@ pub mod transport;
 
 pub use api::activation::{
     ActivationRun, ActivationRunMessage, ActivationRunMessageText, ActivationRunMessages,
-    ActivationRunMode, ActivationRunProperties, InactiveCtsObject, InactiveCtsObjectEntry,
-    InactiveCtsObjectTransport, InactiveCtsObjects, InactiveCtsObjectsQuery, InactiveObjectsQuery,
+    ActivationRunMode, ActivationRunProperties, CheckRunArtifact, CheckRunMessage,
+    CheckRunMessageList, CheckRunObject, CheckRunReport, CheckRunReporter, CheckRunReports,
+    CheckRunT100Key, InactiveCtsObject, InactiveCtsObjectEntry, InactiveCtsObjectTransport,
+    InactiveCtsObjects, InactiveCtsObjectsQuery, InactiveObjectsQuery, ObjectCheckRun,
 };
 pub use api::classes::{ClassRun, ClassRunResult};
 pub use api::creation::CreateObjectRequest;

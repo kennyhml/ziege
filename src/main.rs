@@ -2,8 +2,8 @@ use std::{env, error::Error, io};
 
 use tracing_subscriber::EnvFilter;
 use zadt::{
-    Class, ClassCreateProperties, ClassTemplate, Client, DataElement, FavoriteObjectsQuery,
-    FavoriteObjectsUpdate, ObjectType, Operation, Package, ReqwestTransport, TransportExt,
+    AdtUri, CheckRunArtifact, CheckRunObject, CheckRunReporter, Client, ObjectCheckRun,
+    ObjectVersion, Operation, Program, ReqwestTransport, TransportExt,
 };
 
 #[tokio::main]
@@ -33,13 +33,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let client = Client::new(transport).discover().await?;
 
-    let object = &client
-        .object::<Package>("ZTTT")?
-        .query()
-        .execute(&client)
-        .await?;
+    let object = client.object::<Program>("ZZTFTFRT")?;
+    let source_uri = AdtUri::parse(&format!("{}/source/main", object.uri()))?;
+    let mut run = ObjectCheckRun::new();
+    run.push_object(
+        CheckRunObject::new(&object, ObjectVersion::WorkingArea).artifact(CheckRunArtifact::new(
+            source_uri,
+            "text/plain; charset=utf-8",
+            b"REPORT zztftfrt.\n\nthis is not valid abap.\n",
+        )),
+    )
+    .push_reporter(CheckRunReporter::EXTENDED_CHECK_RUNNER);
 
-    let res = object.transport_requests().execute(&client).await?;
+    let res = run.execute(&client).await?;
 
     println!("{res:#?}");
 
