@@ -2,9 +2,9 @@ use http::{Method, StatusCode};
 use serde::Deserialize;
 
 use crate::{
-    AdtUri, AdvertisedLink, Client, ClientState, Object, ObjectError, ObjectStructureRef,
-    ObjectVersion, Operation, OperationError, OperationResponse, PropertyModel, Relations,
-    ResponseError, Stateless, Structure,
+    AdtUri, AdvertisedLink, AnyObject, Client, ClientState, Object, ObjectError,
+    ObjectStructureRef, ObjectVersion, Operation, OperationError, OperationResponse, PropertyModel,
+    Relations, ResponseError, Stateless, Structure,
     protocol::AdtRequest,
     resource::resolve_href,
     vocabulary::{media_type, query_parameter, relation},
@@ -133,7 +133,7 @@ impl<T: Structure> Object<T> {
     }
 }
 
-impl Object<()> {
+impl AnyObject {
     /// Creates an object-structure query through the runtime descriptor.
     pub fn object_structure(&self) -> Result<ObjectStructureQuery, ObjectError> {
         let Some(descriptor) = self.reference().descriptor() else {
@@ -356,7 +356,7 @@ mod tests {
         );
         assert!(query.resource.query.is_empty());
 
-        let runtime_object = Object::new(
+        let runtime_object = AnyObject::new(
             runtime_reference,
             "application/vnd.sap.adt.oo.classes.v4+xml",
             None,

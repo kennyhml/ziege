@@ -175,19 +175,6 @@ fn expand_object_type_item(
         impl crate::objects::private::Sealed for #object {}
 
         #(#conditional_attrs)*
-        impl crate::objects::ObjectState for #object {
-            type Representation = #model;
-
-            fn validate_representation(
-                reference: &crate::objects::ObjectRef<Self>,
-                media_type: &str,
-                properties: &Self::Representation,
-            ) -> Result<(), crate::error::ObjectError> {
-                crate::objects::validate_typed_object::<Self>(reference, media_type, properties)
-            }
-        }
-
-        #(#conditional_attrs)*
         impl crate::objects::ObjectType for #object {
             type Properties = #model;
 
@@ -996,9 +983,9 @@ mod tests {
         .to_string();
 
         assert!(expanded.contains("pub struct Class"));
-        assert!(expanded.contains("impl crate :: objects :: ObjectState for Class"));
-        assert!(expanded.contains("type Representation = ClassProperties"));
+        assert!(expanded.contains("impl crate :: objects :: ObjectType for Class"));
         assert!(expanded.contains("type Properties = ClassProperties"));
+        assert!(!expanded.contains("ObjectState"));
         assert!(!expanded.contains("AdtObject"));
         assert!(expanded.contains("capability : \"object creation\""));
         assert!(expanded.contains("crate :: objects :: descriptors :: unsupported_update"));

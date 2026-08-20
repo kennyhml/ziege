@@ -3,9 +3,9 @@ use serde::Deserialize;
 
 use super::{common::RepositoryFacet, content::RepositoryObjectEntry};
 use crate::{
-    AdtRequest, AdtUri, CategoryId, Client, GlobalWorkbenchType, Object, ObjectError, ObjectRef,
-    ObjectState, Operation, OperationError, OperationResponse, Package, Ready, RepositoryError,
-    ResponseError, Stateless, TransportNumber, TransportStatus,
+    AdtRequest, AdtUri, AnyObject, CategoryId, Client, GlobalWorkbenchType, Object, ObjectError,
+    ObjectRef, ObjectType, Operation, OperationError, OperationResponse, Package, Ready,
+    RepositoryError, ResponseError, Stateless, TransportNumber, TransportStatus,
     resource::{AdvertisedLink, Relations},
     target::CollectionTarget,
     vocabulary::{media_type, query_parameter},
@@ -142,7 +142,13 @@ impl<T> ObjectRef<T> {
     }
 }
 
-impl<T: ObjectState> Object<T> {
+impl<T: ObjectType> Object<T> {
+    pub fn transport_requests(&self) -> AssignedTransportsQuery {
+        AssignedTransportsQuery::new(self.reference())
+    }
+}
+
+impl AnyObject {
     pub fn transport_requests(&self) -> AssignedTransportsQuery {
         AssignedTransportsQuery::new(self.reference())
     }

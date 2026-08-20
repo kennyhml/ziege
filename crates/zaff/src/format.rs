@@ -2,8 +2,8 @@ use std::fmt;
 
 use serde::{Serialize, de::DeserializeOwned};
 use zadt::{
-    Class, DataElement, GlobalWorkbenchType, Include, Object, ObjectRef, Package, Program,
-    PropertyModel, SourceRef,
+    AnyObject, Class, DataElement, GlobalWorkbenchType, Include, Object, ObjectRef, Package,
+    Program, PropertyModel, SourceRef,
 };
 
 use crate::{ProjectionError, registry};
@@ -207,7 +207,7 @@ impl ProjectedFile {
     }
 
     /// Renders runtime ADT properties through this file's AFF codec.
-    pub fn render_properties(&self, properties: &Object<()>) -> Result<String, ProjectionError> {
+    pub fn render_properties(&self, properties: &AnyObject) -> Result<String, ProjectionError> {
         let FileBacking::Properties(object) = &self.backing else {
             return Err(ProjectionError::NotPropertiesFile {
                 component: self.component,
@@ -225,9 +225,9 @@ impl ProjectedFile {
     /// Merges edited AFF content into the original runtime ADT properties.
     pub fn merge_properties(
         &self,
-        original: &Object<()>,
+        original: &AnyObject,
         edited: &str,
-    ) -> Result<Object<()>, ProjectionError> {
+    ) -> Result<AnyObject, ProjectionError> {
         let FileBacking::Properties(object) = &self.backing else {
             return Err(ProjectionError::NotPropertiesFile {
                 component: self.component,
@@ -245,7 +245,7 @@ impl ProjectedFile {
 
 fn ensure_properties_owner(
     expected: &ObjectRef<()>,
-    properties: &Object<()>,
+    properties: &AnyObject,
 ) -> Result<(), ProjectionError> {
     if properties.reference().uri() != expected.uri()
         || properties.reference().name() != expected.name()
@@ -293,7 +293,7 @@ pub(crate) trait FileDescriptor: fmt::Debug + Sync {
     }
 }
 
-#[doc(hidden)]
+/// Adapter used to project typed and runtime-loaded ADT objects.
 pub trait ProjectionObject {
     fn reference(&self) -> ObjectRef<()>;
     fn object_type(&self) -> &GlobalWorkbenchType;
@@ -355,7 +355,7 @@ macro_rules! impl_sourceless_projection_object {
     };
 }
 
-impl ProjectionObject for Object<()> {
+impl ProjectionObject for AnyObject {
     fn reference(&self) -> ObjectRef<()> {
         self.reference().clone()
     }
@@ -365,7 +365,7 @@ impl ProjectionObject for Object<()> {
     }
 
     fn source(&self) -> Result<Option<SourceRef>, zadt::ObjectError> {
-        match Object::<()>::source(self) {
+        match AnyObject::source(self) {
             Ok(source) => Ok(Some(source)),
             Err(zadt::ObjectError::MissingRelation { relation: "source" }) => Ok(None),
             Err(error) => Err(error),
@@ -373,7 +373,7 @@ impl ProjectionObject for Object<()> {
     }
 
     fn source_component(&self, name: &str) -> Result<Option<SourceRef>, zadt::ObjectError> {
-        Object::<()>::source_component(self, name)
+        AnyObject::source_component(self, name)
     }
 }
 
@@ -399,8 +399,8 @@ impl_source_projection_object!(Object<Include>, Object<Program>);
 impl_sourceless_projection_object!(Object<DataElement>, Object<Package>);
 
 pub(crate) trait PropertiesCodec: fmt::Debug + Sync {
-    fn render(&self, properties: &Object<()>) -> Result<String, ProjectionError>;
-    fn merge(&self, original: &Object<()>, edited: &str) -> Result<Object<()>, ProjectionError>;
+    fn render(&self, properties: &AnyObject) -> Result<String, ProjectionError>;
+    fn merge(&self, original: &AnyObject, edited: &str) -> Result<AnyObject, ProjectionError>;
 }
 
 #[derive(Debug)]
@@ -473,7 +473,7 @@ impl FileDescriptor for UnbackedFileDescriptor {
 }
 
 pub(crate) fn decode_properties<P>(
-    properties: &Object<()>,
+    properties: &AnyObject,
     object_type: &'static str,
 ) -> Result<P, ProjectionError>
 where
@@ -504,10 +504,10 @@ where
 }
 
 pub(crate) fn encode_properties<P>(
-    original: &Object<()>,
+    original: &AnyObject,
     payload: P,
     object_type: &'static str,
-) -> Result<Object<()>, ProjectionError>
+) -> Result<AnyObject, ProjectionError>
 where
     P: Serialize,
 {

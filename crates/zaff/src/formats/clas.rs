@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use zadt::{
-    AbapLanguageVersion, AdvertisedObjectReference, Class, ClassCategory, ClassProperties,
-    GlobalWorkbenchType, Object, ObjectType,
+    AbapLanguageVersion, AdvertisedObjectReference, AnyObject, Class, ClassCategory,
+    ClassProperties, GlobalWorkbenchType, ObjectType,
 };
 
 use crate::{
@@ -117,11 +117,11 @@ impl FileDescriptor for ClassMetadata {
 }
 
 impl PropertiesCodec for ClassMetadata {
-    fn render(&self, properties: &Object<()>) -> Result<String, ProjectionError> {
+    fn render(&self, properties: &AnyObject) -> Result<String, ProjectionError> {
         render_class_properties(&decode_properties::<ClassProperties>(properties, "CLAS")?)
     }
 
-    fn merge(&self, original: &Object<()>, edited: &str) -> Result<Object<()>, ProjectionError> {
+    fn merge(&self, original: &AnyObject, edited: &str) -> Result<AnyObject, ProjectionError> {
         let properties = decode_properties::<ClassProperties>(original, "CLAS")?;
         encode_properties(
             original,

@@ -1,8 +1,9 @@
 use http::Method;
 
 use crate::{
-    AdtRequest, CategoryId, Client, Object, ObjectError, ObjectRef, Operation, OperationError,
-    OperationResponse, PropertyModel, Ready, ResponseError, Stateless, TransportNumber,
+    AdtRequest, AnyObject, CategoryId, Client, Object, ObjectError, ObjectRef, Operation,
+    OperationError, OperationResponse, PropertyModel, Ready, ResponseError, Stateless,
+    TransportNumber,
     objects::{Create, CreationPropertyModel},
     target::CollectionTarget,
     vocabulary::query_parameter,
@@ -81,10 +82,10 @@ where
     }
 }
 
-/// Implementation for untyped objects
+/// Implementation for runtime-typed objects.
 impl Operation<Ready> for CreateObjectRequest<(), serde_json::Value> {
     type Kind = Stateless;
-    type Response = Option<Object<()>>;
+    type Response = Option<AnyObject>;
 
     fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
         let descriptor = self.reference.require_descriptor()?;
@@ -132,7 +133,7 @@ where
     }
 }
 
-/// Implementation for untyped objects
+/// Implementation for erased object references.
 impl ObjectRef<()> {
     /// Creates a runtime [`CreateObjectRequest`] for this object.
     ///

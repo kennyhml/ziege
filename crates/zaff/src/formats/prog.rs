@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use zadt::{
-    GlobalWorkbenchType, Include, IncludeProperties, Object, ObjectType, Program,
+    AnyObject, GlobalWorkbenchType, Include, IncludeProperties, ObjectType, Program,
     ProgramProperties, PropertyModel,
 };
 
@@ -113,7 +113,7 @@ impl FileDescriptor for ProgramMetadata {
 }
 
 impl PropertiesCodec for ProgramMetadata {
-    fn render(&self, properties: &Object<()>) -> Result<String, ProjectionError> {
+    fn render(&self, properties: &AnyObject) -> Result<String, ProjectionError> {
         if ProgramProperties::version_from_media_type(properties.media_type()).is_some() {
             return render_program_properties(&decode_properties::<ProgramProperties>(
                 properties, "PROG",
@@ -122,7 +122,7 @@ impl PropertiesCodec for ProgramMetadata {
         render_include_properties(&decode_properties::<IncludeProperties>(properties, "PROG")?)
     }
 
-    fn merge(&self, original: &Object<()>, edited: &str) -> Result<Object<()>, ProjectionError> {
+    fn merge(&self, original: &AnyObject, edited: &str) -> Result<AnyObject, ProjectionError> {
         if ProgramProperties::version_from_media_type(original.media_type()).is_some() {
             let properties = decode_properties::<ProgramProperties>(original, "PROG")?;
             return encode_properties(

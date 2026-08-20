@@ -3,7 +3,7 @@ use http::{Method, StatusCode};
 use crate::{
     client::{Client, ClientState},
     error::{ObjectError, OperationError, ResponseError},
-    objects::{Object, Source, SourceComponents},
+    objects::{AnyObject, Object, Source, SourceComponents},
     operation::{Operation, OperationResponse, Stateful, Stateless},
     protocol::{AdtRequest, EntityTag},
     resource::{SourceRef, refs::source_from_href},
@@ -113,7 +113,7 @@ impl<T: SourceComponents> Object<T> {
     }
 }
 
-impl Object<()> {
+impl AnyObject {
     /// Resolves the primary source advertised by this runtime-typed object.
     pub fn source(&self) -> Result<SourceRef, ObjectError> {
         let Some(descriptor) = self.reference().descriptor() else {

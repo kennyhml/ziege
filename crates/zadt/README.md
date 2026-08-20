@@ -61,7 +61,7 @@ flowchart TB
     subgraph DEFINITION["Object declaration"]
         direction TB
         DECLARATION["<strong>Type declaration</strong><br>#[object_type(<br>properties = ClassProperties,<br>capabilities(Source, Run, ...)<br>)]<br>pub struct Class;"]
-        FAMILY["Generated Class family<br>ObjectType + ObjectState<br>ClassProperties + PropertyModel"]
+        FAMILY["Generated Class family<br>ObjectType<br>ClassProperties + PropertyModel"]
 
         subgraph MARKERS["Marker traits"]
             direction LR
@@ -101,7 +101,7 @@ flowchart TB
     subgraph RESULTS["Type-state-specific results"]
         direction LR
         TYPED_OBJECT["Object&lt;Class&gt;<br>ClassProperties"]
-        RUNTIME_OBJECT["Object&lt;()&gt;<br>serde_json::Value"]
+        RUNTIME_OBJECT["AnyObject<br>serde_json::Value"]
     end
 
     subgraph EXECUTION["Shared execution layer"]
@@ -172,7 +172,7 @@ requests and use the same executors.
 ### Runtime descriptors
 
 Runtime object types use `ObjectRef<()>`. A modeled runtime reference can load an
-`Object<()>` with JSON properties. ZADT selects a registered descriptor from the
+`AnyObject` with JSON properties. ZADT selects a registered descriptor from the
 exact Workbench type and validates capabilities at runtime.
 
 Typed operations dispatch through Rust traits. Runtime operations dispatch through

@@ -3,14 +3,13 @@
 use std::path::Path;
 
 use thiserror::Error;
-use zadt::{GlobalWorkbenchType, Object, ObjectState, SourceRef};
+use zadt::{AnyObject, GlobalWorkbenchType, Object, ObjectType, SourceRef};
 
 mod format;
 mod formats;
 mod language;
 mod registry;
 
-#[doc(hidden)]
 pub use format::ProjectionObject;
 pub use format::{
     Cardinality, ComponentId, FileBacking, FileSpec, ObjectFormat, ProjectedFile, Projection,
@@ -35,7 +34,7 @@ impl TryFrom<&GlobalWorkbenchType> for ObjectFormat {
     }
 }
 
-impl<T: ObjectState> TryFrom<&Object<T>> for ObjectFormat {
+impl<T: ObjectType> TryFrom<&Object<T>> for ObjectFormat {
     type Error = ProjectionError;
 
     fn try_from(object: &Object<T>) -> Result<Self, Self::Error> {
@@ -43,12 +42,18 @@ impl<T: ObjectState> TryFrom<&Object<T>> for ObjectFormat {
     }
 }
 
+impl TryFrom<&AnyObject> for ObjectFormat {
+    type Error = ProjectionError;
+
+    fn try_from(object: &AnyObject) -> Result<Self, Self::Error> {
+        Self::for_workbench_type(object.reference().object_type())
+    }
+}
+
 /// Projects a loaded repository object into its currently materializable AFF files.
-pub fn project<T: ObjectState>(object: &Object<T>) -> Result<Projection, ProjectionError>
-where
-    Object<T>: ProjectionObject,
-{
-    let descriptor = registry::for_workbench_type(object.reference().object_type())?;
+pub fn project(object: &dyn ProjectionObject) -> Result<Projection, ProjectionError> {
+    let reference = object.reference();
+    let descriptor = registry::for_workbench_type(reference.object_type())?;
     let format = descriptor.format();
     let mut files = Vec::new();
     for specification in descriptor.files() {
@@ -59,7 +64,7 @@ where
             continue;
         };
         files.push(ProjectedFile {
-            name: specification.file_name(object.reference().name(), None)?,
+            name: specification.file_name(reference.name(), None)?,
             format,
             cardinality: specification.cardinality,
             component: specification.component(),
@@ -81,25 +86,20 @@ pub struct ResolvedFile {
 
 impl ResolvedFile {
     /// Binds this projected path to the loaded repository object that produced it.
-    pub fn bind<T: ObjectState>(&self, object: &Object<T>) -> Result<FileBacking, ProjectionError>
-    where
-        Object<T>: ProjectionObject,
-    {
-        if !self
-            .object_name
-            .eq_ignore_ascii_case(object.reference().name())
-        {
+    pub fn bind(&self, object: &dyn ProjectionObject) -> Result<FileBacking, ProjectionError> {
+        let reference = object.reference();
+        if !self.object_name.eq_ignore_ascii_case(reference.name()) {
             return Err(ProjectionError::BindingNameMismatch {
                 projected_name: self.object_name.clone(),
-                repository_name: object.reference().name().to_owned(),
+                repository_name: reference.name().to_owned(),
             });
         }
 
-        let repository_format = ObjectFormat::try_from(object)?;
+        let repository_format = ObjectFormat::for_workbench_type(reference.object_type())?;
         if self.format != repository_format {
             return Err(ProjectionError::BindingTypeMismatch {
                 projected_type: self.format.object_type(),
-                repository_type: object.reference().object_type().clone(),
+                repository_type: reference.object_type().clone(),
             });
         }
 
@@ -108,25 +108,19 @@ impl ResolvedFile {
             .iter()
             .find(|file| file.component() == self.component)
             .ok_or_else(|| ProjectionError::UnsupportedFileComponent {
-                object_type: object.reference().object_type().clone(),
+                object_type: reference.object_type().clone(),
                 component: self.component,
             })?;
         specification
             .bind(object, self.language.as_deref())?
             .ok_or_else(|| ProjectionError::UnsupportedFileComponent {
-                object_type: object.reference().object_type().clone(),
+                object_type: reference.object_type().clone(),
                 component: self.component,
             })
     }
 
     /// Resolves this projected file to its ADT source resource.
-    pub fn source_ref<T: ObjectState>(
-        &self,
-        object: &Object<T>,
-    ) -> Result<SourceRef, ProjectionError>
-    where
-        Object<T>: ProjectionObject,
-    {
+    pub fn source_ref(&self, object: &dyn ProjectionObject) -> Result<SourceRef, ProjectionError> {
         let source_backed = registry::by_format(self.format)
             .files()
             .iter()
@@ -419,8 +413,8 @@ pub enum ProjectionError {
 mod test_support {
     use http::{HeaderMap, StatusCode};
     use zadt::{
-        AdtResponse, AdtUri, Object, ObjectPropertiesQuery, ObjectRef, ObjectType, Operation,
-        OperationResponse, Ready, RepositoryContentQuery, RepositoryObjectEntry,
+        AdtResponse, AdtUri, AnyObject, Object, ObjectPropertiesQuery, ObjectRef, ObjectType,
+        Operation, OperationResponse, Ready, RepositoryContentQuery, RepositoryObjectEntry,
     };
 
     pub fn repository_entry(name: &str, object_type: &str, uri: &str) -> RepositoryObjectEntry {
@@ -475,7 +469,7 @@ mod test_support {
         media_type: &'static str,
         etag: &'static str,
         body: &[u8],
-    ) -> Object<()>
+    ) -> AnyObject
     where
         T: ObjectType,
     {

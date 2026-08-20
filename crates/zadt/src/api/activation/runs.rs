@@ -2,9 +2,9 @@ use http::{Method, StatusCode};
 use serde::Deserialize;
 
 use crate::{
-    AdtRequest, AdvertisedLink, AdvertisedObjectReference, CategoryId, Client, Object, ObjectError,
-    ObjectRef, ObjectState, Operation, OperationError, OperationResponse, Ready, ResponseError,
-    Stateless, objects::ObjectReferences, target::CollectionTarget,
+    AdtRequest, AdvertisedLink, AdvertisedObjectReference, AnyObject, CategoryId, Client, Object,
+    ObjectError, ObjectRef, ObjectType, Operation, OperationError, OperationResponse, Ready,
+    ResponseError, Stateless, objects::ObjectReferences, target::CollectionTarget,
 };
 
 const ACTIVATE_OBJECTS: CategoryId = CategoryId {
@@ -140,7 +140,14 @@ where
     }
 }
 
-impl<T: ObjectState> Object<T> {
+impl<T: ObjectType> Object<T> {
+    /// Creates an activation run for this loaded object.
+    pub fn activation(&self) -> ActivationRun {
+        self.reference().activation()
+    }
+}
+
+impl AnyObject {
     /// Creates an activation run for this loaded object.
     pub fn activation(&self) -> ActivationRun {
         self.reference().activation()

@@ -46,7 +46,7 @@ sequenceDiagram
 ```
 
 Metadata files are properties-backed rather than source-backed. The consumer
-queries the projected `ObjectRef<()>` to obtain `Object<()>`, then
+queries the projected `ObjectRef<()>` to obtain `AnyObject`, then
 uses `ProjectedFile::render_properties` and `ProjectedFile::merge_properties`.
 The file's registered family codec validates and transforms the runtime JSON
 through its concrete ZADT property model. Merging retains the original media

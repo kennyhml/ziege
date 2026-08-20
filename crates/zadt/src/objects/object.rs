@@ -1,32 +1,30 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
-use super::{ObjectRef, ObjectState, ObjectType, PropertyModel};
+use super::{ObjectRef, ObjectType, PropertyModel};
 use crate::{EntityTag, ObjectError};
 
 /// A loaded ADT object representation and its transport metadata.
 #[derive(Debug, Serialize)]
-#[serde(bound(serialize = "T::Representation: Serialize"))]
-pub struct Object<T: ObjectState> {
+#[serde(bound(serialize = "T::Properties: Serialize"))]
+pub struct Object<T: ObjectType> {
     reference: ObjectRef<T>,
     media_type: String,
     pub etag: Option<EntityTag>,
-    pub properties: T::Representation,
+    pub properties: T::Properties,
 }
 
 #[derive(Deserialize)]
-#[serde(bound(
-    deserialize = "ObjectRef<T>: Deserialize<'de>, T::Representation: Deserialize<'de>"
-))]
-struct ObjectRepresentation<T: ObjectState> {
+#[serde(bound(deserialize = "ObjectRef<T>: Deserialize<'de>, T::Properties: Deserialize<'de>"))]
+struct ObjectRepresentation<T: ObjectType> {
     reference: ObjectRef<T>,
     media_type: String,
     etag: Option<EntityTag>,
-    properties: T::Representation,
+    properties: T::Properties,
 }
 
 impl<'de, T> Deserialize<'de> for Object<T>
 where
-    T: ObjectState,
+    T: ObjectType,
     ObjectRef<T>: Deserialize<'de>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -34,7 +32,7 @@ where
         D: Deserializer<'de>,
     {
         let object = ObjectRepresentation::<T>::deserialize(deserializer)?;
-        T::validate_representation(&object.reference, &object.media_type, &object.properties)
+        validate_typed_object::<T>(&object.reference, &object.media_type, &object.properties)
             .map_err(serde::de::Error::custom)?;
         Ok(Self::new(
             object.reference,
@@ -45,12 +43,12 @@ where
     }
 }
 
-impl<T: ObjectState> Object<T> {
+impl<T: ObjectType> Object<T> {
     pub(crate) fn new(
         reference: ObjectRef<T>,
         media_type: impl Into<String>,
         etag: Option<EntityTag>,
-        properties: T::Representation,
+        properties: T::Properties,
     ) -> Self {
         Self {
             reference,
@@ -70,15 +68,15 @@ impl<T: ObjectState> Object<T> {
         &self.media_type
     }
 
-    pub(crate) fn into_parts(self) -> (ObjectRef<T>, String, Option<EntityTag>, T::Representation) {
+    pub(crate) fn into_parts(self) -> (ObjectRef<T>, String, Option<EntityTag>, T::Properties) {
         (self.reference, self.media_type, self.etag, self.properties)
     }
 }
 
 impl<T> Clone for Object<T>
 where
-    T: ObjectState,
-    T::Representation: Clone,
+    T: ObjectType,
+    T::Properties: Clone,
 {
     fn clone(&self) -> Self {
         Self {
@@ -101,7 +99,40 @@ where
     }
 }
 
-impl Object<()> {
+/// A loaded ADT object whose concrete family is known only at runtime.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct AnyObject {
+    reference: ObjectRef<()>,
+    media_type: String,
+    pub etag: Option<EntityTag>,
+    pub properties: serde_json::Value,
+}
+
+impl AnyObject {
+    pub(crate) fn new(
+        reference: ObjectRef<()>,
+        media_type: impl Into<String>,
+        etag: Option<EntityTag>,
+        properties: serde_json::Value,
+    ) -> Self {
+        Self {
+            reference,
+            media_type: media_type.into(),
+            etag,
+            properties,
+        }
+    }
+
+    /// Returns the erased reference identifying this loaded object.
+    pub fn reference(&self) -> &ObjectRef<()> {
+        &self.reference
+    }
+
+    /// Returns the media type of this representation.
+    pub fn media_type(&self) -> &str {
+        &self.media_type
+    }
+
     /// Restores a concrete loaded object after validating its runtime representation.
     pub fn try_into_typed<T>(self) -> Result<Object<T>, ObjectError>
     where

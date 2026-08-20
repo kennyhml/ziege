@@ -1,7 +1,7 @@
 use http::{Method, StatusCode};
 
 use crate::{
-    Object, ObjectError, ObjectLock, TransportNumber,
+    AnyObject, Object, ObjectError, ObjectLock, TransportNumber,
     client::{Client, ClientState, Ready},
     error::{OperationError, ResponseError},
     objects::{
@@ -89,7 +89,7 @@ impl<T: ObjectType> Object<T> {
 }
 
 impl Operation<Ready> for ObjectPropertiesQuery<()> {
-    type Response = Object<()>;
+    type Response = AnyObject;
     type Kind = Stateless;
 
     fn request(&self, _client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
@@ -213,7 +213,7 @@ impl<S> Operation<S> for ObjectPropertiesUpdate<()>
 where
     S: ClientState,
 {
-    type Response = Option<Object<()>>;
+    type Response = Option<AnyObject>;
     type Kind = Stateful;
 
     fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
@@ -239,7 +239,7 @@ impl ObjectRef<()> {
     pub fn update(
         &self,
         object_lock: &ObjectLock,
-        properties: Object<()>,
+        properties: AnyObject,
     ) -> Result<ObjectPropertiesUpdate<()>, ObjectError> {
         if !self.same_identity(properties.reference()) {
             return Err(ObjectError::UnexpectedObjectReference {
