@@ -1,9 +1,6 @@
 use std::{borrow::Cow, fmt};
 
-use http::StatusCode;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-use crate::{AdtResponse, ResponseError};
 
 /// A repository information system facet key.
 ///
@@ -124,13 +121,5 @@ impl RepositoryPreselection {
 
     pub fn values(&self) -> &[String] {
         &self.values
-    }
-}
-
-pub(super) fn ensure_ok(response: &AdtResponse) -> Result<(), ResponseError> {
-    if response.status() == StatusCode::OK {
-        Ok(())
-    } else {
-        Err(ResponseError::unexpected_status(response))
     }
 }

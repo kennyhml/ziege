@@ -17,9 +17,9 @@ pub use favorites::{
     FavoriteObject, FavoriteObjectList, FavoriteObjectsQuery, FavoriteObjectsUpdate,
 };
 pub use object_properties::{
-    RepositoryObjectProperties, RepositoryObjectPropertiesQuery,
-    RepositoryObjectPropertiesQueryBuilder, RepositoryObjectPropertiesQueryBuilderError,
-    RepositoryObjectSummary, RepositoryProperty,
+    AssignedTransport, AssignedTransportRequests, AssignedTransportsQuery,
+    RepositoryObjectProperties, RepositoryObjectPropertiesQuery, RepositoryObjectSummary,
+    RepositoryProperty,
 };
 
 #[cfg(test)]

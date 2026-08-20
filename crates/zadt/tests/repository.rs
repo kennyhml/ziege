@@ -104,10 +104,8 @@ async fn repository_queries_use_discovered_collections() {
         .unwrap();
     let available_facets = RepositoryFacetsQuery.execute(&client).await.unwrap();
     let object_properties = content.objects[0]
-        .properties_builder()
+        .properties()
         .include_facet(RepositoryFacet::PACKAGE)
-        .build()
-        .unwrap()
         .execute(&client)
         .await
         .unwrap();

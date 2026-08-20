@@ -8,7 +8,7 @@ use crate::{
     error::{ObjectError, OperationError, ResponseError},
     objects::{Object, ObjectRef, ObjectState},
     operation::{Operation, OperationResponse, Stateful, UserSessionId},
-    protocol::{AdtRequest, AdtResponse},
+    protocol::AdtRequest,
     vocabulary::{PostAction, media_type, query_parameter},
 };
 
@@ -285,7 +285,7 @@ impl<S: ClientState> Operation<S> for LockRequest {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        expect_ok(response.response())?;
+        response.require_status(StatusCode::OK)?;
         Ok(ObjectLock::parse(
             self.object.clone(),
             self.access_mode,
@@ -323,15 +323,7 @@ impl<S: ClientState> Operation<S> for UnlockRequest {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        expect_ok(response.response())
-    }
-}
-
-fn expect_ok(response: &AdtResponse) -> Result<(), ResponseError> {
-    if response.status() == StatusCode::OK {
-        Ok(())
-    } else {
-        Err(ResponseError::unexpected_status(response))
+        response.require_status(StatusCode::OK)
     }
 }
 

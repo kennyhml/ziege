@@ -112,7 +112,7 @@ mod tests {
     use super::*;
     use crate::{
         AdtResponse, AdtUri, CompatibilityError, EntityTag, Include, IncludePropertyVersion,
-        ObjectError, ObjectPropertiesQuery, ObjectType, ProgramPropertiesVersion, Revalidation,
+        ObjectError, ObjectPropertiesQuery, ProgramPropertiesVersion, Revalidation,
         vocabulary::query_parameter,
     };
 
@@ -353,7 +353,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            ResponseError::MissingContentType { category } if category == Program::CATEGORY
+            ResponseError::MissingContentType { target } if target == request_target()
         ));
     }
 
@@ -373,10 +373,10 @@ mod tests {
         assert!(matches!(
             error,
             ResponseError::UnsupportedContentType {
-                category,
+                target,
                 content_type,
                 supported,
-            } if category == Program::CATEGORY
+            } if target == request_target()
                 && content_type == "application/json"
                 && supported == [
                     ProgramPropertiesVersion::V3.media_type(),

@@ -45,6 +45,7 @@ impl PostAction {
 /// See if_adt_uri_query_parameters
 pub(crate) mod query_parameter {
     pub const ACCESS_MODE: &str = "accessMode";
+    pub const URI: &str = "uri";
     pub const ACTION: &str = "_action";
     pub const LOCK_HANDLE: &str = "lockHandle";
     pub const INHERITED_MEMBERS: &str = "inheritedMembers";
@@ -72,6 +73,8 @@ pub(crate) mod media_type {
         "application/vnd.sap.adt.repository.favorites.modify.v1+xml";
     pub const REPOSITORY_OBJECT_PROPERTIES: &str =
         "application/vnd.sap.adt.repository.objproperties.result.v1+xml";
+    pub const REPOSITORY_OBJECT_TR_PROPERTIES: &str =
+        "application/vnd.sap.adt.repository.trproperties.result.v1+xml";
     pub const SOURCE: &str = "text/plain";
     pub const SOURCE_UPDATE: &str = "text/plain; charset=utf-8";
     pub const OBJECT_STRUCTURE_V2: &str = "application/vnd.sap.adt.objectstructure.v2+xml";

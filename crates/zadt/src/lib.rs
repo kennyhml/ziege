@@ -33,14 +33,14 @@ pub use api::packages::{
 pub use api::programs::{ProgramRun, ProgramRunResult};
 pub use api::properties::{ObjectPropertiesQuery, ObjectPropertiesUpdate};
 pub use api::repository::{
-    FavoriteObject, FavoriteObjectList, FavoriteObjectsQuery, FavoriteObjectsUpdate,
-    RepositoryContent, RepositoryContentOperation, RepositoryContentQuery,
-    RepositoryContentQueryBuilder, RepositoryContentQueryBuilderError, RepositoryFacet,
-    RepositoryFacetDefinition, RepositoryFacetValuesLink, RepositoryFacets, RepositoryFacetsQuery,
-    RepositoryObjectEntry, RepositoryObjectProperties, RepositoryObjectPropertiesQuery,
-    RepositoryObjectPropertiesQueryBuilder, RepositoryObjectPropertiesQueryBuilderError,
-    RepositoryObjectSummary, RepositoryPreselection, RepositoryPreselectionInfo,
-    RepositoryProperty, RepositoryVirtualFolder,
+    AssignedTransport, AssignedTransportRequests, AssignedTransportsQuery, FavoriteObject,
+    FavoriteObjectList, FavoriteObjectsQuery, FavoriteObjectsUpdate, RepositoryContent,
+    RepositoryContentOperation, RepositoryContentQuery, RepositoryContentQueryBuilder,
+    RepositoryContentQueryBuilderError, RepositoryFacet, RepositoryFacetDefinition,
+    RepositoryFacetValuesLink, RepositoryFacets, RepositoryFacetsQuery, RepositoryObjectEntry,
+    RepositoryObjectProperties, RepositoryObjectPropertiesQuery, RepositoryObjectSummary,
+    RepositoryPreselection, RepositoryPreselectionInfo, RepositoryProperty,
+    RepositoryVirtualFolder,
 };
 pub use api::run::{ObjectRun, ObjectRunResult};
 pub use api::session::{Logon, SessionInformation, SessionUri, SystemInformationLink};

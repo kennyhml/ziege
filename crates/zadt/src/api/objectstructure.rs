@@ -2,18 +2,12 @@ use http::{Method, StatusCode};
 use serde::Deserialize;
 
 use crate::{
-    AdtUri, AdvertisedLink, CategoryId, Client, ClientState, Object, ObjectError,
-    ObjectStructureRef, ObjectVersion, Operation, OperationError, OperationResponse, PropertyModel,
-    Relations, ResponseError, Stateless, Structure,
-    compatibility::media_types_match,
+    AdtUri, AdvertisedLink, Client, ClientState, Object, ObjectError, ObjectStructureRef,
+    ObjectVersion, Operation, OperationError, OperationResponse, PropertyModel, Relations,
+    ResponseError, Stateless, Structure,
     protocol::AdtRequest,
     resource::resolve_href,
     vocabulary::{media_type, query_parameter, relation},
-};
-
-const OBJECT_STRUCTURE_CATEGORY: CategoryId = CategoryId {
-    scheme: "http://www.sap.com/adt/categories/respository",
-    term: "objectstructure",
 };
 
 /// Fetches the structure representation advertised by an object.
@@ -108,17 +102,8 @@ impl<S: ClientState> Operation<S> for ObjectStructureQuery {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        if response.status() != StatusCode::OK {
-            return Err(ResponseError::unexpected_status(response.response()));
-        }
-        let content_type = response.content_type(OBJECT_STRUCTURE_CATEGORY)?;
-        if !media_types_match(media_type::OBJECT_STRUCTURE_V2, content_type) {
-            return Err(ResponseError::UnsupportedContentType {
-                category: OBJECT_STRUCTURE_CATEGORY,
-                content_type: content_type.to_owned(),
-                supported: vec![media_type::OBJECT_STRUCTURE_V2.to_owned()],
-            });
-        }
+        response.require_status(StatusCode::OK)?;
+        response.require_content_type(&[media_type::OBJECT_STRUCTURE_V2])?;
 
         let raw: RawObjectStructureElement =
             serde_xml_rs::from_reader(response.body()).map_err(ObjectError::InvalidResponse)?;

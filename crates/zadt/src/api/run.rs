@@ -108,9 +108,7 @@ impl Operation<Ready> for ObjectRun {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        if !response.status().is_success() {
-            return Err(ResponseError::unexpected_status(response.response()));
-        }
+        response.require_success()?;
         let content = String::from_utf8(response.into_body())
             .map_err(ObjectError::InvalidResponseEncoding)?;
         Ok(ObjectRunResult::new(

@@ -124,9 +124,7 @@ impl Operation<Ready> for ActivationRun {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        if response.status() != StatusCode::OK {
-            return Err(ResponseError::unexpected_status(response.response()));
-        }
+        response.require_status(StatusCode::OK)?;
         if response.body().is_empty() {
             return Ok(ActivationRunMessages::default());
         }
@@ -220,9 +218,7 @@ impl Operation<Ready> for InactiveObjectsQuery {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        if response.status() != StatusCode::OK {
-            return Err(ResponseError::unexpected_status(response.response()));
-        }
+        response.require_status(StatusCode::OK)?;
         if response.body().is_empty() {
             return Ok(ObjectReferences::default());
         }
@@ -274,9 +270,7 @@ impl Operation<Ready> for InactiveCtsObjectsQuery {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        if response.status() != StatusCode::OK {
-            return Err(ResponseError::unexpected_status(response.response()));
-        }
+        response.require_status(StatusCode::OK)?;
         if response.body().is_empty() {
             return Ok(InactiveCtsObjects::default());
         }

@@ -1,17 +1,17 @@
-use http::Method;
+use http::{Method, StatusCode};
 use serde::{Deserialize, Serialize};
 
-use super::common::ensure_ok;
 use crate::{
     AdtRequest, AdvertisedObjectReference, CategoryId, Client, GlobalWorkbenchType, ObjectError,
     ObjectRef, Operation, OperationError, OperationResponse, Ready, RepositoryError, ResponseError,
-    Stateless, compatibility::media_types_match, target::CollectionTarget, vocabulary::media_type,
+    Stateless, target::CollectionTarget, vocabulary::media_type,
 };
 
 const CATEGORY: CategoryId = CategoryId {
     scheme: "http://www.sap.com/adt/categories/repository/virtualfolders",
     term: "objectFavorites",
 };
+const FAVORITES_NAMESPACE: &str = "http://www.sap.com/adt/ris/vf/favorites";
 
 /// Queries a users favorite objects. Because this is stored in a table
 /// (vfs_fav_objects) on the backend, favorites set inside different editors
@@ -68,16 +68,9 @@ impl Operation<Ready> for FavoriteObjectsQuery {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        ensure_ok(response.response())?;
+        response.require_status(StatusCode::OK)?;
 
-        let content_type = response.content_type(CATEGORY)?;
-        if !media_types_match(media_type::REPOSITORY_FAVORITES_COMPLETE, content_type) {
-            return Err(ResponseError::UnsupportedContentType {
-                category: CATEGORY,
-                content_type: content_type.to_owned(),
-                supported: vec![media_type::REPOSITORY_FAVORITES_COMPLETE.to_owned()],
-            });
-        }
+        response.require_content_type(&[media_type::REPOSITORY_FAVORITES_COMPLETE])?;
 
         serde_xml_rs::from_reader(response.body())
             .map_err(RepositoryError::InvalidResponse)
@@ -147,16 +140,9 @@ impl Operation<Ready> for FavoriteObjectsUpdate {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        ensure_ok(response.response())?;
+        response.require_status(StatusCode::OK)?;
 
-        let content_type = response.content_type(CATEGORY)?;
-        if !media_types_match(media_type::REPOSITORY_FAVORITES_COMPLETE, content_type) {
-            return Err(ResponseError::UnsupportedContentType {
-                category: CATEGORY,
-                content_type: content_type.to_owned(),
-                supported: vec![media_type::REPOSITORY_FAVORITES_COMPLETE.to_owned()],
-            });
-        }
+        response.require_content_type(&[media_type::REPOSITORY_FAVORITES_COMPLETE])?;
 
         serde_xml_rs::from_reader(response.body())
             .map_err(RepositoryError::InvalidResponse)
@@ -174,7 +160,7 @@ pub struct FavoriteObjectList {
 impl FavoriteObjectList {
     fn serialize(&self) -> Result<String, RepositoryError> {
         serde_xml_rs::SerdeXml::new()
-            .namespace("vf", "http://www.sap.com/adt/ris/virtualFolders")
+            .namespace("vf", FAVORITES_NAMESPACE)
             .namespace("adtcore", "http://www.sap.com/adt/core")
             .to_string(self)
             .map_err(RepositoryError::InvalidRequest)

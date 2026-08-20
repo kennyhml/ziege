@@ -91,9 +91,7 @@ impl Client<Initial> {
 
 // Both dicovery endpoints use the same format
 fn decode_discovery_response(response: OperationResponse) -> Result<Capabilities, ResponseError> {
-    if response.status() != StatusCode::OK {
-        return Err(ResponseError::unexpected_status(response.response()));
-    }
+    response.require_status(StatusCode::OK)?;
 
     parse_capabilities(response.body()).map_err(ResponseError::from)
 }

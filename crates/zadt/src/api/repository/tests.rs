@@ -27,12 +27,16 @@ const REPOSITORY_DISCOVERY_XML: &[u8] = br#"
                     <atom:category term="facets"
                         scheme="http://www.sap.com/adt/categories/repository/virtualfolders" />
                 </app:collection>
-                <app:collection href="/sap/bc/adt/repository/informationsystem/virtualfolders/favorites/lists">
+                <app:collection href="/sap/bc/adt/repository/favorites/lists">
                     <atom:category term="objectFavorites"
                         scheme="http://www.sap.com/adt/categories/repository/virtualfolders" />
                 </app:collection>
                 <app:collection href="/sap/bc/adt/advertised/repository/object-properties">
                     <atom:category term="objectProperties"
+                        scheme="http://www.sap.com/adt/categories/repository" />
+                </app:collection>
+                <app:collection href="/sap/bc/adt/advertised/repository/transport-properties">
+                    <atom:category term="transportProperties"
                         scheme="http://www.sap.com/adt/categories/repository" />
                 </app:collection>
             </app:workspace>
@@ -130,7 +134,7 @@ fn favorite_objects_response_decodes_objects() {
     let request = query.request(&client).unwrap();
     assert_eq!(
         request.target().as_str(),
-        "/sap/bc/adt/repository/informationsystem/virtualfolders/favorites/lists/$"
+        "/sap/bc/adt/repository/favorites/lists/$"
     );
     assert_eq!(
         request.headers().get(header::ACCEPT).unwrap(),
@@ -146,7 +150,7 @@ fn favorite_objects_response_decodes_objects() {
         StatusCode::OK,
         headers,
         br#"<vf:favorites
-                xmlns:vf="http://www.sap.com/adt/ris/virtualFolders"
+                xmlns:vf="http://www.sap.com/adt/ris/vf/favorites"
                 xmlns:adtcore="http://www.sap.com/adt/core">
             <vf:favorite
                 adtcore:uri="/sap/bc/adt/programs/programs/z_test"
@@ -189,7 +193,7 @@ fn favorite_objects_update_serializes_transactions() {
     assert_eq!(request.method(), Method::POST);
     assert_eq!(
         request.target().as_str(),
-        "/sap/bc/adt/repository/informationsystem/virtualfolders/favorites/lists/TEAM"
+        "/sap/bc/adt/repository/favorites/lists/TEAM"
     );
     assert_eq!(
         request.headers().get(header::ACCEPT).unwrap(),
@@ -199,7 +203,7 @@ fn favorite_objects_update_serializes_transactions() {
         request.headers().get(header::CONTENT_TYPE).unwrap(),
         media_type::REPOSITORY_FAVORITES_MODIFY
     );
-    assert!(body.contains("xmlns:vf=\"http://www.sap.com/adt/ris/virtualFolders\""));
+    assert!(body.contains("xmlns:vf=\"http://www.sap.com/adt/ris/vf/favorites\""));
     assert!(body.contains("xmlns:adtcore=\"http://www.sap.com/adt/core\""));
     assert!(body.contains("adtcore:uri=\"/sap/bc/adt/programs/programs/z_test\""));
     assert!(body.contains("adtcore:type=\"PROG/P\""));
@@ -216,11 +220,9 @@ fn object_properties_request_repeats_included_facets() {
         "Z_TEST",
         AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
     );
-    let query = RepositoryObjectPropertiesQuery::builder(&object)
+    let query = RepositoryObjectPropertiesQuery::new(&object)
         .include_facet(RepositoryFacet::PACKAGE)
-        .include_facet(RepositoryFacet::GROUP)
-        .build()
-        .unwrap();
+        .include_facet(RepositoryFacet::GROUP);
 
     let request = query.request(&client).unwrap();
 
@@ -257,6 +259,62 @@ fn object_properties_request_repeats_included_facets() {
     .unwrap();
     assert_eq!(properties.object.reference.uri(), object.uri());
     assert_eq!(properties.properties.len(), 3);
+}
+
+#[test]
+fn assigned_transports_request_and_response_match_the_ris_contract() {
+    let client = ready_client(REPOSITORY_DISCOVERY_XML);
+    let object = ObjectRef::<Program>::for_test(
+        "Z_TEST",
+        AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
+    );
+    let query = object.transport_requests();
+    let request = query.request(&client).unwrap();
+
+    assert_eq!(request.method(), Method::GET);
+    assert_eq!(
+        request.target().as_str(),
+        "/sap/bc/adt/advertised/repository/transport-properties"
+    );
+    assert_eq!(
+        request.query(),
+        [(
+            "uri".to_owned(),
+            "/sap/bc/adt/programs/programs/z_test".to_owned()
+        )]
+    );
+    assert_eq!(
+        request.headers().get(header::ACCEPT).unwrap(),
+        media_type::REPOSITORY_OBJECT_TR_PROPERTIES
+    );
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        media_type::REPOSITORY_OBJECT_TR_PROPERTIES.parse().unwrap(),
+    );
+    let response = AdtResponse::new(
+        StatusCode::OK,
+        headers,
+        br#"<tpr:transportProperties xmlns:tpr="http://www.sap.com/adt/ris/transportProperties">
+            <tpr:transport number="DEVK900001" owner="DEVELOPER" status="D"
+                description="Workbench request" />
+        </tpr:transportProperties>"#
+            .to_vec(),
+    );
+    let transports = <AssignedTransportsQuery as Operation<Ready>>::decode(
+        &query,
+        OperationResponse::new(response, request.target().clone()),
+    )
+    .unwrap();
+
+    assert_eq!(transports.len(), 1);
+    assert_eq!(transports.requests[0].number.as_str(), "DEVK900001");
+    assert_eq!(
+        transports.requests[0].status,
+        crate::TransportStatus::MODIFIABLE
+    );
+    assert_eq!(transports.requests[0].owner, "DEVELOPER");
 }
 
 #[test]

@@ -1,8 +1,8 @@
 use derive_builder::Builder;
-use http::Method;
+use http::{Method, StatusCode};
 use serde::{Deserialize, Serialize};
 
-use super::common::{RepositoryFacet, RepositoryPreselection, ensure_ok};
+use super::common::{RepositoryFacet, RepositoryPreselection};
 use crate::{
     AdtRequest, AdtUri, CategoryId, Client, GlobalWorkbenchType, ObjectError, ObjectRef,
     ObjectType, Operation, OperationError, OperationResponse, Ready, RepositoryError,
@@ -111,7 +111,7 @@ impl Operation<Ready> for RepositoryContentQuery {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        ensure_ok(response.response())?;
+        response.require_status(StatusCode::OK)?;
         RepositoryContent::parse(response.body(), response.request_target()).map_err(Into::into)
     }
 }

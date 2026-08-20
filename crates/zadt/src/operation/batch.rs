@@ -173,11 +173,9 @@ where
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+        response.require_status(StatusCode::ACCEPTED)?;
         let user_session = response.user_session();
         let (response, context) = response.into_context_parts();
-        if response.status() != StatusCode::ACCEPTED {
-            return Err(ResponseError::unexpected_status(&response));
-        }
 
         let boundary = response_boundary(response.headers())?;
         let responses = decode_batch(response.body(), &boundary)?;
@@ -682,11 +680,8 @@ mod tests {
     }
 
     fn expect_ok(response: OperationResponse) -> Result<Vec<u8>, ResponseError> {
-        if response.status() == StatusCode::OK {
-            Ok(response.into_body())
-        } else {
-            Err(ResponseError::unexpected_status(response.response()))
-        }
+        response.require_status(StatusCode::OK)?;
+        Ok(response.into_body())
     }
 
     struct FixtureTransport {

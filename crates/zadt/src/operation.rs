@@ -6,8 +6,8 @@ use secrecy::{ExposeSecret, SecretString};
 use uuid::Uuid;
 
 use crate::{
-    AdtRequest, AdtResponse, AdtUri, CategoryId, Client, ClientState, EntityTag, OperationError,
-    Ready, ResponseError, TransportError, target::CORE_DISCOVERY,
+    AdtRequest, AdtResponse, AdtUri, Client, ClientState, EntityTag, OperationError, Ready,
+    ResponseError, TransportError, compatibility::media_types_match, target::CORE_DISCOVERY,
 };
 
 mod batch;
@@ -152,6 +152,24 @@ impl OperationResponse {
         self.response.status()
     }
 
+    /// Requires the response to have one exact status.
+    pub fn require_status(&self, expected: StatusCode) -> Result<(), ResponseError> {
+        if self.status() == expected {
+            Ok(())
+        } else {
+            Err(ResponseError::unexpected_status(self.response()))
+        }
+    }
+
+    /// Requires the response to have a successful status.
+    pub fn require_success(&self) -> Result<(), ResponseError> {
+        if self.status().is_success() {
+            Ok(())
+        } else {
+            Err(ResponseError::unexpected_status(self.response()))
+        }
+    }
+
     /// Returns the response headers.
     pub fn headers(&self) -> &HeaderMap {
         self.response.headers()
@@ -162,12 +180,32 @@ impl OperationResponse {
         self.response.body()
     }
 
-    /// Returns the response Content-Type header as text.
-    pub fn content_type(&self, category: CategoryId) -> Result<&str, ResponseError> {
+    /// Returns the response Content-Type header when it contains valid text.
+    pub fn content_type(&self) -> Option<&str> {
         self.headers()
             .get(header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
-            .ok_or(ResponseError::MissingContentType { category })
+    }
+
+    /// Requires the response Content-Type to match one of the supported media types.
+    pub fn require_content_type(&self, supported: &[&str]) -> Result<&str, ResponseError> {
+        let content_type =
+            self.content_type()
+                .ok_or_else(|| ResponseError::MissingContentType {
+                    target: self.request_target().clone(),
+                })?;
+        if supported
+            .iter()
+            .any(|expected| media_types_match(expected, content_type))
+        {
+            Ok(content_type)
+        } else {
+            Err(ResponseError::UnsupportedContentType {
+                target: self.request_target().clone(),
+                content_type: content_type.to_owned(),
+                supported: supported.iter().map(|value| (*value).to_owned()).collect(),
+            })
+        }
     }
 
     /// Returns the response entity tag when its header value is valid text.
@@ -454,11 +492,8 @@ mod tests {
         }
 
         fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-            if response.status() == StatusCode::OK {
-                Ok(response.request_target().clone())
-            } else {
-                Err(ResponseError::unexpected_status(response.response()))
-            }
+            response.require_status(StatusCode::OK)?;
+            Ok(response.request_target().clone())
         }
     }
 
@@ -474,11 +509,8 @@ mod tests {
         }
 
         fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-            if response.status() == StatusCode::OK {
-                Ok(response.request_target().clone())
-            } else {
-                Err(ResponseError::unexpected_status(response.response()))
-            }
+            response.require_status(StatusCode::OK)?;
+            Ok(response.request_target().clone())
         }
     }
 
@@ -520,6 +552,48 @@ mod tests {
         let (raw, request_target) = response.into_parts();
         assert_eq!(request_target, target);
         assert_eq!(raw.body(), b"response");
+    }
+
+    #[test]
+    fn operation_response_validates_content_type_against_its_request_target() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/xml; charset=UTF-8"),
+        );
+        let target = AdtUri::parse("/sap/bc/adt/test/resource").unwrap();
+        let response = OperationResponse::new(
+            AdtResponse::new(StatusCode::OK, headers, Vec::new()),
+            target.clone(),
+        );
+
+        assert_eq!(
+            response.require_content_type(&["application/xml"]).unwrap(),
+            "application/xml; charset=UTF-8"
+        );
+        assert!(matches!(
+            response.require_content_type(&["application/json"]),
+            Err(ResponseError::UnsupportedContentType {
+                target: error_target,
+                ..
+            }) if error_target == target
+        ));
+    }
+
+    #[test]
+    fn operation_response_reports_its_target_when_content_type_is_missing() {
+        let target = AdtUri::parse("/sap/bc/adt/test/resource").unwrap();
+        let response = OperationResponse::new(
+            AdtResponse::new(StatusCode::OK, HeaderMap::new(), Vec::new()),
+            target.clone(),
+        );
+
+        assert!(matches!(
+            response.require_content_type(&["application/xml"]),
+            Err(ResponseError::MissingContentType {
+                target: error_target
+            }) if error_target == target
+        ));
     }
 
     #[tokio::test]

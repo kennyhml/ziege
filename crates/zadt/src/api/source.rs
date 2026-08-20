@@ -83,9 +83,7 @@ impl<S: ClientState> Operation<S> for ObjectSourceQuery {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        if response.status() != StatusCode::OK {
-            return Err(ResponseError::unexpected_status(response.response()));
-        }
+        response.require_status(StatusCode::OK)?;
         let etag = response.entity_tag();
         let content = String::from_utf8(response.into_body())
             .map_err(ObjectError::InvalidResponseEncoding)?;
@@ -191,9 +189,7 @@ impl<S: ClientState> Operation<S> for ObjectSourceUpdate {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        if !response.status().is_success() {
-            return Err(ResponseError::unexpected_status(response.response()));
-        }
+        response.require_success()?;
         let etag = response.entity_tag();
         let body = response.into_body();
         let content = (!body.is_empty())

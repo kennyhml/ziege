@@ -112,22 +112,12 @@ impl Operation<Ready> for TransportCheck {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        if response.status() != StatusCode::OK {
-            return Err(ResponseError::unexpected_status(response.response()));
-        }
+        response.require_status(StatusCode::OK)?;
         if response.body().is_empty() {
             return Err(CtsError::MissingTransportCheckResponse.into());
         }
 
-        let content_type = response.content_type(TRANSPORT_CHECKS_CATEGORY)?;
-
-        if !media_types_match(TRANSPORT_CHECK_MEDIA_TYPE, content_type) {
-            return Err(ResponseError::UnsupportedContentType {
-                category: TRANSPORT_CHECKS_CATEGORY,
-                content_type: content_type.to_owned(),
-                supported: vec![TRANSPORT_CHECK_MEDIA_TYPE.to_owned()],
-            });
-        }
+        response.require_content_type(&[TRANSPORT_CHECK_MEDIA_TYPE])?;
 
         TransportCheckResult::parse(response.body()).map_err(Into::into)
     }
@@ -191,22 +181,12 @@ impl Operation<Ready> for TransportsQuery {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        if response.status() != StatusCode::OK {
-            return Err(ResponseError::unexpected_status(response.response()));
-        }
+        response.require_status(StatusCode::OK)?;
         if response.body().is_empty() {
             return Ok(TransportRequests::default());
         }
 
-        let content_type = response.content_type(TRANSPORTS_CATEGORY)?;
-
-        if !media_types_match(TRANSPORT_REQUESTS_MEDIA_TYPE, content_type) {
-            return Err(ResponseError::UnsupportedContentType {
-                category: TRANSPORTS_CATEGORY,
-                content_type: content_type.to_owned(),
-                supported: vec![TRANSPORT_REQUESTS_MEDIA_TYPE.to_owned()],
-            });
-        }
+        response.require_content_type(&[TRANSPORT_REQUESTS_MEDIA_TYPE])?;
 
         TransportRequests::parse(response.body()).map_err(Into::into)
     }
@@ -257,22 +237,12 @@ impl Operation<Ready> for TransportPropertiesQuery {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        if response.status() != StatusCode::OK {
-            return Err(ResponseError::unexpected_status(response.response()));
-        }
+        response.require_status(StatusCode::OK)?;
         if response.body().is_empty() {
             return Ok(None);
         }
 
-        let content_type = response.content_type(TRANSPORTS_CATEGORY)?;
-
-        if !media_types_match(TRANSPORT_REQUEST_MEDIA_TYPE, content_type) {
-            return Err(ResponseError::UnsupportedContentType {
-                category: TRANSPORTS_CATEGORY,
-                content_type: content_type.to_owned(),
-                supported: vec![TRANSPORT_REQUEST_MEDIA_TYPE.to_owned()],
-            });
-        }
+        response.require_content_type(&[TRANSPORT_REQUEST_MEDIA_TYPE])?;
 
         TransportRequest::parse(response.body())
             .map(Some)
@@ -349,28 +319,18 @@ impl Operation<Ready> for TransportCreate {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        if !response.status().is_success() {
-            return Err(ResponseError::unexpected_status(response.response()));
-        }
+        response.require_success()?;
         if response.body().is_empty() {
             return Err(CtsError::MissingTransportCreationResponse.into());
         }
 
-        let content_type = response.content_type(TRANSPORTS_CATEGORY)?;
+        let content_type = response
+            .require_content_type(&[TRANSPORT_CREATE_RESULT_MEDIA_TYPE, PLAIN_TEXT_MEDIA_TYPE])?;
 
         if media_types_match(TRANSPORT_CREATE_RESULT_MEDIA_TYPE, content_type) {
             TransportCreation::parse(response.body()).map_err(Into::into)
-        } else if media_types_match(PLAIN_TEXT_MEDIA_TYPE, content_type) {
-            TransportCreation::parse_legacy(response.body()).map_err(Into::into)
         } else {
-            Err(ResponseError::UnsupportedContentType {
-                category: TRANSPORTS_CATEGORY,
-                content_type: content_type.to_owned(),
-                supported: vec![
-                    TRANSPORT_CREATE_RESULT_MEDIA_TYPE.to_owned(),
-                    PLAIN_TEXT_MEDIA_TYPE.to_owned(),
-                ],
-            })
+            TransportCreation::parse_legacy(response.body()).map_err(Into::into)
         }
     }
 }
@@ -421,7 +381,7 @@ impl TransportCreateMediaVersion {
 ///
 /// Values are preserved exactly because their shape can vary between SAP
 /// systems and backend integrations.
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize)]
 pub struct TransportNumber(String);
 
 impl TransportNumber {
@@ -505,6 +465,15 @@ impl fmt::Display for TransportKind {
     }
 }
 
+impl<'de> Deserialize<'de> for TransportKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        String::deserialize(deserializer).map(Self::parse)
+    }
+}
+
 /// An open CTS transport status value.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct TransportStatus(Cow<'static, str>);
@@ -544,37 +513,60 @@ impl fmt::Display for TransportStatus {
     }
 }
 
+impl<'de> Deserialize<'de> for TransportStatus {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        String::deserialize(deserializer).map(Self::parse)
+    }
+}
+
 /// One CTS transport request header returned by ADT.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct TransportRequest {
     /// The transport request number (`TRKORR`).
+    #[serde(rename = "TRKORR")]
     pub number: TransportNumber,
 
     /// The request's CTS transport function.
+    #[serde(rename = "TRFUNCTION")]
     pub kind: TransportKind,
 
     /// The CTS transport status.
+    #[serde(rename = "TRSTATUS")]
     pub status: TransportStatus,
 
     /// The transport target system, when assigned.
+    #[serde(
+        rename = "TARSYSTEM",
+        default,
+        deserialize_with = "deserialize_non_empty"
+    )]
     pub target_system: Option<String>,
 
     /// The request owner (`AS4USER`).
+    #[serde(rename = "AS4USER")]
     pub owner: String,
 
     /// The CTS date value (`AS4DATE`).
+    #[serde(rename = "AS4DATE")]
     pub date: String,
 
     /// The CTS time value (`AS4TIME`).
+    #[serde(rename = "AS4TIME")]
     pub time: String,
 
     /// The transport description (`AS4TEXT`).
+    #[serde(rename = "AS4TEXT")]
     pub description: String,
 
     /// The SAP client, when supplied.
+    #[serde(rename = "CLIENT", default, deserialize_with = "deserialize_non_empty")]
     pub client: Option<String>,
 
     /// The repository identifier, when supplied.
+    #[serde(rename = "REPOID", default, deserialize_with = "deserialize_non_empty")]
     pub repository_id: Option<String>,
 }
 
@@ -672,7 +664,7 @@ impl TransportCheckResult {
                 .requests
                 .requests
                 .into_iter()
-                .map(|request| request.header.into())
+                .map(|request| request.header)
                 .collect(),
             locks: data
                 .locks
@@ -846,7 +838,7 @@ impl TransportRequest {
     pub(crate) fn parse(body: &[u8]) -> Result<Self, CtsError> {
         let raw: RawTransportRequestResponse =
             serde_xml_rs::from_reader(body).map_err(CtsError::InvalidTransportResponse)?;
-        Ok(raw.values.data.into())
+        Ok(raw.values.data)
     }
 }
 
@@ -866,13 +858,7 @@ impl TransportRequests {
         let raw: RawTransportRequests =
             serde_xml_rs::from_reader(body).map_err(CtsError::InvalidTransportResponse)?;
         Ok(Self {
-            requests: raw
-                .values
-                .data
-                .requests
-                .into_iter()
-                .map(TransportRequest::from)
-                .collect(),
+            requests: raw.values.data.requests,
         })
     }
 
@@ -887,25 +873,15 @@ impl TransportRequests {
     }
 }
 
-impl From<RawTransportRequest> for TransportRequest {
-    fn from(raw: RawTransportRequest) -> Self {
-        Self {
-            number: raw.number.into(),
-            kind: TransportKind::parse(raw.kind),
-            status: TransportStatus::parse(raw.status),
-            target_system: non_empty(raw.target_system),
-            owner: raw.owner,
-            date: raw.date,
-            time: raw.time,
-            description: raw.description,
-            client: non_empty(raw.client),
-            repository_id: non_empty(raw.repository_id),
-        }
-    }
-}
-
 fn non_empty(value: String) -> Option<String> {
     (!value.is_empty()).then_some(value)
+}
+
+fn deserialize_non_empty<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    String::deserialize(deserializer).map(non_empty)
 }
 
 fn is_abap_true(value: &str) -> bool {
@@ -1187,7 +1163,7 @@ struct RawTransportCheckRequests {
 #[derive(Deserialize)]
 struct RawTransportCheckRequestEntry {
     #[serde(rename = "REQ_HEADER")]
-    header: RawTransportRequest,
+    header: TransportRequest,
 }
 
 #[derive(Default, Deserialize)]
@@ -1220,7 +1196,7 @@ struct RawTransportObjectKey {
 #[derive(Deserialize)]
 struct RawTransportLockHolder {
     #[serde(rename = "REQ_HEADER")]
-    request: RawTransportRequest,
+    request: TransportRequest,
 
     #[serde(rename = "TASK_HEADERS", default)]
     tasks: RawTransportTasks,
@@ -1265,7 +1241,7 @@ impl From<RawTransportObjectLock> for TransportObjectLock {
                 object_type: raw.object.object_type,
                 object_name: raw.object.object_name,
             },
-            holder: raw.holder.request.into(),
+            holder: raw.holder.request,
             tasks: raw
                 .holder
                 .tasks
@@ -1337,7 +1313,7 @@ struct RawTransportRequestResponse {
 #[derive(Deserialize)]
 struct RawTransportRequestValue {
     #[serde(rename = "DATA")]
-    data: RawTransportRequest,
+    data: TransportRequest,
 }
 
 #[derive(Deserialize)]
@@ -1349,40 +1325,7 @@ struct RawTransportValues {
 #[derive(Deserialize)]
 struct RawTransportData {
     #[serde(rename = "CTS_REQ_HEADER", default)]
-    requests: Vec<RawTransportRequest>,
-}
-
-#[derive(Deserialize)]
-struct RawTransportRequest {
-    #[serde(rename = "TRKORR")]
-    number: String,
-
-    #[serde(rename = "TRFUNCTION")]
-    kind: String,
-
-    #[serde(rename = "TRSTATUS")]
-    status: String,
-
-    #[serde(rename = "TARSYSTEM")]
-    target_system: String,
-
-    #[serde(rename = "AS4USER")]
-    owner: String,
-
-    #[serde(rename = "AS4DATE")]
-    date: String,
-
-    #[serde(rename = "AS4TIME")]
-    time: String,
-
-    #[serde(rename = "AS4TEXT")]
-    description: String,
-
-    #[serde(rename = "CLIENT")]
-    client: String,
-
-    #[serde(rename = "REPOID")]
-    repository_id: String,
+    requests: Vec<TransportRequest>,
 }
 
 #[derive(Deserialize)]

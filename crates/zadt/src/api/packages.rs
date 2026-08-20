@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use http::{Method, StatusCode, header};
+use http::{Method, StatusCode};
 use serde::Deserialize;
 use stduritemplate::Value;
 
@@ -8,7 +8,7 @@ use crate::{
     AdtUri, AdvertisedObjectReference, CategoryId, Client, GlobalWorkbenchType, ObjectError,
     ObjectRef, ObjectType, Operation, OperationError, OperationResponse, Package, Ready,
     ResponseError, Stateless,
-    protocol::{AdtRequest, AdtResponse},
+    protocol::AdtRequest,
     resource::{AdtUriTemplate, resolve_href},
     target::{CollectionTarget, TemplateTarget},
 };
@@ -309,11 +309,7 @@ impl Operation<Ready> for PackageTreeQuery {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        ensure_xml_response(
-            response.response(),
-            Package::CATEGORY,
-            PACKAGE_TREE_MEDIA_TYPE,
-        )?;
+        ensure_xml_response(&response, PACKAGE_TREE_MEDIA_TYPE)?;
         PackageTree::parse(response.body(), response.request_target())
     }
 }
@@ -333,11 +329,7 @@ impl Operation<Ready> for PackageSettingsQuery {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        ensure_xml_response(
-            response.response(),
-            PACKAGE_SETTINGS,
-            PACKAGE_SETTINGS_MEDIA_TYPE,
-        )?;
+        ensure_xml_response(&response, PACKAGE_SETTINGS_MEDIA_TYPE)?;
         PackageSettings::parse(response.body())
     }
 }
@@ -390,40 +382,20 @@ fn expand_tree_target(
 }
 
 fn ensure_xml_response(
-    response: &AdtResponse,
-    category: CategoryId,
+    response: &OperationResponse,
     expected_content_type: &'static str,
 ) -> Result<(), ResponseError> {
-    if response.status() != StatusCode::OK {
-        return Err(ResponseError::unexpected_status(response));
-    }
-    let Some(content_type) = response
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-    else {
-        return Err(ResponseError::MissingContentType { category });
-    };
-    let matches = content_type
-        .split(';')
-        .next()
-        .is_some_and(|value| value.trim().eq_ignore_ascii_case(expected_content_type));
-    if !matches {
-        return Err(ResponseError::UnsupportedContentType {
-            category,
-            content_type: content_type.to_owned(),
-            supported: vec![expected_content_type.to_owned()],
-        });
-    }
+    response.require_status(StatusCode::OK)?;
+    response.require_content_type(&[expected_content_type])?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use http::{HeaderMap, HeaderValue};
+    use http::{HeaderMap, HeaderValue, header};
 
     use super::*;
-    use crate::PackageProperties;
+    use crate::{AdtResponse, PackageProperties};
 
     const PACKAGE_XML: &[u8] = include_bytes!("../../tests/fixtures/package-sadt-tools-core.xml");
     const SUPER_TREE_XML: &[u8] = include_bytes!("../../tests/fixtures/package-tree-super.xml");
@@ -546,10 +518,12 @@ mod tests {
             header::CONTENT_TYPE,
             HeaderValue::from_static("application/xml"),
         );
-        let response = AdtResponse::new(StatusCode::OK, headers, Vec::new());
+        let response = OperationResponse::new(
+            AdtResponse::new(StatusCode::OK, headers, Vec::new()),
+            AdtUri::parse("/sap/bc/adt/packages/settings").unwrap(),
+        );
 
-        let error = ensure_xml_response(&response, PACKAGE_SETTINGS, PACKAGE_SETTINGS_MEDIA_TYPE)
-            .unwrap_err();
+        let error = ensure_xml_response(&response, PACKAGE_SETTINGS_MEDIA_TYPE).unwrap_err();
 
         assert!(matches!(
             error,

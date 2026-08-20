@@ -1,20 +1,21 @@
-use derive_builder::Builder;
-use http::Method;
+use http::{Method, StatusCode};
 use serde::Deserialize;
 
-use super::{
-    common::{RepositoryFacet, ensure_ok},
-    content::RepositoryObjectEntry,
-};
+use super::{common::RepositoryFacet, content::RepositoryObjectEntry};
 use crate::{
-    AdtRequest, AdtUri, CategoryId, Client, GlobalWorkbenchType, ObjectError, ObjectRef, Operation,
-    OperationError, OperationResponse, Package, Ready, RepositoryError, ResponseError, Stateless,
+    AdtRequest, AdtUri, CategoryId, Client, GlobalWorkbenchType, Object, ObjectError, ObjectRef,
+    ObjectState, Operation, OperationError, OperationResponse, Package, Ready, RepositoryError,
+    ResponseError, Stateless, TransportNumber, TransportStatus,
     resource::{AdvertisedLink, Relations},
     target::CollectionTarget,
-    vocabulary::media_type,
+    vocabulary::{media_type, query_parameter},
 };
 
 pub(super) const PACKAGE_RELATION: &str = "http://www.sap.com/adt/relations/packages";
+const ASSIGNED_TRANSPORTS_CATEGORY: CategoryId = CategoryId {
+    scheme: "http://www.sap.com/adt/categories/repository",
+    term: "transportProperties",
+};
 
 /// Fetches uniform RIS properties for an arbitrary repository object.
 ///
@@ -29,12 +30,9 @@ pub(super) const PACKAGE_RELATION: &str = "http://www.sap.com/adt/relations/pack
 /// This is the information Eclipse shows in the `Properties` view under `General`.
 ///
 /// Handler: `CL_RIS_ADT_RES_OBJ_PROPERTIES`
-#[derive(Builder, Clone, Debug)]
-#[builder(pattern = "owned", setter(into))]
+#[derive(Clone, Debug)]
 pub struct RepositoryObjectPropertiesQuery {
     object_uri: AdtUri,
-
-    #[builder(default, setter(each(name = "include_facet")))]
     facets: Vec<RepositoryFacet>,
 }
 
@@ -57,14 +55,11 @@ impl RepositoryObjectPropertiesQuery {
         }
     }
 
-    /// Creates a builder initialized for a validated object reference.
-    pub fn builder<T>(object: &ObjectRef<T>) -> RepositoryObjectPropertiesQueryBuilder {
-        RepositoryObjectPropertiesQueryBuilder::default().object_uri(object.uri().clone())
-    }
-
-    /// Creates a builder initialized with a validated ADT object URI.
-    pub fn builder_for_uri(object_uri: AdtUri) -> RepositoryObjectPropertiesQueryBuilder {
-        RepositoryObjectPropertiesQueryBuilder::default().object_uri(object_uri)
+    /// Includes one RIS facet in the returned properties.
+    #[must_use]
+    pub fn include_facet(mut self, facet: impl Into<RepositoryFacet>) -> Self {
+        self.facets.push(facet.into());
+        self
     }
 }
 
@@ -83,7 +78,7 @@ impl Operation<Ready> for RepositoryObjectPropertiesQuery {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        ensure_ok(response.response())?;
+        response.require_status(StatusCode::OK)?;
         RepositoryObjectProperties::parse(response.body(), &self.object_uri).map_err(Into::into)
     }
 }
@@ -93,10 +88,63 @@ impl RepositoryObjectEntry {
     pub fn properties(&self) -> RepositoryObjectPropertiesQuery {
         RepositoryObjectPropertiesQuery::new(&self.reference)
     }
+}
 
-    /// Creates a configurable uniform RIS property query for this listed object.
-    pub fn properties_builder(&self) -> RepositoryObjectPropertiesQueryBuilder {
-        RepositoryObjectPropertiesQuery::builder(&self.reference)
+/// Queries unreleased transport requests assigned to an object.
+///
+/// If the object expands into multiple objects, such as a package,
+/// all transport requests of objects assigned to that package are
+/// returned.
+///
+/// Backend handler: `CL_RIS_ADT_RES_TR_PROPERTIES`
+#[derive(Debug, Clone)]
+pub struct AssignedTransportsQuery {
+    object_uri: AdtUri,
+}
+
+impl AssignedTransportsQuery {
+    const TARGET: CollectionTarget = CollectionTarget::new(ASSIGNED_TRANSPORTS_CATEGORY);
+
+    /// Creates a query for the transport requests assigned to an object.
+    pub fn new<T>(object: &ObjectRef<T>) -> Self {
+        Self::for_uri(object.uri().clone())
+    }
+
+    /// Creates a query for the repository objects resolved from an ADT URI.
+    pub fn for_uri(object_uri: AdtUri) -> Self {
+        Self { object_uri }
+    }
+}
+
+impl Operation<Ready> for AssignedTransportsQuery {
+    type Kind = Stateless;
+    type Response = AssignedTransportRequests;
+
+    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
+        let mut request = Self::TARGET.request(client, Method::GET)?;
+        request.push_query(query_parameter::URI, self.object_uri.as_str());
+        request.set_accept(media_type::REPOSITORY_OBJECT_TR_PROPERTIES);
+        Ok(request)
+    }
+
+    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+        response.require_status(StatusCode::OK)?;
+        response.require_content_type(&[media_type::REPOSITORY_OBJECT_TR_PROPERTIES])?;
+        serde_xml_rs::from_reader(response.body())
+            .map_err(RepositoryError::InvalidResponse)
+            .map_err(Into::into)
+    }
+}
+
+impl<T> ObjectRef<T> {
+    pub fn transport_requests(&self) -> AssignedTransportsQuery {
+        AssignedTransportsQuery::new(self)
+    }
+}
+
+impl<T: ObjectState> Object<T> {
+    pub fn transport_requests(&self) -> AssignedTransportsQuery {
+        AssignedTransportsQuery::new(self.reference())
     }
 }
 
@@ -199,6 +247,39 @@ impl RepositoryObjectProperties {
 
         Ok(Self { object, properties })
     }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename = "tpr:transportProperties")]
+pub struct AssignedTransportRequests {
+    #[serde(rename = "tpr:transport", default)]
+    pub requests: Vec<AssignedTransport>,
+}
+
+impl AssignedTransportRequests {
+    pub fn len(&self) -> usize {
+        self.requests.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.requests.is_empty()
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename = "tpr:transport")]
+pub struct AssignedTransport {
+    #[serde(rename = "@number")]
+    pub number: TransportNumber,
+
+    #[serde(rename = "@owner")]
+    pub owner: String,
+
+    #[serde(rename = "@status")]
+    pub status: TransportStatus,
+
+    #[serde(rename = "@description")]
+    pub description: String,
 }
 
 #[derive(Deserialize)]

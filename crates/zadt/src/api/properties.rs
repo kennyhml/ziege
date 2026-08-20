@@ -162,9 +162,7 @@ where
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        if !response.status().is_success() {
-            return Err(ResponseError::unexpected_status(response.response()));
-        }
+        response.require_success()?;
         if response.body().is_empty() {
             return Ok(None);
         }
@@ -223,9 +221,7 @@ where
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        if !response.status().is_success() {
-            return Err(ResponseError::unexpected_status(response.response()));
-        }
+        response.require_success()?;
         if response.body().is_empty() {
             return Ok(None);
         }
@@ -283,11 +279,14 @@ where
     if response.status() == StatusCode::NOT_MODIFIED {
         return Err(ResponseError::UnexpectedNotModified);
     }
-    if response.status() != StatusCode::OK && !response.status().is_success() {
-        return Err(ResponseError::unexpected_status(response.response()));
-    }
-    let content_type = response.content_type(T::CATEGORY)?;
-    let media_version = T::Properties::require_version_from_media_type(content_type, T::CATEGORY)?;
+    response.require_success()?;
+    let supported = T::Properties::SUPPORTED_VERSIONS
+        .iter()
+        .map(|version| T::Properties::media_type(*version))
+        .collect::<Vec<_>>();
+    let content_type = response.require_content_type(&supported)?;
+    let media_version = T::Properties::version_from_media_type(content_type)
+        .expect("validated properties Content-Type must have a media version");
     let etag = response.entity_tag();
     let payload = T::Properties::from_xml_for(response.body(), resource)?;
     Ok(Object::new(

@@ -1,7 +1,7 @@
-use http::Method;
+use http::{Method, StatusCode};
 use serde::Deserialize;
 
-use super::common::{RepositoryFacet, ensure_ok};
+use super::common::RepositoryFacet;
 use crate::{
     AdtRequest, CategoryId, Client, Operation, OperationError, OperationResponse, Ready,
     RepositoryError, ResponseError, Stateless, target::CollectionTarget,
@@ -34,7 +34,7 @@ impl Operation<Ready> for RepositoryFacetsQuery {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        ensure_ok(response.response())?;
+        response.require_status(StatusCode::OK)?;
         RepositoryFacets::parse(response.body()).map_err(Into::into)
     }
 }

@@ -73,9 +73,7 @@ where
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        if !response.status().is_success() {
-            return Err(ResponseError::unexpected_status(response.response()));
-        }
+        response.require_success()?;
         if response.body().is_empty() {
             return Ok(None);
         }
@@ -98,9 +96,7 @@ impl Operation<Ready> for CreateObjectRequest<(), serde_json::Value> {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        if !response.status().is_success() {
-            return Err(ResponseError::unexpected_status(response.response()));
-        }
+        response.require_success()?;
         if response.body().is_empty() {
             return Ok(None);
         }

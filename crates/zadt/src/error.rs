@@ -5,7 +5,7 @@ use serde::Deserialize;
 use thiserror::Error;
 
 use crate::{
-    AdtResponse, AdtUriError, BatchError, CategoryId, CompatibilityError, GlobalWorkbenchType,
+    AdtResponse, AdtUri, AdtUriError, BatchError, CompatibilityError, GlobalWorkbenchType,
     resource::AdtLinkError,
 };
 
@@ -357,14 +357,14 @@ pub enum ResponseError {
     #[error("ADT returned 304 Not Modified without an If-None-Match validator")]
     UnexpectedNotModified,
 
-    #[error("ADT response for collection {category:?} did not include a Content-Type header")]
-    MissingContentType { category: CategoryId },
+    #[error("ADT response from `{target}` did not include a Content-Type header")]
+    MissingContentType { target: AdtUri },
 
     #[error(
-        "ADT response for collection {category:?} used unsupported Content-Type `{content_type}`; supported media types: {supported:?}"
+        "ADT response from `{target}` used unsupported Content-Type `{content_type}`; supported media types: {supported:?}"
     )]
     UnsupportedContentType {
-        category: CategoryId,
+        target: AdtUri,
         content_type: String,
         supported: Vec<String>,
     },

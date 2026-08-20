@@ -2,7 +2,7 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use super::{GlobalWorkbenchType, ObjectRef, ObjectType};
 use crate::{
-    ObjectError, ResponseError, compatibility::media_types_match, resource::AdvertisedLink,
+    ObjectError, compatibility::media_types_match, resource::AdvertisedLink,
     target::TemplateTarget, vocabulary::CategoryId,
 };
 
@@ -131,23 +131,6 @@ pub trait PropertyModel: std::fmt::Debug + DeserializeOwned + Serialize + Send +
             .iter()
             .copied()
             .find(|version| media_types_match(Self::media_type(*version), media_type))
-    }
-
-    /// Resolves a supported media version or reports the complete expected contract.
-    fn require_version_from_media_type(
-        media_type: &str,
-        category: CategoryId,
-    ) -> Result<Self::Version, ResponseError> {
-        Self::version_from_media_type(media_type).ok_or_else(|| {
-            ResponseError::UnsupportedContentType {
-                category,
-                content_type: media_type.to_owned(),
-                supported: Self::SUPPORTED_VERSIONS
-                    .iter()
-                    .map(|version| Self::media_type(*version).to_owned())
-                    .collect(),
-            }
-        })
     }
 }
 

@@ -230,9 +230,7 @@ impl<S: ClientState> Operation<S> for Logon {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        if response.status() != StatusCode::OK {
-            return Err(ResponseError::unexpected_status(response.response()));
-        }
+        response.require_status(StatusCode::OK)?;
         if response.body().is_empty() {
             return Err(LogonError::MissingResponseBody.into());
         }
