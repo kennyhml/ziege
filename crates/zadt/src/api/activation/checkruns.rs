@@ -14,17 +14,62 @@ const CHECK_RUN_CATEGORY: CategoryId = CategoryId {
     scheme: "http://www.sap.com/adt/categories/check",
     term: "checkruns",
 };
+const REPORTERS_CATEGORY: CategoryId = CategoryId {
+    scheme: "http://www.sap.com/adt/categories/check",
+    term: "reporters",
+};
+
 const CHECK_OBJECTS_MEDIA_TYPE: &str = "application/vnd.sap.adt.checkobjects+xml";
 const CHECK_MESSAGES_MEDIA_TYPE: &str = "application/vnd.sap.adt.checkmessages+xml";
+const CHECK_REPORTERS_MEDIA_TYPE: &str = "application/vnd.sap.adt.reporters+xml";
 const CHECK_RUN_NAMESPACE: &str = "http://www.sap.com/adt/checkrun";
 const ADT_CORE_NAMESPACE: &str = "http://www.sap.com/adt/core";
 
+/// Retrieves the check-run reporters advertised by the backend.
+///
+/// This does not seem to be an exhaustive list, as reporters not advertised,
+/// such as the extended check run reporters, still seem to function.
+///
+/// However, this does allow to dynamically check backend reporter compatibility
+/// and kernel release versioning. The advertised check runners also contain a
+/// list of object types which they are valid for.
+#[derive(Debug, Default)]
+pub struct CheckRunReportersQuery;
+
+impl CheckRunReportersQuery {
+    const TARGET: CollectionTarget = CollectionTarget::new(REPORTERS_CATEGORY);
+
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Operation<Ready> for CheckRunReportersQuery {
+    type Kind = Stateless;
+    type Response = SupportedCheckReporters;
+
+    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
+        let mut request = Self::TARGET.request(client, Method::GET)?;
+        request.set_accept(CHECK_REPORTERS_MEDIA_TYPE);
+        Ok(request)
+    }
+
+    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+        response.require_status(StatusCode::OK)?;
+        response.require_content_type(&[CHECK_REPORTERS_MEDIA_TYPE])?;
+        serde_xml_rs::from_reader::<SupportedCheckReporterList, _>(response.body())
+            .map(|reporters| reporters.entries)
+            .map_err(ObjectError::InvalidResponse)
+            .map_err(Into::into)
+    }
+}
+
 /// Executes checks on a set of objects with the given reporters.
 ///
-/// Multiple reporters can be specified. The avaiable reporters can be
+/// Multiple reporters can be specified. The available reporters can be
 /// queried using [`CheckRunReportersQuery`]. Common reporters are
-/// specified as constants in [`CheckRunReporter`] - it can, however not
-/// account for kernel release based check runners or custom enhancements.
+/// specified as constants in [`CheckRunReporter`], but these cannot account
+/// for release-based check runners or custom enhancements.
 ///
 /// Backend handler: `CL_SEU_ADT_RES_CHECK_RUN`
 #[derive(Debug, Default)]
@@ -53,6 +98,16 @@ impl ObjectCheckRun {
     /// Adds a reporter to execute its checks.
     pub fn push_reporter(&mut self, reporter: CheckRunReporter) -> &mut Self {
         self.reporters.push(reporter);
+        self
+    }
+
+    /// Adds multiple reporters, including a discovered reporter collection.
+    pub fn extend_reporters<I>(&mut self, reporters: I) -> &mut Self
+    where
+        I: IntoIterator,
+        I::Item: Into<CheckRunReporter>,
+    {
+        self.reporters.extend(reporters.into_iter().map(Into::into));
         self
     }
 }
@@ -97,6 +152,38 @@ impl CheckRunReporter {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+/// Check-run reporters advertised by the backend.
+pub type SupportedCheckReporters = Vec<SupportedCheckReporter>;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename = "chkrun:checkReporters")]
+struct SupportedCheckReporterList {
+    #[serde(rename = "chkrun:reporter", default)]
+    entries: SupportedCheckReporters,
+}
+
+/// One advertised check-run reporter and its supported object types.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct SupportedCheckReporter {
+    #[serde(rename = "@chkrun:name")]
+    pub name: CheckRunReporter,
+
+    #[serde(rename = "chkrun:supportedType", default)]
+    pub supported_types: Vec<String>,
+}
+
+impl From<SupportedCheckReporter> for CheckRunReporter {
+    fn from(reporter: SupportedCheckReporter) -> Self {
+        reporter.name
+    }
+}
+
+impl From<&SupportedCheckReporter> for CheckRunReporter {
+    fn from(reporter: &SupportedCheckReporter) -> Self {
+        reporter.name.clone()
     }
 }
 
@@ -288,6 +375,10 @@ mod tests {
                     <atom:category term="checkruns"
                         scheme="http://www.sap.com/adt/categories/check" />
                 </app:collection>
+                <app:collection href="/sap/bc/adt/checkruns/reporters">
+                    <atom:category term="reporters"
+                        scheme="http://www.sap.com/adt/categories/check" />
+                </app:collection>
             </app:workspace>
         </app:service>
     "#;
@@ -304,6 +395,17 @@ mod tests {
                 </chkrun:checkMessageList>
             </chkrun:checkReport>
         </chkrun:checkRunReports>
+    "#;
+    const CHECK_REPORTERS_XML: &[u8] = br#"
+        <chkrun:checkReporters xmlns:chkrun="http://www.sap.com/adt/checkrun">
+            <chkrun:reporter chkrun:name="abapCheckRun">
+                <chkrun:supportedType>CLAS*</chkrun:supportedType>
+                <chkrun:supportedType>PROG*</chkrun:supportedType>
+            </chkrun:reporter>
+            <chkrun:reporter chkrun:name="abapCheckRunVersion-0">
+                <chkrun:supportedType>CLAS*</chkrun:supportedType>
+            </chkrun:reporter>
+        </chkrun:checkReporters>
     "#;
 
     struct UnusedTransport;
@@ -374,6 +476,48 @@ mod tests {
         assert_eq!(
             request.headers()[header::CONTENT_TYPE],
             CHECK_OBJECTS_MEDIA_TYPE
+        );
+    }
+
+    #[test]
+    fn reporters_query_uses_the_discovered_contract_and_decodes_supported_types() {
+        let query = CheckRunReportersQuery::new();
+        let request = query.request(&ready_client()).unwrap();
+
+        assert_eq!(request.method(), Method::GET);
+        assert_eq!(request.target().as_str(), "/sap/bc/adt/checkruns/reporters");
+        assert_eq!(
+            request.headers()[header::ACCEPT],
+            CHECK_REPORTERS_MEDIA_TYPE
+        );
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            CHECK_REPORTERS_MEDIA_TYPE.parse().unwrap(),
+        );
+        let response = AdtResponse::new(StatusCode::OK, headers, CHECK_REPORTERS_XML.to_vec());
+        let reporters = query
+            .decode(OperationResponse::new(
+                response,
+                AdtUri::parse("/sap/bc/adt/checkruns/reporters").unwrap(),
+            ))
+            .unwrap();
+
+        assert_eq!(reporters.len(), 2);
+        assert_eq!(reporters[0].name.as_str(), "abapCheckRun");
+        assert_eq!(reporters[0].supported_types, ["CLAS*", "PROG*"]);
+        assert_eq!(reporters[1].name.as_str(), "abapCheckRunVersion-0");
+
+        let mut run = ObjectCheckRun::new();
+        run.extend_reporters(&reporters);
+        let request = run.request(&ready_client()).unwrap();
+        assert_eq!(
+            request.query(),
+            [
+                ("reporters".to_owned(), "abapCheckRun".to_owned()),
+                ("reporters".to_owned(), "abapCheckRunVersion-0".to_owned()),
+            ]
         );
     }
 
