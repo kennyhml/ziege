@@ -7,14 +7,16 @@ use uuid::Uuid;
 
 use crate::{
     AdtRequest, AdtResponse, AdtUri, Client, ClientState, EntityTag, OperationError, Ready,
-    ResponseError, TransportError, compatibility::media_types_match, target::CORE_DISCOVERY,
+    ResponseError, TransportError, compatibility::media_types_match, protocol::CORE_DISCOVERY_PATH,
 };
 
 mod batch;
 mod revalidation;
+mod target;
 
 pub use batch::{BatchError, BatchKey, BatchOperation, BatchResponses, Batched};
 pub use revalidation::{IfNoneMatch, Revalidation};
+pub(crate) use target::{CollectionTarget, TemplateTarget};
 
 const ADT_SESSION_TYPE: &str = "x-sap-adt-sessiontype";
 const STATEFUL_SESSION_TYPE: &str = "stateful";
@@ -441,7 +443,9 @@ where
         let Some(cookie) = state.cookie_header()? else {
             return Ok(());
         };
-        let mut request = CORE_DISCOVERY.request(http::Method::GET);
+        let target = AdtUri::parse(CORE_DISCOVERY_PATH)
+            .expect("the core discovery path must be a valid ADT URI");
+        let mut request = AdtRequest::new(http::Method::GET, target);
         request.headers_mut().insert(
             ADT_SESSION_TYPE,
             HeaderValue::from_static(STATELESS_SESSION_TYPE),

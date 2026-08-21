@@ -7,12 +7,15 @@ use crate::{
     AdtRequest, AdtUri, CategoryId, Client, GlobalWorkbenchType, ObjectError, ObjectRef,
     ObjectType, Operation, OperationError, OperationResponse, Ready, RepositoryError,
     ResponseError, Stateless,
+    operation::CollectionTarget,
     resource::{AdvertisedLink, Relations},
-    target::CollectionTarget,
-    vocabulary::media_type,
 };
 
 const VIRTUAL_FOLDERS_NAMESPACE: &str = "http://www.sap.com/adt/ris/virtualFolders";
+pub(super) const REPOSITORY_CONTENT_REQUEST_MEDIA_TYPE: &str =
+    "application/vnd.sap.adt.repository.virtualfolders.request.v1+xml";
+pub(super) const REPOSITORY_CONTENT_RESULT_MEDIA_TYPE: &str =
+    "application/vnd.sap.adt.repository.virtualfolders.result.v1+xml";
 
 /// Fetches one virtual-folder hierarchy layer from the repository information system.
 ///
@@ -104,8 +107,8 @@ impl Operation<Ready> for RepositoryContentQuery {
         if let Some(operation) = self.operation {
             request.push_query("operation", operation.as_str());
         }
-        request.set_accept(media_type::REPOSITORY_CONTENT_RESULT);
-        request.set_content_type(media_type::REPOSITORY_CONTENT_REQUEST);
+        request.set_accept(REPOSITORY_CONTENT_RESULT_MEDIA_TYPE);
+        request.set_content_type(REPOSITORY_CONTENT_REQUEST_MEDIA_TYPE);
         request.set_body(body);
         Ok(request)
     }

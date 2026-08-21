@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use zadt::{
-    AnyObject, DataElement, DataElementDefinition, DataElementProperties, GlobalWorkbenchType,
-    ObjectType,
+    AbapLanguageVersion, AnyObject, DataElement, DataElementDefinition, DataElementProperties,
+    GlobalWorkbenchType, ObjectType,
 };
 
 use crate::{
@@ -181,8 +181,8 @@ pub enum AffAbapLanguageVersion {
 }
 
 impl AffAbapLanguageVersion {
-    fn from_adt(value: Option<&str>) -> Result<Self, ProjectionError> {
-        match value {
+    fn from_adt(value: Option<&AbapLanguageVersion>) -> Result<Self, ProjectionError> {
+        match value.map(AbapLanguageVersion::as_str) {
             None | Some("" | " " | "0") => Ok(Self::Standard),
             Some("2") => Ok(Self::KeyUser),
             Some("5") => Ok(Self::CloudDevelopment),
@@ -197,15 +197,17 @@ impl AffAbapLanguageVersion {
         matches!(self, Self::Standard)
     }
 
-    fn adt_value(self, original: Option<&str>) -> Option<String> {
+    fn adt_value(self, original: Option<&AbapLanguageVersion>) -> Option<AbapLanguageVersion> {
         match self {
             Self::Standard if original.is_none() => None,
-            Self::Standard if original.is_some_and(|value| matches!(value, "" | " " | "0")) => {
-                original.map(str::to_owned)
+            Self::Standard
+                if original.is_some_and(|value| matches!(value.as_str(), "" | " " | "0")) =>
+            {
+                original.cloned()
             }
-            Self::Standard => Some("0".to_owned()),
-            Self::KeyUser => Some("2".to_owned()),
-            Self::CloudDevelopment => Some("5".to_owned()),
+            Self::Standard => Some(AbapLanguageVersion::Other("0".to_owned())),
+            Self::KeyUser => Some(AbapLanguageVersion::KeyUser),
+            Self::CloudDevelopment => Some(AbapLanguageVersion::CloudDevelopment),
         }
     }
 }
@@ -457,7 +459,7 @@ fn document_from_properties(
                 "header.originalLanguage",
             )?,
             abap_language_version: AffAbapLanguageVersion::from_adt(
-                properties.abap_language_version.as_deref(),
+                properties.abap_language_version.as_ref(),
             )?,
         },
         data_type_information: AffDataElementTypeInformation {
@@ -501,7 +503,7 @@ pub(crate) fn merge_data_element_properties(
         properties.abap_language_version = document
             .header
             .abap_language_version
-            .adt_value(original_language_version.as_deref());
+            .adt_value(original_language_version.as_ref());
     }
     properties.definition = definition;
     Ok(merged)
@@ -839,7 +841,7 @@ mod tests {
         let properties_v2 = &mut properties;
         properties_v2.description = Some("Example data element".to_owned());
         properties_v2.master_language = Some("EN".to_owned());
-        properties_v2.abap_language_version = Some("0".to_owned());
+        properties_v2.abap_language_version = Some(AbapLanguageVersion::Other("0".to_owned()));
         properties_v2.definition.type_kind = "domain".to_owned();
         properties_v2.definition.type_name = Some("Z_EXAMPLE_DOMAIN".to_owned());
         properties_v2.definition.data_type = Some("CHAR".to_owned());
@@ -937,7 +939,7 @@ mod tests {
     fn renders_predefined_types_and_nonstandard_language_versions() {
         let mut properties = properties();
         let properties_v2 = &mut properties;
-        properties_v2.abap_language_version = Some("5".to_owned());
+        properties_v2.abap_language_version = Some(AbapLanguageVersion::CloudDevelopment);
         properties_v2.definition.type_kind = "predefinedAbapType".to_owned();
         properties_v2.definition.type_name = None;
         properties_v2.definition.data_type = Some("DEC".to_owned());
@@ -1013,7 +1015,10 @@ mod tests {
 
         assert_eq!(properties.description.as_deref(), Some("Updated"));
         assert_eq!(properties.master_language.as_deref(), Some("DE"));
-        assert_eq!(properties.abap_language_version.as_deref(), Some("2"));
+        assert_eq!(
+            properties.abap_language_version,
+            Some(AbapLanguageVersion::KeyUser)
+        );
         assert_eq!(definition.type_kind, "predefinedAbapType");
         assert_eq!(definition.type_name, None);
         assert_eq!(definition.data_type_length, Some(30));

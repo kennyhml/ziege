@@ -7,10 +7,10 @@ use super::{
     ObjectVersion, Package, Program, PropertyModel, RunCapability,
 };
 use crate::{
+    CategoryId,
     error::{ObjectError, OperationError, ResponseError},
     operation::{Operation, OperationResponse},
     protocol::AdtRequest,
-    vocabulary::{CategoryId, query_parameter},
 };
 
 /// Runtime capabilities for one modeled ADT object type.
@@ -196,7 +196,7 @@ where
         }
         let mut request = AdtRequest::new(Method::GET, object.uri().clone());
         if let Some(version) = version {
-            request.push_query(query_parameter::VERSION, version.as_str());
+            request.push_query(ObjectVersion::QUERY_PARAMETER, version.as_str());
         }
         let media_types = T::Properties::SUPPORTED_VERSIONS
             .iter()

@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use zadt_macros::object_type;
 
-use super::super::{GlobalWorkbenchType, ObjectRef, PropertyModel, Source, Structure};
+use super::super::{
+    AbapLanguageVersion, GlobalWorkbenchType, ObjectRef, ObjectVersion, PropertyModel, Source,
+    Structure,
+};
 use crate::{AdvertisedLink, AdvertisedObjectReference};
 
 #[object_type(
@@ -89,9 +92,9 @@ pub struct SyntaxConfiguration {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SyntaxLanguage {
-    /// The language version identifier, such as `X`.
+    /// The ABAP language version.
     #[serde(rename = "abapsource:version")]
-    pub version: String,
+    pub version: AbapLanguageVersion,
 
     /// The server-provided language description.
     #[serde(rename = "abapsource:description")]
@@ -118,9 +121,9 @@ pub struct ProgramProperties {
     #[serde(rename = "@adtcore:changedAt")]
     pub last_changed: String,
 
-    /// The object version exactly as supplied by ADT.
+    /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: String,
+    pub version: ObjectVersion,
 
     /// The timestamp at which the program was created.
     #[serde(rename = "@adtcore:createdAt")]
@@ -176,7 +179,7 @@ pub struct ProgramProperties {
 
     /// The configured ABAP language version.
     #[serde(rename = "@adtcore:abapLanguageVersion")]
-    pub abap_language_version: String,
+    pub abap_language_version: AbapLanguageVersion,
 
     /// The package reference exactly as embedded in the payload.
     #[serde(rename = "adtcore:packageRef")]
@@ -244,9 +247,9 @@ pub struct IncludeProperties {
     #[serde(rename = "@adtcore:changedAt")]
     pub last_changed: String,
 
-    /// The object version exactly as supplied by ADT.
+    /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: String,
+    pub version: ObjectVersion,
 
     /// The timestamp at which the include was created.
     #[serde(rename = "@adtcore:createdAt")]
@@ -364,7 +367,11 @@ mod tests {
         let program = parse_program(PROGRAM_XML).unwrap();
 
         assert_eq!(program.name, "Z_TEST");
-        assert_eq!(program.version, "inactive");
+        assert_eq!(program.version, ObjectVersion::Inactive);
+        assert_eq!(
+            program.abap_language_version,
+            AbapLanguageVersion::StandardX
+        );
         assert_eq!(program.source_uri, "source/main");
         assert_eq!(program.package.name.as_deref(), Some("$TMP"));
         assert_eq!(program.links.len(), 9);
@@ -382,7 +389,7 @@ mod tests {
         let include = parse_include(INCLUDE_XML).unwrap();
 
         assert_eq!(include.name, "ZTEST");
-        assert_eq!(include.version, "active");
+        assert_eq!(include.version, ObjectVersion::Active);
         assert_eq!(include.source_uri, "source/main");
         assert_eq!(include.context_ref_count, 0);
         assert!(include.context_ref.is_none());
@@ -510,10 +517,9 @@ mod tests {
     }
 
     #[test]
-    fn preserves_unparsed_object_version_and_unresolved_links() {
+    fn preserves_unresolved_links_and_object_values() {
         let invalid_href = "https://attacker.example/source";
         let body = PROGRAM_XML
-            .replace("adtcore:version=\"inactive\"", "adtcore:version=\"dirty\"")
             .replace("adtcore:type=\"DEVC/K\"", "adtcore:type=\"FUTURE/PACKAGE\"")
             .replace(
                 "adtcore:uri=\"/sap/bc/adt/packages/%24tmp\"",
@@ -522,7 +528,7 @@ mod tests {
             .replace("source/main/versions", invalid_href);
         let program = parse_program(&body).unwrap();
 
-        assert_eq!(program.version, "dirty");
+        assert_eq!(program.version, ObjectVersion::Inactive);
         assert_eq!(
             program.package.object_type.unwrap().as_str(),
             "FUTURE/PACKAGE"
@@ -532,6 +538,13 @@ mod tests {
             Some("https://example.test/package")
         );
         assert_eq!(program.links[0].href, invalid_href);
+    }
+
+    #[test]
+    fn rejects_unknown_object_versions() {
+        let body = PROGRAM_XML.replace("adtcore:version=\"inactive\"", "adtcore:version=\"dirty\"");
+
+        assert!(parse_program(&body).is_err());
     }
 
     #[test]

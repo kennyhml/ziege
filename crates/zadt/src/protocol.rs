@@ -7,6 +7,36 @@ use http::{
 
 use crate::{AdtUri, OperationContext, operation::UserSessionId};
 
+pub(crate) const TEXT_PLAIN_MEDIA_TYPE: &str = "text/plain";
+pub(crate) const CORE_DISCOVERY_PATH: &str = "/sap/bc/adt/core/discovery";
+
+/// Actions accepted through ADT's `_action` query parameter.
+///
+/// Values come from `IF_ADT_REST_POST_ACTION`.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum PostAction {
+    Check,
+    Activate,
+    Lock,
+    Unlock,
+    Find,
+}
+
+impl PostAction {
+    pub(crate) const QUERY_PARAMETER: &'static str = "_action";
+
+    /// Returns the exact value expected by ADT.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Check => "CHECK",
+            Self::Activate => "ACTIVATE",
+            Self::Lock => "LOCK",
+            Self::Unlock => "UNLOCK",
+            Self::Find => "FIND",
+        }
+    }
+}
+
 /// A transport agnostic request to an ADT resource.
 ///
 /// Different transports preserve the HTTP-like method, target, query,
@@ -345,5 +375,14 @@ mod tests {
         let response = AdtResponse::new(StatusCode::OK, headers, Vec::new());
 
         assert_eq!(response.entity_tag().as_deref(), Some("response-etag"));
+    }
+
+    #[test]
+    fn post_actions_match_if_adt_rest_post_action() {
+        assert_eq!(PostAction::Check.as_str(), "CHECK");
+        assert_eq!(PostAction::Activate.as_str(), "ACTIVATE");
+        assert_eq!(PostAction::Lock.as_str(), "LOCK");
+        assert_eq!(PostAction::Unlock.as_str(), "UNLOCK");
+        assert_eq!(PostAction::Find.as_str(), "FIND");
     }
 }

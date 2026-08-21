@@ -10,8 +10,9 @@ use crate::{
     },
     operation::{IfNoneMatch, Operation, OperationResponse, Stateful, Stateless},
     protocol::{AdtRequest, EntityTag},
-    vocabulary::query_parameter,
 };
+
+use super::{locking::LOCK_HANDLE_QUERY, transports::TRANSPORT_REQUEST_QUERY};
 
 /// Fetches a versioned object-properties representation.
 #[derive(Debug)]
@@ -132,12 +133,9 @@ impl<T> ObjectPropertiesUpdate<T> {
 
     fn build_request(&self) -> Result<AdtRequest, OperationError> {
         let mut request = AdtRequest::new(Method::PUT, self.resource.uri().clone());
-        request.push_query(query_parameter::LOCK_HANDLE, self.object_lock.handle());
+        request.push_query(LOCK_HANDLE_QUERY, self.object_lock.handle());
         if let Some(transport_request) = &self.transport_request {
-            request.push_query(
-                query_parameter::TRANSPORT_REQUEST,
-                transport_request.as_str(),
-            );
+            request.push_query(TRANSPORT_REQUEST_QUERY, transport_request.as_str());
         }
         if let Some(user_session) = self.object_lock.user_session() {
             request.require_user_session(user_session);

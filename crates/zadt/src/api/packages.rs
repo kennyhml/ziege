@@ -8,9 +8,9 @@ use crate::{
     AdtUri, AdvertisedObjectReference, CategoryId, Client, GlobalWorkbenchType, ObjectError,
     ObjectRef, ObjectType, Operation, OperationError, OperationResponse, Package, Ready,
     ResponseError, Stateless,
+    operation::{CollectionTarget, TemplateTarget},
     protocol::AdtRequest,
     resource::{AdtUriTemplate, resolve_href},
-    target::{CollectionTarget, TemplateTarget},
 };
 
 const PACKAGE_TYPE_KEY: &str = "DEVCK";

@@ -180,7 +180,7 @@ fn expand_object_type_item(
 
             const WORKBENCH_TYPE: crate::objects::GlobalWorkbenchType =
                 crate::objects::GlobalWorkbenchType::new(#workbench_type);
-            const CATEGORY: crate::vocabulary::CategoryId = crate::vocabulary::CategoryId {
+            const CATEGORY: crate::CategoryId = crate::CategoryId {
                 scheme: #scheme,
                 term: #term,
             };

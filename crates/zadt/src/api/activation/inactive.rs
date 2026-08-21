@@ -8,7 +8,7 @@ use crate::{
     AdtRequest, AdvertisedObjectReference, CategoryId, Client, ObjectError, Operation,
     OperationError, OperationResponse, Ready, ResponseError, Stateless,
     objects::ObjectReferences,
-    target::{CollectionTarget, TemplateTarget},
+    operation::{CollectionTarget, TemplateTarget},
 };
 
 const INACTIVE_OBJECTS: CategoryId = CategoryId {

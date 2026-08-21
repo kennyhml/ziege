@@ -2,8 +2,8 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use super::{GlobalWorkbenchType, ObjectRef, ObjectType};
 use crate::{
-    ObjectError, compatibility::media_types_match, resource::AdvertisedLink,
-    target::TemplateTarget, vocabulary::CategoryId,
+    CategoryId, ObjectError, compatibility::media_types_match, operation::TemplateTarget,
+    resource::AdvertisedLink,
 };
 
 /// Marks an object capable of being executed immediately (not a job).

@@ -169,7 +169,7 @@ async fn include_properties_query_converts_the_live_ztest_properties() {
 
     assert_eq!(include.name, "ZTEST");
     assert_eq!(include.object_type.to_string(), "PROG/I");
-    assert_eq!(include.version, "active");
+    assert_eq!(include.version, ObjectVersion::Active);
     assert_eq!(include.context_ref_count, 0);
     assert_eq!(include.package.name.as_deref(), Some("$TMP"));
     assert_eq!(include.links.len(), 7);
@@ -244,7 +244,7 @@ async fn program_properties_query_converts_the_live_z_test_v3_properties() {
 
     assert_eq!(program.name, "Z_TEST");
     assert_eq!(program.object_type.to_string(), "PROG/P");
-    assert_eq!(program.version, "inactive");
+    assert_eq!(program.version, ObjectVersion::Inactive);
     assert_eq!(program.program_type, "executableProgram");
     assert!(program.fix_point_arithmetic);
     assert!(program.unicode_check_active);
@@ -257,7 +257,10 @@ async fn program_properties_query_converts_the_live_z_test_v3_properties() {
         program.package.uri.as_deref(),
         Some("/sap/bc/adt/packages/%24tmp")
     );
-    assert_eq!(program.syntax_configuration.language.version, "X");
+    assert_eq!(
+        program.syntax_configuration.language.version,
+        zadt::AbapLanguageVersion::StandardX
+    );
     assert_eq!(
         program.syntax_configuration.language.description,
         "Standard ABAP"
@@ -345,7 +348,7 @@ async fn program_properties_query_accepts_server_selected_v2() {
     let program = &response.properties;
 
     assert_eq!(program.name, "Z_TEST");
-    assert_eq!(program.version, "inactive");
+    assert_eq!(program.version, ObjectVersion::Inactive);
     assert_eq!(program.source_uri, "source/main");
     logon.assert_async().await;
     discovery.assert_async().await;

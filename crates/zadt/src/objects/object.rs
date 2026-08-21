@@ -3,7 +3,14 @@ use serde::{Deserialize, Deserializer, Serialize};
 use super::{ObjectRef, ObjectType, PropertyModel};
 use crate::{EntityTag, ObjectError};
 
-/// A loaded ADT object representation and its transport metadata.
+/// A loaded ADT object with its properties, media type, and entity tag.
+///
+/// Unlike [`ObjectRef<T>`], this value includes the object properties returned
+/// by ADT. The type parameter `T` selects the property model and the operations
+/// available for that object family.
+///
+/// Some operations use links advertised by the loaded properties. Operations
+/// that only need the object identity can use [`Object::reference`].
 #[derive(Debug, Serialize)]
 #[serde(bound(serialize = "T::Properties: Serialize"))]
 pub struct Object<T: ObjectType> {
@@ -11,36 +18,6 @@ pub struct Object<T: ObjectType> {
     media_type: String,
     pub etag: Option<EntityTag>,
     pub properties: T::Properties,
-}
-
-#[derive(Deserialize)]
-#[serde(bound(deserialize = "ObjectRef<T>: Deserialize<'de>, T::Properties: Deserialize<'de>"))]
-struct ObjectRepresentation<T: ObjectType> {
-    reference: ObjectRef<T>,
-    media_type: String,
-    etag: Option<EntityTag>,
-    properties: T::Properties,
-}
-
-impl<'de, T> Deserialize<'de> for Object<T>
-where
-    T: ObjectType,
-    ObjectRef<T>: Deserialize<'de>,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let object = ObjectRepresentation::<T>::deserialize(deserializer)?;
-        validate_typed_object::<T>(&object.reference, &object.media_type, &object.properties)
-            .map_err(serde::de::Error::custom)?;
-        Ok(Self::new(
-            object.reference,
-            object.media_type,
-            object.etag,
-            object.properties,
-        ))
-    }
 }
 
 impl<T: ObjectType> Object<T> {
@@ -100,6 +77,15 @@ where
 }
 
 /// A loaded ADT object whose concrete family is known only at runtime.
+///
+/// This is the loaded counterpart to [`ObjectRef<()>`]. It is useful when the
+/// object family comes from user input or a repository response.
+///
+/// Supported object families are handled through an internal descriptor.
+/// Operations check this descriptor and the loaded properties at runtime.
+///
+/// Properties are stored as JSON so callers can inspect and edit them without
+/// knowing their concrete Rust type.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct AnyObject {
     reference: ObjectRef<()>,
@@ -153,6 +139,40 @@ impl AnyObject {
             self.media_type,
             self.etag,
             properties,
+        ))
+    }
+}
+
+/// Temporary Serde value used while deserializing an [`Object`].
+///
+/// The reference, media type, and properties are checked before the object is
+/// constructed.
+#[derive(Deserialize)]
+#[serde(bound(deserialize = "ObjectRef<T>: Deserialize<'de>, T::Properties: Deserialize<'de>"))]
+struct RawObject<T: ObjectType> {
+    reference: ObjectRef<T>,
+    media_type: String,
+    etag: Option<EntityTag>,
+    properties: T::Properties,
+}
+
+impl<'de, T> Deserialize<'de> for Object<T>
+where
+    T: ObjectType,
+    ObjectRef<T>: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let object = RawObject::<T>::deserialize(deserializer)?;
+        validate_typed_object::<T>(&object.reference, &object.media_type, &object.properties)
+            .map_err(serde::de::Error::custom)?;
+        Ok(Self::new(
+            object.reference,
+            object.media_type,
+            object.etag,
+            object.properties,
         ))
     }
 }

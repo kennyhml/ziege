@@ -3,7 +3,6 @@ use std::{fmt, marker::PhantomData};
 use crate::{
     AdtUri, ObjectError, ObjectRef,
     resource::{AdvertisedLink, resolve_href},
-    vocabulary::relation,
 };
 
 /// A typed related-resource location and the object that advertised it.
@@ -91,13 +90,15 @@ pub type SourceVersionsRef = OwnedResourceRef<kind::SourceVersions>;
 pub type ObjectStructureRef = OwnedResourceRef<kind::ObjectStructure>;
 
 impl ObjectStructureRef {
+    pub(crate) const RELATION: &'static str = "http://www.sap.com/adt/relations/objectstructure";
+
     pub(crate) fn from_relations(
         object: ObjectRef<()>,
         links: &[AdvertisedLink],
     ) -> Result<Option<Self>, ObjectError> {
         links
             .iter()
-            .find(|link| link.relation.as_deref() == Some(relation::OBJECT_STRUCTURE))
+            .find(|link| link.relation.as_deref() == Some(Self::RELATION))
             .map(|link| Self::from_relation(object, link))
             .transpose()
     }

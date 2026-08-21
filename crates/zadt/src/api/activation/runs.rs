@@ -4,7 +4,7 @@ use serde::Deserialize;
 use crate::{
     AdtRequest, AdvertisedLink, AdvertisedObjectReference, AnyObject, CategoryId, Client, Object,
     ObjectError, ObjectRef, ObjectType, Operation, OperationError, OperationResponse, Ready,
-    ResponseError, Stateless, objects::ObjectReferences, target::CollectionTarget,
+    ResponseError, Stateless, objects::ObjectReferences, operation::CollectionTarget,
 };
 
 const ACTIVATE_OBJECTS: CategoryId = CategoryId {

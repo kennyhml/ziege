@@ -3,21 +3,21 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use http::{HeaderValue, Method, StatusCode, header};
+use http::{HeaderName, HeaderValue, Method, StatusCode, header};
 use serde::Deserialize;
 use url::Url;
 
 use crate::{
-    AdtRequest, Client, ClientState, LogonError, Operation, OperationError, OperationResponse,
-    ResponseError, Stateless,
-    compatibility::media_types_match,
-    target::HTTP_SESSIONS,
-    vocabulary::{
-        CANCEL_ON_CLOSE_HEADER, LOAD_BALANCER_HEADER, PURPOSE_HEADER, SECURITY_SESSION_HEADER,
-    },
+    AdtRequest, AdtUri, Client, ClientState, LogonError, Operation, OperationError,
+    OperationResponse, ResponseError, Stateless, compatibility::media_types_match,
 };
 
 const SESSION_MEDIA_TYPE: &str = "application/vnd.sap.adt.core.http.session.v3+xml";
+const HTTP_SESSIONS_PATH: &str = "/sap/bc/adt/core/http/sessions";
+const SECURITY_SESSION_HEADER: HeaderName = HeaderName::from_static("x-sap-security-session");
+const PURPOSE_HEADER: HeaderName = HeaderName::from_static("sap-adt-purpose");
+const LOAD_BALANCER_HEADER: HeaderName = HeaderName::from_static("sap-adt-saplb");
+const CANCEL_ON_CLOSE_HEADER: HeaderName = HeaderName::from_static("sap-cancel-on-close");
 
 pub(crate) fn parse_session_information(body: &[u8]) -> Result<SessionInformation, LogonError> {
     let raw: RawSession = serde_xml_rs::from_reader(body)?;
@@ -209,7 +209,9 @@ impl<S: ClientState> Operation<S> for Logon {
     type Kind = Stateless;
 
     fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
-        let mut request = HTTP_SESSIONS.request(Method::GET);
+        let target = AdtUri::parse(HTTP_SESSIONS_PATH)
+            .expect("the HTTP sessions path must be a valid ADT URI");
+        let mut request = AdtRequest::new(Method::GET, target);
         request.push_query("_", cache_buster());
         request.set_accept(SESSION_MEDIA_TYPE);
 

@@ -5,11 +5,10 @@ use crate::{
     OperationError, OperationResponse, PropertyModel, Ready, ResponseError, Stateless,
     TransportNumber,
     objects::{Create, CreationPropertyModel},
-    target::CollectionTarget,
-    vocabulary::query_parameter,
+    operation::CollectionTarget,
 };
 
-use super::properties::decode_properties;
+use super::{properties::decode_properties, transports::TRANSPORT_REQUEST_QUERY};
 
 /// Creates a repository object from a family-specific creation payload.
 ///
@@ -50,7 +49,7 @@ impl<T, P> CreateObjectRequest<T, P> {
         request.set_content_type(self.media_type);
         request.set_body(body);
         if let Some(transport) = &self.transport_request {
-            request.push_query(query_parameter::TRANSPORT_REQUEST, transport.as_str());
+            request.push_query(TRANSPORT_REQUEST_QUERY, transport.as_str());
         }
         Ok(request)
     }

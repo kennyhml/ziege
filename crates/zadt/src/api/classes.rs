@@ -1,9 +1,8 @@
 use super::run::ObjectRun;
 use crate::{
-    AdtRequest, Client, Operation, OperationError, OperationResponse, Ready, ResponseError,
-    Stateless,
+    AdtRequest, CategoryId, Client, Operation, OperationError, OperationResponse, Ready,
+    ResponseError, Stateless,
     objects::{Class, ImmediateRun, Object, ObjectRef, RunCapability},
-    vocabulary::CategoryId,
 };
 
 const CLASS_NAME_VARIABLE: &str = "classname";

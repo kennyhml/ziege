@@ -1,11 +1,11 @@
 use super::run::ObjectRun;
 use crate::{
+    CategoryId,
     client::{Client, Ready},
     error::{OperationError, ResponseError},
     objects::{ImmediateRun, Object, ObjectRef, Program, RunCapability},
     operation::{Operation, OperationResponse, Stateless},
     protocol::AdtRequest,
-    vocabulary::CategoryId,
 };
 
 const PROGRAM_NAME_VARIABLE: &str = "programname";
@@ -110,10 +110,10 @@ mod tests {
     use http::{HeaderMap, HeaderValue, StatusCode, header};
 
     use super::*;
+    use crate::api::run::PROFILER_ID_QUERY;
     use crate::{
         AdtResponse, AdtUri, CompatibilityError, EntityTag, Include, IncludePropertyVersion,
         ObjectError, ObjectPropertiesQuery, ProgramPropertiesVersion, Revalidation,
-        vocabulary::query_parameter,
     };
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
@@ -263,7 +263,7 @@ mod tests {
         assert!(matches!(
             error,
             OperationError::Object(ObjectError::UnsupportedTemplateParameter { parameter })
-                if parameter == query_parameter::PROFILER_ID
+                if parameter == PROFILER_ID_QUERY
         ));
     }
 

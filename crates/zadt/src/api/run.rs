@@ -8,9 +8,10 @@ use crate::{
     error::{ObjectError, OperationError, ResponseError},
     objects::{AnyObject, GlobalWorkbenchType, ImmediateRun, ObjectRef, RunCapability},
     operation::{Operation, OperationResponse, Stateless},
-    protocol::AdtRequest,
-    vocabulary::{media_type, query_parameter},
+    protocol::{AdtRequest, TEXT_PLAIN_MEDIA_TYPE},
 };
+
+pub(super) const PROFILER_ID_QUERY: &str = "profilerId";
 
 /// Plain-text output produced by running a type-erased repository object.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -81,9 +82,9 @@ impl Operation<Ready> for ObjectRun {
             }
             .into());
         }
-        if self.profiler_id.is_some() && !template.has_variable(query_parameter::PROFILER_ID) {
+        if self.profiler_id.is_some() && !template.has_variable(PROFILER_ID_QUERY) {
             return Err(ObjectError::UnsupportedTemplateParameter {
-                parameter: query_parameter::PROFILER_ID,
+                parameter: PROFILER_ID_QUERY,
             }
             .into());
         }
@@ -94,7 +95,7 @@ impl Operation<Ready> for ObjectRun {
         )]);
         if let Some(profiler_id) = &self.profiler_id {
             variables.insert(
-                query_parameter::PROFILER_ID.to_owned(),
+                PROFILER_ID_QUERY.to_owned(),
                 Value::String(profiler_id.clone()),
             );
         }
@@ -103,7 +104,7 @@ impl Operation<Ready> for ObjectRun {
         for (name, value) in query {
             request.push_query(name, value);
         }
-        request.set_accept(media_type::SOURCE);
+        request.set_accept(TEXT_PLAIN_MEDIA_TYPE);
         Ok(request)
     }
 

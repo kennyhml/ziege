@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use crate::{
     AdtRequest, AdtUri, AdvertisedLink, CategoryId, Client, ObjectError, ObjectRef, ObjectVersion,
     Operation, OperationError, OperationResponse, Ready, ResponseError, Stateless,
-    target::CollectionTarget,
+    operation::CollectionTarget,
 };
 
 const CHECK_RUN_CATEGORY: CategoryId = CategoryId {

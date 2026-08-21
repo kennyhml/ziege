@@ -1,6 +1,6 @@
 use super::super::{
     AbapLanguageVersion, AdvertisedObjectReference, GlobalWorkbenchType, ObjectRef, ObjectType,
-    PropertyModel, Source, SourceComponents, Structure,
+    ObjectVersion, PropertyModel, Source, SourceComponents, Structure,
 };
 use crate::resource::AdvertisedLink;
 use serde::{Deserialize, Serialize};
@@ -80,9 +80,9 @@ pub struct ClassProperties {
     /// The timestamp at which the class was last changed.
     #[serde(rename = "@adtcore:changedAt")]
     pub last_changed: String,
-    /// The object version exactly as advertised by SAP.
+    /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: String,
+    pub version: ObjectVersion,
     /// The timestamp at which the class was created.
     #[serde(rename = "@adtcore:createdAt")]
     pub created_at: String,
@@ -415,9 +415,9 @@ pub struct ClassSyntaxConfiguration {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClassSyntaxLanguage {
-    /// The language-version token.
+    /// The ABAP language version.
     #[serde(rename = "abapsource:version")]
-    pub version: String,
+    pub version: AbapLanguageVersion,
     /// The language description.
     #[serde(rename = "abapsource:description")]
     pub description: String,
@@ -445,9 +445,9 @@ pub struct ClassSourceProperties {
     /// The timestamp at which this source was last changed.
     #[serde(rename = "@adtcore:changedAt")]
     pub last_changed: String,
-    /// The source version exactly as advertised by SAP.
+    /// The source version.
     #[serde(rename = "@adtcore:version")]
-    pub version: String,
+    pub version: ObjectVersion,
     /// The timestamp at which this source was created.
     #[serde(rename = "@adtcore:createdAt")]
     pub created_at: String,
@@ -475,7 +475,7 @@ impl ClassSourceProperties {
             name: name.into(),
             object_type,
             last_changed: String::new(),
-            version: String::new(),
+            version: ObjectVersion::New,
             created_at: String::new(),
             changed_by: String::new(),
             created_by: String::new(),
@@ -687,7 +687,7 @@ mod tests {
 
         assert_eq!(class.name, "CL_ADT_URI_MAPPER");
         assert_eq!(class.object_type, Class::WORKBENCH_TYPE);
-        assert_eq!(class.version, "active");
+        assert_eq!(class.version, ObjectVersion::Active);
         assert_eq!(
             class.abap_language_version,
             Some(AbapLanguageVersion::StandardX)
@@ -713,7 +713,7 @@ mod tests {
             .find(|source| source.include_type == "main")
             .unwrap();
         assert_eq!(main.source_uri, "source/main");
-        assert_eq!(main.version, "active");
+        assert_eq!(main.version, ObjectVersion::Active);
         assert_eq!(main.links.len(), 4);
         assert_eq!(main.links[0].href, "includes/main/versions");
     }
@@ -874,12 +874,11 @@ mod tests {
                 "adtcore:type=\"FUTURE/PACKAGE\"",
                 1,
             )
-            .replace("adtcore:type=\"CLAS/I\"", "adtcore:type=\"FUTURE/INCLUDE\"")
-            .replace("adtcore:version=\"active\"", "adtcore:version=\"future\"");
+            .replace("adtcore:type=\"CLAS/I\"", "adtcore:type=\"FUTURE/INCLUDE\"");
         let class = parse(&wire_values).unwrap();
         assert_eq!(class.object_type.as_str(), "PROG/P");
         assert_eq!(class.name, "OTHER_CLASS");
-        assert_eq!(class.version, "future");
+        assert_eq!(class.version, ObjectVersion::Active);
         assert_eq!(
             class.package.object_type.as_ref().unwrap().as_str(),
             "FUTURE/PACKAGE"
@@ -890,5 +889,16 @@ mod tests {
                 .iter()
                 .all(|include| include.object_type.as_str() == "FUTURE/INCLUDE")
         );
+    }
+
+    #[test]
+    fn rejects_unknown_object_versions() {
+        let xml = CLASS_XML.replacen(
+            "adtcore:version=\"active\"",
+            "adtcore:version=\"future\"",
+            1,
+        );
+
+        assert!(parse(&xml).is_err());
     }
 }

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     AdtRequest, AdvertisedObjectReference, CategoryId, Client, GlobalWorkbenchType, ObjectError,
     ObjectRef, Operation, OperationError, OperationResponse, Ready, RepositoryError, ResponseError,
-    Stateless, target::CollectionTarget, vocabulary::media_type,
+    Stateless, operation::CollectionTarget,
 };
 
 const CATEGORY: CategoryId = CategoryId {
@@ -12,6 +12,9 @@ const CATEGORY: CategoryId = CategoryId {
     term: "objectFavorites",
 };
 const FAVORITES_NAMESPACE: &str = "http://www.sap.com/adt/ris/vf/favorites";
+pub(super) const FAVORITES_MEDIA_TYPE: &str = "application/vnd.sap.adt.repository.favorites.v1+xml";
+pub(super) const FAVORITES_UPDATE_MEDIA_TYPE: &str =
+    "application/vnd.sap.adt.repository.favorites.modify.v1+xml";
 
 /// Queries a users favorite objects. Because this is stored in a table
 /// (vfs_fav_objects) on the backend, favorites set inside different editors
@@ -63,14 +66,14 @@ impl Operation<Ready> for FavoriteObjectsQuery {
             .map_err(ObjectError::InvalidTarget)?;
 
         let mut request = AdtRequest::new(Method::GET, target);
-        request.set_accept(media_type::REPOSITORY_FAVORITES_COMPLETE);
+        request.set_accept(FAVORITES_MEDIA_TYPE);
         Ok(request)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         response.require_status(StatusCode::OK)?;
 
-        response.require_content_type(&[media_type::REPOSITORY_FAVORITES_COMPLETE])?;
+        response.require_content_type(&[FAVORITES_MEDIA_TYPE])?;
 
         serde_xml_rs::from_reader(response.body())
             .map_err(RepositoryError::InvalidResponse)
@@ -133,8 +136,8 @@ impl Operation<Ready> for FavoriteObjectsUpdate {
             .map_err(ObjectError::InvalidTarget)?;
 
         let mut request = AdtRequest::new(Method::POST, target);
-        request.set_accept(media_type::REPOSITORY_FAVORITES_COMPLETE);
-        request.set_content_type(media_type::REPOSITORY_FAVORITES_MODIFY);
+        request.set_accept(FAVORITES_MEDIA_TYPE);
+        request.set_content_type(FAVORITES_UPDATE_MEDIA_TYPE);
         request.set_body(body);
         Ok(request)
     }
@@ -142,7 +145,7 @@ impl Operation<Ready> for FavoriteObjectsUpdate {
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         response.require_status(StatusCode::OK)?;
 
-        response.require_content_type(&[media_type::REPOSITORY_FAVORITES_COMPLETE])?;
+        response.require_content_type(&[FAVORITES_MEDIA_TYPE])?;
 
         serde_xml_rs::from_reader(response.body())
             .map_err(RepositoryError::InvalidResponse)

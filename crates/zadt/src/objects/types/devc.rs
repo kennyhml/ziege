@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use zadt_macros::object_type;
 
-use crate::{AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType, PropertyModel};
+use crate::{
+    AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
+    ObjectVersion, PropertyModel,
+};
 
 #[object_type(
     properties = PackageProperties,
@@ -44,9 +47,9 @@ pub struct PackageProperties {
     /// The timestamp at which the package was last changed.
     #[serde(rename = "@adtcore:changedAt")]
     pub last_changed: String,
-    /// The object version exactly as advertised by SAP.
+    /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: String,
+    pub version: ObjectVersion,
     /// The timestamp at which the package was created.
     #[serde(rename = "@adtcore:createdAt")]
     pub created_at: String,
@@ -157,14 +160,18 @@ pub struct PackageAttributes {
     #[serde(rename = "@pak:isSwitchVisible")]
     pub switch_visible: bool,
     /// The configured ABAP language version.
-    #[serde(rename = "@pak:languageVersion", default)]
-    pub language_version: String,
+    #[serde(rename = "@pak:languageVersion", default = "empty_language_version")]
+    pub language_version: AbapLanguageVersion,
     /// Whether the language version is shown by the package editor.
     #[serde(rename = "@pak:isLanguageVersionVisible")]
     pub language_version_visible: bool,
     /// Whether the language version is editable.
     #[serde(rename = "@pak:isLanguageVersionEditable")]
     pub language_version_editable: bool,
+}
+
+fn empty_language_version() -> AbapLanguageVersion {
+    AbapLanguageVersion::Other(String::new())
 }
 
 /// A named package assignment with editor visibility and mutability flags.
@@ -245,7 +252,8 @@ mod property_tests {
 
         assert_eq!(properties.name, "SADT_TOOLS_CORE");
         assert_eq!(properties.object_type, Package::WORKBENCH_TYPE);
-        assert_eq!(properties.version, "active");
+        assert_eq!(properties.version, ObjectVersion::Active);
+        assert_eq!(properties.attributes.language_version.as_str(), "");
         assert_eq!(properties.links.len(), 1);
         assert_eq!(properties.links[0].href, "versions");
         assert_eq!(
@@ -290,11 +298,6 @@ mod property_tests {
         let xml = String::from_utf8(PACKAGE_XML.to_vec())
             .unwrap()
             .replacen(
-                "adtcore:version=\"active\"",
-                "adtcore:version=\"future\"",
-                1,
-            )
-            .replacen(
                 "adtcore:uri=\"/sap/bc/adt/packages/sadt_main\"",
                 "adtcore:uri=\"https://example.test/package\"",
                 1,
@@ -302,7 +305,7 @@ mod property_tests {
             .replacen("adtcore:type=\"PINF/KI\"", "adtcore:type=\"FUTURE/I\"", 1);
         let properties: PackageProperties = serde_xml_rs::from_str(&xml).unwrap();
 
-        assert_eq!(properties.version, "future");
+        assert_eq!(properties.version, ObjectVersion::Active);
         assert_eq!(
             properties.super_package.unwrap().uri.as_deref(),
             Some("https://example.test/package")
@@ -315,5 +318,16 @@ mod property_tests {
                 .map(GlobalWorkbenchType::as_str),
             Some("FUTURE/I")
         );
+    }
+
+    #[test]
+    fn rejects_unknown_object_versions() {
+        let xml = String::from_utf8(PACKAGE_XML.to_vec()).unwrap().replacen(
+            "adtcore:version=\"active\"",
+            "adtcore:version=\"future\"",
+            1,
+        );
+
+        assert!(serde_xml_rs::from_str::<PackageProperties>(&xml).is_err());
     }
 }

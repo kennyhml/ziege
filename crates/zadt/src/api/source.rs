@@ -5,12 +5,16 @@ use crate::{
     error::{ObjectError, OperationError, ResponseError},
     objects::{AnyObject, Object, Source, SourceComponents},
     operation::{Operation, OperationResponse, Stateful, Stateless},
-    protocol::{AdtRequest, EntityTag},
+    protocol::{AdtRequest, EntityTag, TEXT_PLAIN_MEDIA_TYPE},
     resource::{SourceRef, refs::source_from_href},
-    vocabulary::{media_type, query_parameter},
 };
 
-use super::{locking::ObjectLock, transports::TransportNumber};
+use super::{
+    locking::{LOCK_HANDLE_QUERY, ObjectLock},
+    transports::{TRANSPORT_REQUEST_QUERY, TransportNumber},
+};
+
+const SOURCE_UPDATE_MEDIA_TYPE: &str = "text/plain; charset=utf-8";
 
 /// A fetched source representation and its attached metadata.
 #[derive(Debug)]
@@ -78,7 +82,7 @@ impl<S: ClientState> Operation<S> for ObjectSourceQuery {
         for (name, value) in &self.source.query {
             request.push_query(name, value);
         }
-        request.set_accept(media_type::SOURCE);
+        request.set_accept(TEXT_PLAIN_MEDIA_TYPE);
         Ok(request)
     }
 
@@ -173,17 +177,14 @@ impl<S: ClientState> Operation<S> for ObjectSourceUpdate {
 
     fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
         let mut request = AdtRequest::new(Method::PUT, self.source.uri.clone());
-        request.push_query(query_parameter::LOCK_HANDLE, self.object_lock.handle());
+        request.push_query(LOCK_HANDLE_QUERY, self.object_lock.handle());
         if let Some(transport_request) = &self.transport_request {
-            request.push_query(
-                query_parameter::TRANSPORT_REQUEST,
-                transport_request.as_str(),
-            );
+            request.push_query(TRANSPORT_REQUEST_QUERY, transport_request.as_str());
         }
         if let Some(user_session) = self.object_lock.user_session() {
             request.require_user_session(user_session);
         }
-        request.set_content_type(media_type::SOURCE_UPDATE);
+        request.set_content_type(SOURCE_UPDATE_MEDIA_TYPE);
         request.set_body(self.content.clone());
         Ok(request)
     }

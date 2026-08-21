@@ -4,7 +4,7 @@ use serde::Deserialize;
 use super::common::RepositoryFacet;
 use crate::{
     AdtRequest, CategoryId, Client, Operation, OperationError, OperationResponse, Ready,
-    RepositoryError, ResponseError, Stateless, target::CollectionTarget,
+    RepositoryError, ResponseError, Stateless, operation::CollectionTarget,
 };
 
 /// Fetches the facets supported by the repository information system.

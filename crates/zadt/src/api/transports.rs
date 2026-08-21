@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     AdtRequest, AdtUri, CategoryId, Client, CtsError, ObjectError, Operation, OperationError,
     OperationResponse, PostAction, Ready, ResponseError, Stateless,
-    compatibility::media_types_match, target::CollectionTarget, vocabulary::query_parameter,
+    compatibility::media_types_match, operation::CollectionTarget, protocol::TEXT_PLAIN_MEDIA_TYPE,
 };
 
 const ABAP_XML_NAMESPACE: &str = "http://www.sap.com/abapxml";
@@ -32,7 +32,7 @@ const TRANSPORT_CREATE_V1_MEDIA_TYPE: &str =
     "application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.CreateCorrectionRequest.v1";
 const TRANSPORT_CREATE_RESULT_MEDIA_TYPE: &str =
     "application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.CorrectionRequestResult";
-const PLAIN_TEXT_MEDIA_TYPE: &str = "text/plain";
+pub(crate) const TRANSPORT_REQUEST_QUERY: &str = "corrNr";
 
 /// Checks whether and where a repository operation must be recorded in CTS.
 ///
@@ -171,7 +171,7 @@ impl Operation<Ready> for TransportsQuery {
 
     fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
         let mut request = Self::TARGET.request(client, Method::GET)?;
-        request.push_query(query_parameter::ACTION, PostAction::Find.as_str());
+        request.push_query(PostAction::QUERY_PARAMETER, PostAction::Find.as_str());
         if let Some(user) = &self.user {
             request.push_query("user", user);
         }
@@ -325,7 +325,7 @@ impl Operation<Ready> for TransportCreate {
         }
 
         let content_type = response
-            .require_content_type(&[TRANSPORT_CREATE_RESULT_MEDIA_TYPE, PLAIN_TEXT_MEDIA_TYPE])?;
+            .require_content_type(&[TRANSPORT_CREATE_RESULT_MEDIA_TYPE, TEXT_PLAIN_MEDIA_TYPE])?;
 
         if media_types_match(TRANSPORT_CREATE_RESULT_MEDIA_TYPE, content_type) {
             TransportCreation::parse(response.body()).map_err(Into::into)
@@ -372,7 +372,7 @@ impl TransportCreateMediaVersion {
     fn response_media_type(self) -> &'static str {
         match self {
             Self::V1 => TRANSPORT_CREATE_RESULT_MEDIA_TYPE,
-            Self::Legacy => PLAIN_TEXT_MEDIA_TYPE,
+            Self::Legacy => TEXT_PLAIN_MEDIA_TYPE,
         }
     }
 }

@@ -4,15 +4,20 @@ use http::{Method, StatusCode};
 use serde::Deserialize;
 
 use crate::{
+    PostAction,
     client::{Client, ClientState},
     error::{ObjectError, OperationError, ResponseError},
     objects::{AnyObject, Object, ObjectRef, ObjectType},
     operation::{Operation, OperationResponse, Stateful, UserSessionId},
     protocol::AdtRequest,
-    vocabulary::{PostAction, media_type, query_parameter},
 };
 
 use super::transports::TransportNumber;
+
+const ACCESS_MODE_QUERY: &str = "accessMode";
+pub(crate) const LOCK_HANDLE_QUERY: &str = "lockHandle";
+const LOCK_RESULT_MEDIA_TYPE: &str =
+    "application/vnd.sap.as+xml; charset=utf-8; dataname=com.sap.adt.lock.Result2";
 
 /// The access requested when locking an ADT repository object.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -290,9 +295,9 @@ impl<S: ClientState> Operation<S> for LockRequest {
 
     fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
         let mut request = AdtRequest::new(Method::POST, self.object.uri().clone());
-        request.push_query(query_parameter::ACTION, PostAction::Lock.as_str());
-        request.push_query(query_parameter::ACCESS_MODE, self.access_mode.as_str());
-        request.set_accept(media_type::LOCK_RESULT);
+        request.push_query(PostAction::QUERY_PARAMETER, PostAction::Lock.as_str());
+        request.push_query(ACCESS_MODE_QUERY, self.access_mode.as_str());
+        request.set_accept(LOCK_RESULT_MEDIA_TYPE);
         Ok(request)
     }
 
@@ -326,8 +331,8 @@ impl<S: ClientState> Operation<S> for UnlockRequest {
 
     fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
         let mut request = AdtRequest::new(Method::POST, self.object_lock.object().uri().clone());
-        request.push_query(query_parameter::ACTION, PostAction::Unlock.as_str());
-        request.push_query(query_parameter::LOCK_HANDLE, self.object_lock.handle());
+        request.push_query(PostAction::QUERY_PARAMETER, PostAction::Unlock.as_str());
+        request.push_query(LOCK_HANDLE_QUERY, self.object_lock.handle());
         if let Some(user_session) = self.object_lock.user_session() {
             request.require_user_session(user_session);
         }

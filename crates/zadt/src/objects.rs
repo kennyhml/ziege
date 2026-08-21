@@ -1,12 +1,10 @@
-use crate::vocabulary::CategoryId;
+use crate::CategoryId;
 
 mod capabilities;
 pub(crate) mod descriptors;
-mod families;
-mod language_version;
 mod object;
 mod reference;
-mod version;
+mod types;
 mod workbench;
 
 pub use capabilities::{
@@ -16,7 +14,9 @@ pub use capabilities::{
 pub(crate) use capabilities::{ImmediateRun, RunCapability};
 pub(crate) use descriptors::ObjectTypeDescriptor;
 pub(crate) use descriptors::RuntimeObjectTypeDescriptor;
-pub use families::{
+pub use object::{AnyObject, Object};
+pub use reference::{AdvertisedObjectReference, ObjectRef, ObjectReferences};
+pub use types::{
     Class, ClassCategory, ClassCreateProperties, ClassCreatePropertiesBuilder,
     ClassCreatePropertiesBuilderError, ClassProperties, ClassPropertiesVersion,
     ClassSourceComponent, ClassSourceProperties, ClassTemplate, ClassTemplateProperty, DataElement,
@@ -25,11 +25,9 @@ pub use families::{
     PackageProperties, PackagePropertiesVersion, PackageTransport, PackageUseAccess, Program,
     ProgramProperties, ProgramPropertiesVersion, SyntaxConfiguration, SyntaxLanguage,
 };
-pub use language_version::AbapLanguageVersion;
-pub use object::{AnyObject, Object};
-pub use reference::{AdvertisedObjectReference, ObjectRef, ObjectReferences};
-pub use version::ObjectVersion;
-pub use workbench::{GlobalWorkbenchType, InvalidWorkbenchType};
+pub use workbench::{
+    AbapLanguageVersion, GlobalWorkbenchType, InvalidWorkbenchType, ObjectVersion,
+};
 
 pub(crate) mod private {
     pub trait Sealed {}

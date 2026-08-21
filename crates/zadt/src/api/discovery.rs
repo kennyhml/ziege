@@ -4,10 +4,21 @@ use url::Url;
 
 use crate::{
     AdtRequest, AdtUri, Client, ClientState, DiscoveryError, Initial, Operation, OperationError,
-    OperationResponse, Ready, ResponseError, Stateless,
-    target::{CENTRAL_DISCOVERY, CORE_DISCOVERY},
-    vocabulary::media_type,
+    OperationResponse, Ready, ResponseError, Stateless, protocol::CORE_DISCOVERY_PATH,
 };
+
+const DISCOVERY_MEDIA_TYPE: &str = "application/atomsvc+xml";
+const CENTRAL_DISCOVERY_PATH: &str = "/sap/bc/adt/discovery";
+
+/// A stable category identity from an ADT discovery document.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CategoryId {
+    /// The category scheme URI.
+    pub scheme: &'static str,
+
+    /// The category term within the scheme.
+    pub term: &'static str,
+}
 
 /// Fetches the small, fixed ADT bootstrap capability document.
 ///
@@ -35,8 +46,10 @@ impl<S: ClientState> Operation<S> for CoreDiscoveryQuery {
     type Kind = Stateless;
 
     fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
-        let mut request = CORE_DISCOVERY.request(Method::GET);
-        request.set_accept(media_type::DISCOVERY);
+        let target = AdtUri::parse(CORE_DISCOVERY_PATH)
+            .expect("the core discovery path must be a valid ADT URI");
+        let mut request = AdtRequest::new(Method::GET, target);
+        request.set_accept(DISCOVERY_MEDIA_TYPE);
         Ok(request)
     }
 
@@ -70,8 +83,10 @@ impl<S: ClientState> Operation<S> for DiscoveryQuery {
     type Kind = Stateless;
 
     fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
-        let mut request = CENTRAL_DISCOVERY.request(Method::GET);
-        request.set_accept(media_type::DISCOVERY);
+        let target = AdtUri::parse(CENTRAL_DISCOVERY_PATH)
+            .expect("the central discovery path must be a valid ADT URI");
+        let mut request = AdtRequest::new(Method::GET, target);
+        request.set_accept(DISCOVERY_MEDIA_TYPE);
         Ok(request)
     }
 

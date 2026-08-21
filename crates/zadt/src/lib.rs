@@ -8,9 +8,7 @@ mod objects;
 mod operation;
 mod protocol;
 mod resource;
-mod target;
 mod uri;
-mod vocabulary;
 
 pub mod transport;
 
@@ -25,7 +23,8 @@ pub use api::activation::{
 pub use api::classes::{ClassRun, ClassRunResult};
 pub use api::creation::CreateObjectRequest;
 pub use api::discovery::{
-    Capabilities, Category, Collection, CoreDiscoveryQuery, DiscoveryQuery, TemplateLink, Workspace,
+    Capabilities, Category, CategoryId, Collection, CoreDiscoveryQuery, DiscoveryQuery,
+    TemplateLink, Workspace,
 };
 pub use api::locking::{AccessMode, LockRequest, ObjectLock, UnlockRequest};
 pub use api::objectstructure::{ObjectStructure, ObjectStructureElement, ObjectStructureQuery};
@@ -82,7 +81,7 @@ pub use operation::{
     OperationContext, OperationKind, OperationResponse, Revalidation, Stateful, Stateless,
     UserSession,
 };
-pub use protocol::{AdtRequest, AdtResponse, EntityTag};
+pub use protocol::{AdtRequest, AdtResponse, EntityTag, PostAction};
 pub use resource::{
     AdtLink, AdtLinkError, AdvertisedLink, EnhancementImplementationsRef, HtmlSourceRef,
     ObjectEnhancementOptionsRef, ObjectStateRef, ObjectStructureRef, OwnedResourceRef, ParserRef,
@@ -94,4 +93,3 @@ pub use transport::{ReqwestTransport, ReqwestTransportBuilder};
 #[cfg(feature = "logging")]
 pub use transport::{Traced, TransportExt};
 pub use uri::{ADT_RESOURCE_ROOT, ADT_ROOT, AdtUri, AdtUriError};
-pub use vocabulary::{CategoryId, PostAction};

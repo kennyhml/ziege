@@ -6,12 +6,16 @@ use crate::{
     AdtRequest, AdtUri, AnyObject, CategoryId, Client, GlobalWorkbenchType, Object, ObjectError,
     ObjectRef, ObjectType, Operation, OperationError, OperationResponse, Package, Ready,
     RepositoryError, ResponseError, Stateless, TransportNumber, TransportStatus,
+    operation::CollectionTarget,
     resource::{AdvertisedLink, Relations},
-    target::CollectionTarget,
-    vocabulary::{media_type, query_parameter},
 };
 
 pub(super) const PACKAGE_RELATION: &str = "http://www.sap.com/adt/relations/packages";
+const URI_QUERY: &str = "uri";
+pub(super) const OBJECT_PROPERTIES_MEDIA_TYPE: &str =
+    "application/vnd.sap.adt.repository.objproperties.result.v1+xml";
+pub(super) const TRANSPORT_PROPERTIES_MEDIA_TYPE: &str =
+    "application/vnd.sap.adt.repository.trproperties.result.v1+xml";
 const ASSIGNED_TRANSPORTS_CATEGORY: CategoryId = CategoryId {
     scheme: "http://www.sap.com/adt/categories/repository",
     term: "transportProperties",
@@ -69,11 +73,11 @@ impl Operation<Ready> for RepositoryObjectPropertiesQuery {
 
     fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
         let mut request = Self::TARGET.request(client, Method::GET)?;
-        request.push_query("uri", self.object_uri.as_str());
+        request.push_query(URI_QUERY, self.object_uri.as_str());
         for facet in &self.facets {
             request.push_query("facet", facet.as_str());
         }
-        request.set_accept(media_type::REPOSITORY_OBJECT_PROPERTIES);
+        request.set_accept(OBJECT_PROPERTIES_MEDIA_TYPE);
         Ok(request)
     }
 
@@ -122,14 +126,14 @@ impl Operation<Ready> for AssignedTransportsQuery {
 
     fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
         let mut request = Self::TARGET.request(client, Method::GET)?;
-        request.push_query(query_parameter::URI, self.object_uri.as_str());
-        request.set_accept(media_type::REPOSITORY_OBJECT_TR_PROPERTIES);
+        request.push_query(URI_QUERY, self.object_uri.as_str());
+        request.set_accept(TRANSPORT_PROPERTIES_MEDIA_TYPE);
         Ok(request)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         response.require_status(StatusCode::OK)?;
-        response.require_content_type(&[media_type::REPOSITORY_OBJECT_TR_PROPERTIES])?;
+        response.require_content_type(&[TRANSPORT_PROPERTIES_MEDIA_TYPE])?;
         serde_xml_rs::from_reader(response.body())
             .map_err(RepositoryError::InvalidResponse)
             .map_err(Into::into)

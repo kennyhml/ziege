@@ -8,7 +8,10 @@ use reqwest::cookie::{CookieStore, Jar};
 use secrecy::{ExposeSecret, SecretString};
 use url::Url;
 
-use crate::{AdtRequest, AdtResponse, ReqwestTransportBuildError, Transport, TransportError};
+use crate::{
+    AdtRequest, AdtResponse, ReqwestTransportBuildError, Transport, TransportError,
+    protocol::CORE_DISCOVERY_PATH,
+};
 
 const CSRF_TOKEN_HEADER: &str = "x-csrf-token";
 const CSRF_FETCH: &str = "Fetch";
@@ -157,7 +160,7 @@ impl ReqwestTransport {
     async fn fetch_csrf_token(&self) -> Result<HeaderValue, TransportError> {
         let url = self
             .destination
-            .join(crate::target::CORE_DISCOVERY.as_str())
+            .join(CORE_DISCOVERY_PATH)
             .map_err(TransportError::new)?;
         let mut headers = HeaderMap::new();
         headers.insert(CSRF_TOKEN_HEADER, HeaderValue::from_static(CSRF_FETCH));

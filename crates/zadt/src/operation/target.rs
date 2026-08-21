@@ -1,36 +1,9 @@
 use http::Method;
 
 use crate::{
-    AdtRequest, AdtUri, CategoryId, Client, Collection, ObjectError, OperationError, Ready,
+    AdtRequest, CategoryId, Client, Collection, ObjectError, OperationError, Ready,
     resource::AdtUriTemplate,
 };
-
-pub(crate) const CENTRAL_DISCOVERY: FixedTarget = FixedTarget::new("/sap/bc/adt/discovery");
-pub(crate) const CORE_DISCOVERY: FixedTarget = FixedTarget::new("/sap/bc/adt/core/discovery");
-pub(crate) const HTTP_SESSIONS: FixedTarget = FixedTarget::new("/sap/bc/adt/core/http/sessions");
-
-/// A protocol bootstrap target known without server discovery.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct FixedTarget(&'static str);
-
-impl FixedTarget {
-    pub(crate) const fn new(target: &'static str) -> Self {
-        Self(target)
-    }
-
-    #[cfg(feature = "reqwest")]
-    pub(crate) const fn as_str(self) -> &'static str {
-        self.0
-    }
-
-    pub(crate) fn uri(self) -> AdtUri {
-        AdtUri::parse(self.0).expect("a fixed ADT target must be a valid ADT URI")
-    }
-
-    pub(crate) fn request(self, method: Method) -> AdtRequest {
-        AdtRequest::new(method, self.uri())
-    }
-}
 
 /// A collection identified by its stable category in central discovery.
 #[derive(Clone, Copy, Debug)]

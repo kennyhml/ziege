@@ -220,7 +220,7 @@ async fn class_properties_query_converts_the_live_v4_manifest() {
     let source = source_ref.query().execute(&client).await.unwrap();
 
     assert_eq!(class.name, "CL_ADT_URI_MAPPER");
-    assert_eq!(class.version, "active");
+    assert_eq!(class.version, ObjectVersion::Active);
     assert_eq!(class.package.name.as_deref(), Some("SADT_TOOLS_CORE"));
     assert_eq!(class.sources.len(), 5);
     assert_eq!(

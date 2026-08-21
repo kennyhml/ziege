@@ -4,11 +4,12 @@ use serde::Deserialize;
 use crate::{
     AdtUri, AdvertisedLink, AnyObject, Client, ClientState, Object, ObjectError,
     ObjectStructureRef, ObjectVersion, Operation, OperationError, OperationResponse, PropertyModel,
-    Relations, ResponseError, Stateless, Structure,
-    protocol::AdtRequest,
-    resource::resolve_href,
-    vocabulary::{media_type, query_parameter, relation},
+    Relations, ResponseError, Stateless, Structure, protocol::AdtRequest, resource::resolve_href,
 };
+
+const INHERITED_MEMBERS_QUERY: &str = "inheritedMembers";
+const WITH_SHORT_DESCRIPTIONS_QUERY: &str = "withShortDescriptions";
+const OBJECT_STRUCTURE_MEDIA_TYPE: &str = "application/vnd.sap.adt.objectstructure.v2+xml";
 
 /// Fetches the structure representation advertised by an object.
 ///
@@ -73,37 +74,35 @@ impl<S: ClientState> Operation<S> for ObjectStructureQuery {
     fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
         let mut request = AdtRequest::new(Method::GET, self.resource.uri.clone());
         for (name, value) in &self.resource.query {
-            if self.version.is_some() && name == query_parameter::VERSION {
+            if self.version.is_some() && name == ObjectVersion::QUERY_PARAMETER {
                 continue;
             }
-            if self.inherited_members.is_some() && name == query_parameter::INHERITED_MEMBERS {
+            if self.inherited_members.is_some() && name == INHERITED_MEMBERS_QUERY {
                 continue;
             }
-            if self.with_short_descriptions.is_some()
-                && name == query_parameter::WITH_SHORT_DESCRIPTIONS
-            {
+            if self.with_short_descriptions.is_some() && name == WITH_SHORT_DESCRIPTIONS_QUERY {
                 continue;
             }
             request.push_query(name, value);
         }
         if let Some(version) = self.version {
-            request.push_query(query_parameter::VERSION, version.as_str());
+            request.push_query(ObjectVersion::QUERY_PARAMETER, version.as_str());
         }
         if self.with_short_descriptions == Some(true) {
-            request.push_query(query_parameter::WITH_SHORT_DESCRIPTIONS, "true");
+            request.push_query(WITH_SHORT_DESCRIPTIONS_QUERY, "true");
         }
         // Only the presence of the query parameter makes it expand inherited members
         // Seems like a bug in the ADT handler, so we need a workaround
         if self.inherited_members == Some(true) {
-            request.push_query(query_parameter::INHERITED_MEMBERS, "true");
+            request.push_query(INHERITED_MEMBERS_QUERY, "true");
         }
-        request.set_accept(media_type::OBJECT_STRUCTURE_V2);
+        request.set_accept(OBJECT_STRUCTURE_MEDIA_TYPE);
         Ok(request)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         response.require_status(StatusCode::OK)?;
-        response.require_content_type(&[media_type::OBJECT_STRUCTURE_V2])?;
+        response.require_content_type(&[OBJECT_STRUCTURE_MEDIA_TYPE])?;
 
         let raw: RawObjectStructureElement =
             serde_xml_rs::from_reader(response.body()).map_err(ObjectError::InvalidResponse)?;
@@ -128,7 +127,7 @@ impl<T: Structure> Object<T> {
         ObjectStructureRef::from_relations(self.reference().erase(), self.properties.links())?
             .map(|reference| reference.query())
             .ok_or(ObjectError::MissingRelation {
-                relation: relation::OBJECT_STRUCTURE,
+                relation: ObjectStructureRef::RELATION,
             })
     }
 }
@@ -143,7 +142,7 @@ impl AnyObject {
             .object_structure(self.reference(), &self.properties)?
             .map(|reference| reference.query())
             .ok_or(ObjectError::MissingRelation {
-                relation: relation::OBJECT_STRUCTURE,
+                relation: ObjectStructureRef::RELATION,
             })
     }
 }
@@ -393,13 +392,13 @@ mod tests {
     #[test]
     fn query_uses_v2_and_overrides_advertised_options() {
         let mut structure = structure_reference();
+        structure.query.push((
+            ObjectVersion::QUERY_PARAMETER.to_owned(),
+            "active".to_owned(),
+        ));
         structure
             .query
-            .push((query_parameter::VERSION.to_owned(), "active".to_owned()));
-        structure.query.push((
-            query_parameter::INHERITED_MEMBERS.to_owned(),
-            "legacy".to_owned(),
-        ));
+            .push((INHERITED_MEMBERS_QUERY.to_owned(), "legacy".to_owned()));
         let query = structure
             .query()
             .version(ObjectVersion::Inactive)
@@ -418,17 +417,16 @@ mod tests {
         );
         assert_eq!(
             request.headers().get(header::ACCEPT).unwrap(),
-            media_type::OBJECT_STRUCTURE_V2
+            OBJECT_STRUCTURE_MEDIA_TYPE
         );
     }
 
     #[test]
     fn false_inherited_members_omits_the_presence_based_parameter() {
         let mut structure = structure_reference();
-        structure.query.push((
-            query_parameter::INHERITED_MEMBERS.to_owned(),
-            "true".to_owned(),
-        ));
+        structure
+            .query
+            .push((INHERITED_MEMBERS_QUERY.to_owned(), "true".to_owned()));
 
         let request = structure
             .query()
@@ -460,7 +458,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::CONTENT_TYPE,
-            HeaderValue::from_static(media_type::OBJECT_STRUCTURE_V2),
+            HeaderValue::from_static(OBJECT_STRUCTURE_MEDIA_TYPE),
         );
         let response = OperationResponse::new(
             AdtResponse::new(StatusCode::OK, headers, STRUCTURE_XML.to_vec()),

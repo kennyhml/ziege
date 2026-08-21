@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use zadt_macros::object_type;
 
-use crate::{AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType, PropertyModel};
+use crate::{
+    AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
+    ObjectVersion, PropertyModel,
+};
 
 #[object_type(
     properties = DataElementProperties,
@@ -53,15 +56,15 @@ pub struct DataElementProperties {
 
     /// The configured ABAP language version, when advertised.
     #[serde(rename = "@adtcore:abapLanguageVersion")]
-    pub abap_language_version: Option<String>,
+    pub abap_language_version: Option<AbapLanguageVersion>,
 
     /// The timestamp at which the object was last changed.
     #[serde(rename = "@adtcore:changedAt")]
     pub last_changed: Option<String>,
 
-    /// The object version exactly as advertised by SAP.
+    /// The object version, when advertised.
     #[serde(rename = "@adtcore:version")]
-    pub version: Option<String>,
+    pub version: Option<ObjectVersion>,
 
     /// The timestamp at which the object was created.
     #[serde(rename = "@adtcore:createdAt")]
@@ -242,7 +245,14 @@ mod tests {
     fn parses_live_data_element_properties_as_one_representation() {
         let properties = properties();
 
-        assert_eq!(properties.version.as_deref(), Some("new"));
+        assert_eq!(properties.version, Some(ObjectVersion::New));
+        assert_eq!(
+            properties
+                .abap_language_version
+                .as_ref()
+                .map(AbapLanguageVersion::as_str),
+            Some("0")
+        );
         assert_eq!(properties.master_system.as_deref(), Some("A4H"));
         assert_eq!(
             properties.package.as_ref().unwrap().name.as_deref(),

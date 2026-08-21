@@ -4,16 +4,20 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::{GlobalWorkbenchType, ObjectType, descriptors};
 use crate::{
+    CategoryId,
     client::{Client, Ready},
     error::ObjectError,
     uri::AdtUri,
-    vocabulary::CategoryId,
 };
 
-/// A validated ADT repository-object identity with static or runtime type state.
+/// A reference to an ADT object with its name, URI, and Workbench type.
 ///
-/// Typed references obtain capabilities from `T`. [`ObjectRef<()>`] retains the
-/// exact runtime Workbench type for runtime capability dispatch.
+/// Unlike [`crate::Object<T>`], this value does not include loaded properties.
+/// The type parameter `T` selects the operations available for that object
+/// family.
+///
+/// [`ObjectRef<()>`] stores the object family at runtime. It is useful when the
+/// family comes from user input or a repository response.
 #[derive(Debug, Serialize)]
 #[serde(bound = "")]
 pub struct ObjectRef<T = ()> {
@@ -22,45 +26,6 @@ pub struct ObjectRef<T = ()> {
     object_type: GlobalWorkbenchType,
     #[serde(skip)]
     marker: PhantomData<fn() -> T>,
-}
-
-#[derive(Deserialize)]
-struct ObjectRefRepresentation {
-    name: String,
-    uri: AdtUri,
-    object_type: GlobalWorkbenchType,
-}
-
-impl<'de> Deserialize<'de> for ObjectRef<()> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let reference = ObjectRefRepresentation::deserialize(deserializer)?;
-        Ok(Self::erased(
-            reference.name,
-            reference.uri,
-            reference.object_type,
-        ))
-    }
-}
-
-impl<'de, T: ObjectType> Deserialize<'de> for ObjectRef<T> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let reference = ObjectRefRepresentation::deserialize(deserializer)?;
-        if reference.object_type != T::WORKBENCH_TYPE {
-            return Err(serde::de::Error::custom(
-                ObjectError::UnexpectedObjectType {
-                    expected: T::WORKBENCH_TYPE,
-                    actual: reference.object_type,
-                },
-            ));
-        }
-        Ok(Self::new(reference.name, reference.uri))
-    }
 }
 
 impl<T> ObjectRef<T> {
@@ -178,6 +143,49 @@ impl<T> Hash for ObjectRef<T> {
 impl<T> fmt::Display for ObjectRef<T> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.uri.fmt(formatter)
+    }
+}
+
+/// Temporary Serde value used while deserializing an [`ObjectRef`].
+///
+/// For typed references, the Workbench type is checked before the reference is
+/// constructed.
+#[derive(Deserialize)]
+struct RawObjectRef {
+    name: String,
+    uri: AdtUri,
+    object_type: GlobalWorkbenchType,
+}
+
+impl<'de> Deserialize<'de> for ObjectRef<()> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let reference = RawObjectRef::deserialize(deserializer)?;
+        Ok(Self::erased(
+            reference.name,
+            reference.uri,
+            reference.object_type,
+        ))
+    }
+}
+
+impl<'de, T: ObjectType> Deserialize<'de> for ObjectRef<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let reference = RawObjectRef::deserialize(deserializer)?;
+        if reference.object_type != T::WORKBENCH_TYPE {
+            return Err(serde::de::Error::custom(
+                ObjectError::UnexpectedObjectType {
+                    expected: T::WORKBENCH_TYPE,
+                    actual: reference.object_type,
+                },
+            ));
+        }
+        Ok(Self::new(reference.name, reference.uri))
     }
 }
 

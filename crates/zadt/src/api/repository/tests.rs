@@ -1,11 +1,21 @@
 use async_trait::async_trait;
 use http::{HeaderMap, Method, StatusCode, header};
 
-use super::{content::RepositoryContentRequest, object_properties::PACKAGE_RELATION, *};
+use super::{
+    content::{
+        REPOSITORY_CONTENT_REQUEST_MEDIA_TYPE, REPOSITORY_CONTENT_RESULT_MEDIA_TYPE,
+        RepositoryContentRequest,
+    },
+    favorites::{FAVORITES_MEDIA_TYPE, FAVORITES_UPDATE_MEDIA_TYPE},
+    object_properties::{
+        OBJECT_PROPERTIES_MEDIA_TYPE, PACKAGE_RELATION, TRANSPORT_PROPERTIES_MEDIA_TYPE,
+    },
+    *,
+};
 use crate::{
     AccessMode, AdtRequest, AdtResponse, AdtUri, Class, Client, CompatibilityError, DataElement,
     Include, ObjectError, ObjectRef, ObjectType, Operation, OperationError, OperationResponse,
-    Package, Program, Ready, RepositoryError, Transport, TransportError, vocabulary::media_type,
+    Package, Program, Ready, RepositoryError, Transport, TransportError,
 };
 
 const CONTENT_XML: &[u8] = include_bytes!("../../../tests/fixtures/repository-content.xml");
@@ -92,11 +102,11 @@ fn repository_content_request_matches_the_ris_contract() {
     );
     assert_eq!(
         request.headers().get(header::CONTENT_TYPE).unwrap(),
-        media_type::REPOSITORY_CONTENT_REQUEST
+        REPOSITORY_CONTENT_REQUEST_MEDIA_TYPE
     );
     assert_eq!(
         request.headers().get(header::ACCEPT).unwrap(),
-        media_type::REPOSITORY_CONTENT_RESULT
+        REPOSITORY_CONTENT_RESULT_MEDIA_TYPE
     );
     assert!(body.contains("xmlns:vfs=\"http://www.sap.com/adt/ris/virtualFolders\""));
     assert!(body.contains("objectSearchPattern=\"Z*\""));
@@ -138,14 +148,11 @@ fn favorite_objects_response_decodes_objects() {
     );
     assert_eq!(
         request.headers().get(header::ACCEPT).unwrap(),
-        media_type::REPOSITORY_FAVORITES_COMPLETE
+        FAVORITES_MEDIA_TYPE
     );
 
     let mut headers = HeaderMap::new();
-    headers.insert(
-        header::CONTENT_TYPE,
-        media_type::REPOSITORY_FAVORITES_COMPLETE.parse().unwrap(),
-    );
+    headers.insert(header::CONTENT_TYPE, FAVORITES_MEDIA_TYPE.parse().unwrap());
     let response = AdtResponse::new(
         StatusCode::OK,
         headers,
@@ -197,11 +204,11 @@ fn favorite_objects_update_serializes_transactions() {
     );
     assert_eq!(
         request.headers().get(header::ACCEPT).unwrap(),
-        media_type::REPOSITORY_FAVORITES_COMPLETE
+        FAVORITES_MEDIA_TYPE
     );
     assert_eq!(
         request.headers().get(header::CONTENT_TYPE).unwrap(),
-        media_type::REPOSITORY_FAVORITES_MODIFY
+        FAVORITES_UPDATE_MEDIA_TYPE
     );
     assert!(body.contains("xmlns:vf=\"http://www.sap.com/adt/ris/vf/favorites\""));
     assert!(body.contains("xmlns:adtcore=\"http://www.sap.com/adt/core\""));
@@ -244,7 +251,7 @@ fn object_properties_request_repeats_included_facets() {
     );
     assert_eq!(
         request.headers().get(header::ACCEPT).unwrap(),
-        media_type::REPOSITORY_OBJECT_PROPERTIES
+        OBJECT_PROPERTIES_MEDIA_TYPE
     );
 
     let response = AdtResponse::new(
@@ -285,13 +292,13 @@ fn assigned_transports_request_and_response_match_the_ris_contract() {
     );
     assert_eq!(
         request.headers().get(header::ACCEPT).unwrap(),
-        media_type::REPOSITORY_OBJECT_TR_PROPERTIES
+        TRANSPORT_PROPERTIES_MEDIA_TYPE
     );
 
     let mut headers = HeaderMap::new();
     headers.insert(
         header::CONTENT_TYPE,
-        media_type::REPOSITORY_OBJECT_TR_PROPERTIES.parse().unwrap(),
+        TRANSPORT_PROPERTIES_MEDIA_TYPE.parse().unwrap(),
     );
     let response = AdtResponse::new(
         StatusCode::OK,
