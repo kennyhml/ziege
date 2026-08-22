@@ -246,6 +246,11 @@ impl OperationResponse {
 /// Consumers of the API should construct operations manually only in exceptional
 /// cases. In most scenarios, a callable operation can be constructed - or at least
 /// partially derived - from an existing context, such as an object reference.
+///
+/// TODO: Currently, many operatios take a client to build the request without
+/// actually needing one, usually because they do not rely on discovered elements.
+/// This should be cleand up if possible. Ideally, the operation itself should
+/// only concern itself with encode / decode
 pub trait Operation<S: ClientState>: Send + Sync {
     type Response: Send;
     type Kind: OperationKind;

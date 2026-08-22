@@ -6,7 +6,7 @@ use stduritemplate::Value;
 
 use crate::{
     AdtRequest, AdvertisedObjectReference, CategoryId, Client, ObjectError, Operation,
-    OperationError, OperationResponse, Ready, ResponseError, Stateless,
+    OperationError, OperationResponse, Ready, ResponseError, Stateless, User,
     objects::ObjectReferences,
     operation::{CollectionTarget, TemplateTarget},
 };
@@ -30,7 +30,7 @@ const QUERY_RELATION: &str = "http://www.sap.com/adt/relations/activation/inacti
 /// Backend handler: `CL_SEU_ADT_RES_INACTIVE`
 #[derive(Debug, Default)]
 pub struct InactiveObjectsQuery {
-    username: Option<String>,
+    username: Option<User>,
 }
 
 impl InactiveObjectsQuery {
@@ -41,8 +41,8 @@ impl InactiveObjectsQuery {
     }
 
     /// Restricts the query to inactive objects owned by `name`.
-    pub fn username<T: Into<Option<String>>>(&mut self, name: T) -> &mut Self {
-        self.username = name.into();
+    pub fn username(&mut self, user: impl Into<User>) -> &mut Self {
+        self.username = Some(user.into());
         self
     }
 
@@ -61,7 +61,10 @@ impl Operation<Ready> for InactiveObjectsQuery {
         // does not provide much benefit over just using a query parameter
         let mut request = if let Some(username) = &self.username {
             let target = TemplateTarget::new(INACTIVE_OBJECTS, QUERY_RELATION);
-            let variables = HashMap::from([("USERNAME".into(), Value::String(username.clone()))]);
+            let variables = HashMap::from([(
+                "USERNAME".into(),
+                Value::String(username.as_str().to_owned()),
+            )]);
             let (target, query) = target.template(client)?.expand(&variables)?;
             let mut request = AdtRequest::new(Method::GET, target);
             for (name, value) in query {
@@ -89,6 +92,15 @@ impl Operation<Ready> for InactiveObjectsQuery {
     }
 }
 
+impl User {
+    /// Creates a query for this user's inactive repository objects.
+    pub fn inactive_objects(&self) -> InactiveObjectsQuery {
+        let mut query = InactiveObjectsQuery::new();
+        query.username(self);
+        query
+    }
+}
+
 /// Retrieves the inactive objects of the given user. If the user is omitted,
 /// the user making the request is used instead.
 ///
@@ -112,8 +124,8 @@ impl InactiveCtsObjectsQuery {
     }
 
     /// Restricts the query to inactive objects owned by `name`.
-    pub fn username<T: Into<Option<String>>>(&mut self, name: T) -> &mut Self {
-        self.inner.username = name.into();
+    pub fn username(&mut self, user: impl Into<User>) -> &mut Self {
+        self.inner.username = Some(user.into());
         self
     }
 }
@@ -166,7 +178,7 @@ pub struct InactiveCtsObjectEntry {
 pub struct InactiveCtsObject {
     /// User owning the inactive object, when this slot is populated.
     #[serde(rename = "@ioc:user", default)]
-    pub user: Option<String>,
+    pub user: Option<User>,
     /// Whether the represented repository object has been deleted.
     #[serde(rename = "@ioc:deleted", default)]
     pub deleted: Option<bool>,
@@ -180,7 +192,7 @@ pub struct InactiveCtsObject {
 pub struct InactiveCtsObjectTransport {
     /// User owning the transport assignment, when populated.
     #[serde(rename = "@ioc:user", default)]
-    pub user: Option<String>,
+    pub user: Option<User>,
     /// Whether the transport is linked to the paired inactive object.
     #[serde(rename = "@ioc:linked", default)]
     pub linked: Option<bool>,
@@ -229,6 +241,10 @@ mod tests {
 
         let transport = objects.entries[1].transport.reference.as_ref().unwrap();
         assert_eq!(transport.name.as_deref(), Some("A4HK900099"));
+        assert_eq!(
+            objects.entries[1].transport.user.as_ref().map(User::as_str),
+            Some("DEVELOPER")
+        );
         assert_eq!(objects.entries[1].transport.linked, Some(false));
 
         let include = &objects.entries[3];
@@ -258,6 +274,17 @@ mod tests {
                 .as_ref()
                 .and_then(|reference| reference.uri.as_deref())
                 .is_some_and(|uri| uri.contains("#type=CLAS%2FOM"))
+        );
+    }
+
+    #[test]
+    fn user_creates_an_inactive_objects_query_with_preserved_identity() {
+        let user = User::new("DEVELOPER");
+        let query = user.inactive_objects().with_transports();
+
+        assert_eq!(
+            query.inner.username.as_ref().map(User::as_str),
+            Some("DEVELOPER")
         );
     }
 }

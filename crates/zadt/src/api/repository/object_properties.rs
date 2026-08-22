@@ -5,7 +5,7 @@ use super::{common::RepositoryFacet, content::RepositoryObjectEntry};
 use crate::{
     AdtRequest, AdtUri, AnyObject, CategoryId, Client, GlobalWorkbenchType, Object, ObjectError,
     ObjectRef, ObjectType, Operation, OperationError, OperationResponse, Package, Ready,
-    RepositoryError, ResponseError, Stateless, TransportNumber, TransportStatus,
+    RepositoryError, ResponseError, Stateless, TransportNumber, TransportStatus, User,
     operation::CollectionTarget,
     resource::{AdvertisedLink, Relations},
 };
@@ -283,7 +283,7 @@ pub struct AssignedTransport {
     pub number: TransportNumber,
 
     #[serde(rename = "@owner")]
-    pub owner: String,
+    pub owner: User,
 
     #[serde(rename = "@status")]
     pub status: TransportStatus,

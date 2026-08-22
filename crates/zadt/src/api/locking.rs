@@ -4,7 +4,7 @@ use http::{Method, StatusCode};
 use serde::Deserialize;
 
 use crate::{
-    PostAction,
+    PostAction, User,
     client::{Client, ClientState},
     error::{ObjectError, OperationError, ResponseError},
     objects::{AnyObject, Object, ObjectRef, ObjectType},
@@ -55,7 +55,7 @@ pub struct ObjectLock {
     transport_relevant: bool,
     transport_request: Option<TransportNumber>,
     transport_request_description: Option<String>,
-    transport_request_owner: Option<String>,
+    transport_request_owner: Option<User>,
     link_up: bool,
     link_up_mode: Option<String>,
     modification_support: Option<String>,
@@ -90,7 +90,7 @@ impl ObjectLock {
             transport_relevant: !is_local.eq_ignore_ascii_case("X"),
             transport_request: non_empty(transport_request).map(TransportNumber::from),
             transport_request_description: non_empty(transport_request_description),
-            transport_request_owner: non_empty(transport_request_owner),
+            transport_request_owner: non_empty(transport_request_owner).map(User::from),
             link_up: is_link_up.eq_ignore_ascii_case("X"),
             link_up_mode: non_empty(link_up_mode),
             modification_support: non_empty(modification_support),
@@ -144,8 +144,8 @@ impl ObjectLock {
     }
 
     /// Returns the owner of the associated transport request, when supplied.
-    pub fn transport_request_owner(&self) -> Option<&str> {
-        self.transport_request_owner.as_deref()
+    pub fn transport_request_owner(&self) -> Option<&User> {
+        self.transport_request_owner.as_ref()
     }
 
     /// Returns whether SAP requested transport link-up handling.
@@ -443,7 +443,10 @@ mod tests {
             lock.transport_request().map(TransportNumber::as_str),
             Some("A4HK900001")
         );
-        assert_eq!(lock.transport_request_owner(), Some("DEVELOPER"));
+        assert_eq!(
+            lock.transport_request_owner().map(User::as_str),
+            Some("DEVELOPER")
+        );
         assert_eq!(lock.transport_request_description(), Some("Source update"));
         assert!(lock.is_link_up());
         assert_eq!(lock.link_up_mode(), Some("MultipleRequests"));

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AdtRequest, AdtUri, CategoryId, Client, CtsError, ObjectError, Operation, OperationError,
-    OperationResponse, PostAction, Ready, ResponseError, Stateless,
+    OperationResponse, PostAction, Ready, ResponseError, Stateless, User,
     compatibility::media_types_match, operation::CollectionTarget, protocol::TEXT_PLAIN_MEDIA_TYPE,
 };
 
@@ -136,7 +136,7 @@ impl Operation<Ready> for TransportCheck {
 pub struct TransportsQuery {
     /// The transport owner. The backend uses the current user when omitted.
     #[builder(setter(strip_option))]
-    user: Option<String>,
+    user: Option<User>,
 
     /// The transport functions to include.
     kind: QueryTransportKind,
@@ -165,6 +165,16 @@ impl TransportsQuery {
     }
 }
 
+impl User {
+    /// Creates a query for this user's Workbench transports.
+    pub fn transports(&self) -> TransportsQuery {
+        TransportsQuery {
+            user: Some(self.clone()),
+            ..TransportsQuery::default()
+        }
+    }
+}
+
 impl Operation<Ready> for TransportsQuery {
     type Response = TransportRequests;
     type Kind = Stateless;
@@ -173,7 +183,7 @@ impl Operation<Ready> for TransportsQuery {
         let mut request = Self::TARGET.request(client, Method::GET)?;
         request.push_query(PostAction::QUERY_PARAMETER, PostAction::Find.as_str());
         if let Some(user) = &self.user {
-            request.push_query("user", user);
+            request.push_query("user", user.as_str());
         }
         request.push_query("trfunction", self.kind.as_str());
         request.set_accept(TRANSPORT_REQUESTS_MEDIA_TYPE);
@@ -547,7 +557,7 @@ pub struct TransportRequest {
 
     /// The request owner (`AS4USER`).
     #[serde(rename = "AS4USER")]
-    pub owner: String,
+    pub owner: User,
 
     /// The CTS date value (`AS4DATE`).
     #[serde(rename = "AS4DATE")]
@@ -744,7 +754,7 @@ pub struct TransportTask {
     pub status: TransportStatus,
 
     /// The task owner.
-    pub owner: String,
+    pub owner: User,
 
     /// The CTS date value.
     pub date: String,
@@ -1259,7 +1269,7 @@ impl From<RawTransportTask> for TransportTask {
             number: raw.number.into(),
             kind: TransportKind::parse(raw.kind),
             status: TransportStatus::parse(raw.status),
-            owner: raw.owner,
+            owner: raw.owner.into(),
             date: raw.date,
             time: raw.time,
             description: raw.description,

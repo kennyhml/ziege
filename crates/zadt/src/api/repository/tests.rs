@@ -140,11 +140,12 @@ fn repository_content_response_decodes_one_layer() {
 #[test]
 fn favorite_objects_response_decodes_objects() {
     let client = ready_client(REPOSITORY_DISCOVERY_XML);
-    let query = FavoriteObjectsQuery::new();
+    let user = crate::User::new("DEVELOPER");
+    let query = user.favorites();
     let request = query.request(&client).unwrap();
     assert_eq!(
         request.target().as_str(),
-        "/sap/bc/adt/repository/favorites/lists/$"
+        "/sap/bc/adt/repository/favorites/lists/$DEVELOPER"
     );
     assert_eq!(
         request.headers().get(header::ACCEPT).unwrap(),
@@ -321,7 +322,7 @@ fn assigned_transports_request_and_response_match_the_ris_contract() {
         transports.requests[0].status,
         crate::TransportStatus::MODIFIABLE
     );
-    assert_eq!(transports.requests[0].owner, "DEVELOPER");
+    assert_eq!(transports.requests[0].owner.as_str(), "DEVELOPER");
 }
 
 #[test]

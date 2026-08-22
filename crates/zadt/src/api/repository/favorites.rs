@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     AdtRequest, AdvertisedObjectReference, CategoryId, Client, GlobalWorkbenchType, ObjectError,
     ObjectRef, Operation, OperationError, OperationResponse, Ready, RepositoryError, ResponseError,
-    Stateless, operation::CollectionTarget,
+    Stateless, User, operation::CollectionTarget,
 };
 
 const CATEGORY: CategoryId = CategoryId {
@@ -40,7 +40,7 @@ impl FavoriteObjectsQuery {
 
     /// Constructs a query for the objects of the given username by
     /// providing a $ prefix, which is what ADT uses internally.
-    pub fn username(&mut self, username: impl Into<String>) -> &mut Self {
+    pub fn username(&mut self, username: impl Into<User>) -> &mut Self {
         self.list = Some(format!("${}", username.into()));
         self
     }
@@ -50,6 +50,15 @@ impl FavoriteObjectsQuery {
     pub fn list(&mut self, list: impl Into<String>) -> &mut Self {
         self.list = Some(list.into());
         self
+    }
+}
+
+impl User {
+    /// Creates a query for this user's default favorites list.
+    pub fn favorites(&self) -> FavoriteObjectsQuery {
+        let mut query = FavoriteObjectsQuery::new();
+        query.username(self);
+        query
     }
 }
 

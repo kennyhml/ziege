@@ -82,6 +82,14 @@ pub enum LogonError {
     },
 }
 
+/// An error decoding a system user representation.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum UserError {
+    #[error("invalid system users response: {0}")]
+    InvalidResponse(#[from] serde_xml_rs::Error),
+}
+
 /// An error in a generic ADT object operation or representation.
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -377,6 +385,9 @@ pub enum ResponseError {
 
     #[error(transparent)]
     Logon(#[from] LogonError),
+
+    #[error(transparent)]
+    User(#[from] UserError),
 
     #[error(transparent)]
     Object(#[from] ObjectError),

@@ -9,6 +9,7 @@ mod operation;
 mod protocol;
 mod resource;
 mod uri;
+mod user;
 
 pub mod transport;
 
@@ -56,13 +57,14 @@ pub use api::transports::{
     TransportRequests, TransportStatus, TransportTask, TransportsQuery, TransportsQueryBuilder,
     TransportsQueryBuilderError,
 };
+pub use api::users::{Users, UsersQuery};
 pub use client::{Client, ClientState, Initial, Ready};
 pub use compatibility::CompatibilityError;
 #[cfg(feature = "reqwest")]
 pub use error::ReqwestTransportBuildError;
 pub use error::{
     AdtException, AdtExceptionProperty, CtsError, DiscoveryError, LogonError, ObjectError,
-    OperationError, RepositoryError, ResponseError, TransportError,
+    OperationError, RepositoryError, ResponseError, TransportError, UserError,
 };
 pub use objects::{
     AbapLanguageVersion, AdvertisedObjectReference, AnyObject, Class, ClassCategory,
@@ -93,3 +95,4 @@ pub use transport::{ReqwestTransport, ReqwestTransportBuilder};
 #[cfg(feature = "logging")]
 pub use transport::{Traced, TransportExt};
 pub use uri::{ADT_RESOURCE_ROOT, ADT_ROOT, AdtUri, AdtUriError};
+pub use user::User;

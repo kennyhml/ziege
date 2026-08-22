@@ -5,7 +5,7 @@ use httpmock::prelude::*;
 use zadt::{
     AdtUri, Client, Operation, OperationError, QueryTransportKind, Ready, ReqwestTransport,
     ResponseError, TransportCheck, TransportCheckLinkUpMode, TransportCheckOperation,
-    TransportCreate, TransportKind, TransportPropertiesQuery, TransportsQuery,
+    TransportCreate, TransportKind, TransportPropertiesQuery, TransportsQuery, User,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -140,7 +140,9 @@ async fn transport_check_uses_the_discovered_endpoint_and_link_up_mode() {
 
     assert_eq!(result.object.object_type, "CINC");
     assert_eq!(result.requests[0].number.as_str(), "DEVK900001");
+    assert_eq!(result.requests[0].owner.as_str(), "DEVELOPER");
     assert_eq!(result.locks[0].tasks[0].number.as_str(), "DEVK900002");
+    assert_eq!(result.locks[0].tasks[0].owner.as_str(), "DEVELOPER");
     csrf.assert_async().await;
     check.assert_async().await;
 }
@@ -206,6 +208,7 @@ async fn wildcard_transport_query_uses_the_discovered_cts_collection() {
     assert_eq!(response.len(), 2);
     assert_eq!(response.requests[0].number.as_str(), "DEVK900001");
     assert_eq!(response.requests[0].kind, TransportKind::Workbench);
+    assert_eq!(response.requests[0].owner.as_str(), "DEVELOPER");
     discovery.assert_async().await;
     core_discovery.assert_async().await;
     transports.assert_async().await;
@@ -229,13 +232,8 @@ async fn explicit_user_query_accepts_the_backends_empty_response() {
         .await;
 
     let client = ready_client(&server).await;
-    let response = TransportsQuery::builder()
-        .user("OTHER_USER")
-        .build()
-        .unwrap()
-        .execute(&client)
-        .await
-        .unwrap();
+    let user = User::new("OTHER_USER");
+    let response = user.transports().execute(&client).await.unwrap();
 
     assert!(response.is_empty());
     transports.assert_async().await;
