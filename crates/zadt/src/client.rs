@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
-    BatchOperation, Capabilities, CategoryId, Collection, CompatibilityError, OperationError,
-    Stateless, Transport, UserSession,
+    BatchOperation, Capabilities, CategoryId, Collection, CompatibilityError, Stateless, Transport,
+    UserSession,
 };
 
 mod private {
@@ -12,9 +12,8 @@ mod private {
 /// Marker for the protocol lifecycle state of an ADT client.
 ///
 /// ADT advertises top-level collections, URI templates, and accepted media
-/// types through `/sap/bc/adt/discovery`. Operations that require those
-/// capabilities implement `Operation<Ready>`, preventing their execution by a
-/// client that has not completed discovery.
+/// types through `/sap/bc/adt/discovery`. Operations with an advertised target
+/// can only execute through a client that has completed discovery.
 pub trait ClientState: private::Sealed + Clone + Send + Sync {}
 
 /// The client has not loaded the server's central ADT capabilities.
@@ -78,9 +77,9 @@ impl Client<Initial> {
 }
 
 impl Client<Ready> {
-    /// Creates an empty stateless batch using this client's core capabilities.
-    pub fn batch(&self) -> Result<BatchOperation<Stateless>, OperationError> {
-        BatchOperation::new(self)
+    /// Creates an empty stateless batch bound to this client.
+    pub fn batch(&self) -> BatchOperation<'_, Stateless> {
+        BatchOperation::for_client(self)
     }
 
     /// Returns the capabilities advertised by ADT.

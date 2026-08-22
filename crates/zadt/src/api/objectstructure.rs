@@ -2,9 +2,9 @@ use http::{Method, StatusCode};
 use serde::Deserialize;
 
 use crate::{
-    AdtUri, AdvertisedLink, AnyObject, Client, ClientState, Object, ObjectError,
-    ObjectStructureRef, ObjectVersion, Operation, OperationError, OperationResponse, PropertyModel,
-    Relations, ResponseError, Stateless, Structure, protocol::AdtRequest, resource::resolve_href,
+    AdtUri, AdvertisedLink, AnyObject, EncodeError, EncodedOperation, Object, ObjectError,
+    ObjectStructureRef, ObjectVersion, Operation, OperationResponse, Owned, PropertyModel,
+    Relations, ResponseError, Stateless, Structure, resource::resolve_href,
 };
 
 const INHERITED_MEMBERS_QUERY: &str = "inheritedMembers";
@@ -67,12 +67,13 @@ impl ObjectStructureQuery {
     }
 }
 
-impl<S: ClientState> Operation<S> for ObjectStructureQuery {
+impl Operation for ObjectStructureQuery {
     type Response = ObjectStructure;
     type Kind = Stateless;
+    type Target = Owned;
 
-    fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
-        let mut request = AdtRequest::new(Method::GET, self.resource.uri.clone());
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        let mut request = EncodedOperation::owned(Method::GET, self.resource.uri.clone());
         for (name, value) in &self.resource.query {
             if self.version.is_some() && name == ObjectVersion::QUERY_PARAMETER {
                 continue;
@@ -299,26 +300,15 @@ struct RawObjectStructureElement {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use http::{HeaderMap, HeaderValue, StatusCode, header};
 
     use crate::{
         AdtResponse, Class, ClassProperties, ObjectRef, Program, ProgramProperties, PropertyModel,
-        Transport, TransportError,
     };
 
     const STRUCTURE_XML: &[u8] = include_bytes!("../../tests/fixtures/object-structure-class.xml");
     const CLASS_XML: &[u8] = include_bytes!("../../tests/fixtures/class-cl-adt-uri-mapper-v4.xml");
     const PROGRAM_XML: &[u8] = include_bytes!("../../tests/fixtures/program-z-test.xml");
-
-    struct UnusedTransport;
-
-    #[async_trait]
-    impl Transport for UnusedTransport {
-        async fn send(&self, _request: AdtRequest) -> Result<AdtResponse, TransportError> {
-            unreachable!("request construction tests do not send requests")
-        }
-    }
 
     fn structure_reference() -> ObjectStructureRef {
         let object = ObjectRef::<Class>::for_test(
@@ -404,7 +394,7 @@ mod tests {
             .version(ObjectVersion::Inactive)
             .inherited_members(true);
 
-        let request = query.request(&Client::new(UnusedTransport)).unwrap();
+        let request = query.encode().unwrap();
 
         assert_eq!(request.method(), Method::GET);
         assert_eq!(request.target(), &structure.uri);
@@ -428,11 +418,7 @@ mod tests {
             .query
             .push((INHERITED_MEMBERS_QUERY.to_owned(), "true".to_owned()));
 
-        let request = structure
-            .query()
-            .inherited_members(false)
-            .request(&Client::new(UnusedTransport))
-            .unwrap();
+        let request = structure.query().inherited_members(false).encode().unwrap();
 
         assert!(request.query().is_empty());
     }
@@ -442,7 +428,7 @@ mod tests {
         let request = structure_reference()
             .query()
             .short_descriptions(true)
-            .request(&Client::new(UnusedTransport))
+            .encode()
             .unwrap();
 
         assert_eq!(
@@ -465,8 +451,7 @@ mod tests {
             structure.uri.clone(),
         );
 
-        let result =
-            <ObjectStructureQuery as Operation<crate::Initial>>::decode(&query, response).unwrap();
+        let result = <ObjectStructureQuery as Operation>::decode(&query, response).unwrap();
 
         assert_eq!(result.reference, structure);
         assert_eq!(result.root.name, "ZMYNEWCLASSV7");

@@ -1,16 +1,12 @@
-use std::collections::HashMap;
-
 use http::{Method, StatusCode};
 use serde::Deserialize;
-use stduritemplate::Value;
 
 use crate::{
-    AdtUri, AdvertisedObjectReference, CategoryId, Client, GlobalWorkbenchType, ObjectError,
-    ObjectRef, ObjectType, Operation, OperationError, OperationResponse, Package, Ready,
-    ResponseError, Stateless,
+    AdtUri, Advertised, AdvertisedObjectReference, CategoryId, Client, EncodeError,
+    EncodedOperation, GlobalWorkbenchType, ObjectError, ObjectRef, ObjectType, Operation,
+    OperationResponse, Package, Ready, ResponseError, Stateless,
     operation::{CollectionTarget, TemplateTarget},
-    protocol::AdtRequest,
-    resource::{AdtUriTemplate, resolve_href},
+    resource::resolve_href,
 };
 
 const PACKAGE_TYPE_KEY: &str = "DEVCK";
@@ -292,18 +288,20 @@ impl PackageTreeQuery {
     }
 }
 
-impl Operation<Ready> for PackageTreeQuery {
+impl Operation for PackageTreeQuery {
     type Response = PackageTree;
     type Kind = Stateless;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        let template = Self::TARGET.template(client)?;
-        let (target, query) =
-            expand_tree_target(template.as_str(), self.package.name(), self.kind)?;
-        let mut request = AdtRequest::new(Method::GET, target);
-        for (name, value) in query {
-            request.push_query(name, value);
-        }
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        let mut target = Self::TARGET.target();
+        target.push_variable("packagename", self.package.name());
+        target.push_variable("type", self.kind.as_str());
+        target.require_variable("packagename");
+        target.require_variable("type");
+        target.require_query_parameter("packagename");
+        target.require_query_parameter("type");
+        let mut request = EncodedOperation::advertised(Method::GET, target);
         request.set_accept(PACKAGE_TREE_MEDIA_TYPE);
         Ok(request)
     }
@@ -325,12 +323,13 @@ impl Client<Ready> {
     }
 }
 
-impl Operation<Ready> for PackageSettingsQuery {
+impl Operation for PackageSettingsQuery {
     type Response = PackageSettings;
     type Kind = Stateless;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        let mut request = CollectionTarget::new(PACKAGE_SETTINGS).request(client, Method::GET)?;
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        let mut request = CollectionTarget::new(PACKAGE_SETTINGS).operation(Method::GET);
         request.set_accept(PACKAGE_SETTINGS_MEDIA_TYPE);
         Ok(request)
     }
@@ -353,41 +352,6 @@ impl ObjectRef<Package> {
     }
 }
 
-fn expand_tree_target(
-    template: &str,
-    package_name: &str,
-    kind: PackageTreeKind,
-) -> Result<(AdtUri, Vec<(String, String)>), OperationError> {
-    let template = AdtUriTemplate::new(template);
-    for expected in ["packagename", "type"] {
-        if !template.has_variable(expected) {
-            return Err(ObjectError::InvalidTemplate {
-                template: template.as_str().to_owned(),
-                reason: format!("missing `{expected}` query variable"),
-            }
-            .into());
-        }
-    }
-    let variables = HashMap::from([
-        (
-            "packagename".to_owned(),
-            Value::String(package_name.to_owned()),
-        ),
-        ("type".to_owned(), Value::String(kind.as_str().to_owned())),
-    ]);
-    let (target, query) = template.expand(&variables)?;
-    for expected in ["packagename", "type"] {
-        if !query.iter().any(|(name, _)| name == expected) {
-            return Err(ObjectError::InvalidTemplate {
-                template: template.as_str().to_owned(),
-                reason: format!("missing `{expected}` query variable"),
-            }
-            .into());
-        }
-    }
-    Ok((target, query))
-}
-
 fn ensure_xml_response(
     response: &OperationResponse,
     expected_content_type: &'static str,
@@ -399,14 +363,54 @@ fn ensure_xml_response(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use async_trait::async_trait;
     use http::{HeaderMap, HeaderValue, header};
 
     use super::*;
-    use crate::{AdtResponse, PackageProperties};
+    use crate::{
+        AdtRequest, AdtResponse, OperationError, PackageProperties, ResolveError, Transport,
+        TransportError,
+    };
 
+    const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
     const PACKAGE_XML: &[u8] = include_bytes!("../../tests/fixtures/package-sadt-tools-core.xml");
     const SUPER_TREE_XML: &[u8] = include_bytes!("../../tests/fixtures/package-tree-super.xml");
     const SETTINGS_XML: &[u8] = include_bytes!("../../tests/fixtures/package-settings.xml");
+
+    struct RecordingTransport {
+        requests: Arc<Mutex<Vec<AdtRequest>>>,
+    }
+
+    #[async_trait]
+    impl Transport for RecordingTransport {
+        async fn send(&self, request: AdtRequest) -> Result<AdtResponse, TransportError> {
+            self.requests.lock().unwrap().push(request);
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static(PACKAGE_TREE_MEDIA_TYPE),
+            );
+            Ok(AdtResponse::new(
+                StatusCode::OK,
+                headers,
+                SUPER_TREE_XML.to_vec(),
+            ))
+        }
+    }
+
+    fn ready_client(xml: &[u8]) -> (Client<Ready>, Arc<Mutex<Vec<AdtRequest>>>) {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let client = Client::new(RecordingTransport {
+            requests: Arc::clone(&requests),
+        })
+        .with_capabilities(
+            crate::api::discovery::parse_capabilities(xml).unwrap(),
+            crate::api::discovery::parse_capabilities(xml).unwrap(),
+        );
+        (client, requests)
+    }
 
     #[test]
     fn parses_live_package_properties() {
@@ -481,18 +485,23 @@ mod tests {
         );
     }
 
-    #[test]
-    fn expands_namespaced_package_tree_targets() {
-        let (target, query) = expand_tree_target(
-            "/sap/bc/adt/packages/$tree{?packagename,type}",
-            "/DMO/FLIGHT",
-            PackageTreeKind::Super,
-        )
-        .unwrap();
+    #[tokio::test]
+    async fn expands_namespaced_package_tree_targets() {
+        let package = ObjectRef::<Package>::new(
+            "/DMO/FLIGHT".to_owned(),
+            AdtUri::parse("/sap/bc/adt/packages/%2Fdmo%2Fflight").unwrap(),
+        );
+        let (client, requests) = ready_client(DISCOVERY_XML);
+        PackageTreeQuery::new(package, PackageTreeKind::Super)
+            .execute(&client)
+            .await
+            .unwrap();
+        let requests = requests.lock().unwrap();
+        let request = &requests[0];
 
-        assert_eq!(target.as_str(), "/sap/bc/adt/packages/$tree");
+        assert_eq!(request.target().as_str(), "/sap/bc/adt/packages/$tree");
         assert_eq!(
-            query,
+            request.query(),
             [
                 ("packagename".to_owned(), "/DMO/FLIGHT".to_owned()),
                 ("type".to_owned(), "super".to_owned()),
@@ -500,21 +509,30 @@ mod tests {
         );
     }
 
-    #[test]
-    fn rejects_a_tree_template_without_required_variables() {
-        let error = expand_tree_target(
-            "/sap/bc/adt/packages/$tree{?packagename}",
-            "SADT_MAIN",
-            PackageTreeKind::Sub,
-        )
-        .unwrap_err();
+    #[tokio::test]
+    async fn rejects_a_tree_template_without_required_variables() {
+        let discovery = String::from_utf8(DISCOVERY_XML.to_vec()).unwrap().replacen(
+            "{?packagename,type}",
+            "{?packagename}",
+            1,
+        );
+        let (client, _) = ready_client(discovery.as_bytes());
+        let package = ObjectRef::<Package>::new(
+            "SADT_MAIN".to_owned(),
+            AdtUri::parse("/sap/bc/adt/packages/sadt_main").unwrap(),
+        );
+
+        let error = PackageTreeQuery::new(package, PackageTreeKind::Sub)
+            .execute(&client)
+            .await
+            .unwrap_err();
 
         assert!(matches!(
             error,
-            OperationError::Object(ObjectError::InvalidTemplate {
+            OperationError::Resolve(ResolveError::Object(ObjectError::InvalidTemplate {
                 reason,
                 ..
-            }) if reason.contains("`type`")
+            })) if reason.contains("`type`")
         ));
     }
 

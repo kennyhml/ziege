@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use super::common::{RepositoryFacet, RepositoryPreselection};
 use crate::{
-    AdtRequest, AdtUri, CategoryId, Client, GlobalWorkbenchType, ObjectError, ObjectRef,
-    ObjectType, Operation, OperationError, OperationResponse, Ready, RepositoryError,
+    AdtUri, Advertised, CategoryId, Client, EncodeError, EncodedOperation, GlobalWorkbenchType,
+    ObjectError, ObjectRef, ObjectType, Operation, OperationResponse, Ready, RepositoryError,
     ResponseError, Stateless,
     operation::CollectionTarget,
     resource::{AdvertisedLink, Relations},
@@ -96,15 +96,16 @@ impl Client<Ready> {
     }
 }
 
-impl Operation<Ready> for RepositoryContentQuery {
+impl Operation for RepositoryContentQuery {
     type Response = RepositoryContent;
     type Kind = Stateless;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
         let body =
             RepositoryContentRequest::new(&self.search_pattern, &self.preselections, &self.facets)
                 .serialize()?;
-        let mut request = Self::TARGET.request(client, Method::POST)?;
+        let mut request = Self::TARGET.operation(Method::POST);
         if let Some(ignore) = self.ignore_short_descriptions {
             request.push_query("ignoreShortDescriptions", ignore.to_string());
         }

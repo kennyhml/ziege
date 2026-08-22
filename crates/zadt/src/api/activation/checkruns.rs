@@ -5,9 +5,9 @@ use http::{Method, StatusCode};
 use serde::{Deserialize, Serialize, Serializer};
 
 use crate::{
-    AdtRequest, AdtUri, AdvertisedLink, CategoryId, Client, ObjectError, ObjectRef, ObjectVersion,
-    Operation, OperationError, OperationResponse, Ready, ResponseError, Stateless,
-    operation::CollectionTarget,
+    AdtUri, Advertised, AdvertisedLink, CategoryId, Client, EncodeError, EncodedOperation,
+    ObjectError, ObjectRef, ObjectVersion, Operation, OperationResponse, Ready, ResponseError,
+    Stateless, operation::CollectionTarget,
 };
 
 const CHECK_RUN_CATEGORY: CategoryId = CategoryId {
@@ -51,12 +51,13 @@ impl Client<Ready> {
     }
 }
 
-impl Operation<Ready> for CheckRunReportersQuery {
+impl Operation for CheckRunReportersQuery {
     type Kind = Stateless;
     type Response = SupportedCheckReporters;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        let mut request = Self::TARGET.request(client, Method::GET)?;
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        let mut request = Self::TARGET.operation(Method::GET);
         request.set_accept(CHECK_REPORTERS_MEDIA_TYPE);
         Ok(request)
     }
@@ -119,13 +120,14 @@ impl ObjectCheckRun {
     }
 }
 
-impl Operation<Ready> for ObjectCheckRun {
+impl Operation for ObjectCheckRun {
     type Kind = Stateless;
     type Response = CheckRunReports;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
         let body = self.objects.serialize()?;
-        let mut request = Self::TARGET.request(client, Method::POST)?;
+        let mut request = Self::TARGET.operation(Method::POST);
         for reporter in &self.reporters {
             request.push_query("reporters", reporter.as_str());
         }
@@ -370,25 +372,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtResponse, Program, Transport, TransportError};
+    use crate::{AdtResponse, Program};
     use http::{HeaderMap, header};
 
-    const CHECK_DISCOVERY_XML: &[u8] = br#"
-        <app:service xmlns:app="http://www.w3.org/2007/app"
-                xmlns:atom="http://www.w3.org/2005/Atom">
-            <app:workspace>
-                <atom:title>Activation</atom:title>
-                <app:collection href="/sap/bc/adt/checkruns">
-                    <atom:category term="checkruns"
-                        scheme="http://www.sap.com/adt/categories/check" />
-                </app:collection>
-                <app:collection href="/sap/bc/adt/checkruns/reporters">
-                    <atom:category term="reporters"
-                        scheme="http://www.sap.com/adt/categories/check" />
-                </app:collection>
-            </app:workspace>
-        </app:service>
-    "#;
     const CHECK_REPORTS_XML: &[u8] = br#"
         <chkrun:checkRunReports xmlns:chkrun="http://www.sap.com/adt/checkrun">
             <chkrun:checkReport chkrun:reporter="abapCheckRun"
@@ -414,22 +400,6 @@ mod tests {
             </chkrun:reporter>
         </chkrun:checkReporters>
     "#;
-
-    struct UnusedTransport;
-
-    #[async_trait::async_trait]
-    impl Transport for UnusedTransport {
-        async fn send(&self, _request: AdtRequest) -> Result<AdtResponse, TransportError> {
-            unreachable!("request construction tests do not send requests")
-        }
-    }
-
-    fn ready_client() -> Client<Ready> {
-        Client::new(UnusedTransport).with_capabilities(
-            super::super::super::discovery::parse_capabilities(CHECK_DISCOVERY_XML).unwrap(),
-            super::super::super::discovery::parse_capabilities(CHECK_DISCOVERY_XML).unwrap(),
-        )
-    }
 
     fn serialize(objects: &CheckObjectList) -> String {
         objects.serialize().unwrap()
@@ -471,10 +441,9 @@ mod tests {
         run.push_object(CheckRunObject::new(&object, ObjectVersion::Active))
             .push_reporter(CheckRunReporter::SYNTAX_CHECK_RUNNER);
 
-        let request = run.request(&ready_client()).unwrap();
+        let request = run.encode().unwrap();
 
         assert_eq!(request.method(), Method::POST);
-        assert_eq!(request.target().as_str(), "/sap/bc/adt/checkruns");
         assert_eq!(
             request.query(),
             [("reporters".to_owned(), "abapCheckRun".to_owned())]
@@ -488,12 +457,10 @@ mod tests {
 
     #[test]
     fn reporters_query_uses_the_discovered_contract_and_decodes_supported_types() {
-        let client = ready_client();
-        let query = client.supported_reporters();
-        let request = query.request(&client).unwrap();
+        let query = CheckRunReportersQuery::new();
+        let request = query.encode().unwrap();
 
         assert_eq!(request.method(), Method::GET);
-        assert_eq!(request.target().as_str(), "/sap/bc/adt/checkruns/reporters");
         assert_eq!(
             request.headers()[header::ACCEPT],
             CHECK_REPORTERS_MEDIA_TYPE
@@ -519,7 +486,7 @@ mod tests {
 
         let mut run = ObjectCheckRun::new();
         run.extend_reporters(&reporters);
-        let request = run.request(&ready_client()).unwrap();
+        let request = run.encode().unwrap();
         assert_eq!(
             request.query(),
             [

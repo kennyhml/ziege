@@ -1,14 +1,11 @@
-use std::collections::HashMap;
-
 use http::Method;
-use stduritemplate::Value;
 
 use crate::{
-    client::{Client, Ready},
-    error::{ObjectError, OperationError, ResponseError},
+    Advertised, EncodeError, EncodedOperation,
+    error::{ObjectError, ResponseError},
     objects::{AnyObject, GlobalWorkbenchType, ImmediateRun, ObjectRef, RunCapability},
     operation::{Operation, OperationResponse, Stateless},
-    protocol::{AdtRequest, TEXT_PLAIN_MEDIA_TYPE},
+    protocol::TEXT_PLAIN_MEDIA_TYPE,
 };
 
 pub(super) const PROFILER_ID_QUERY: &str = "profilerId";
@@ -69,41 +66,23 @@ impl ObjectRun {
     }
 }
 
-impl Operation<Ready> for ObjectRun {
+impl Operation for ObjectRun {
     type Response = ObjectRunResult;
     type Kind = Stateless;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        let template = self.run.target.template(client)?;
-        if !template.has_variable(self.run.name_variable) {
-            return Err(ObjectError::InvalidTemplate {
-                template: template.as_str().to_owned(),
-                reason: format!("missing `{}` variable", self.run.name_variable),
-            }
-            .into());
-        }
-        if self.profiler_id.is_some() && !template.has_variable(PROFILER_ID_QUERY) {
-            return Err(ObjectError::UnsupportedTemplateParameter {
-                parameter: PROFILER_ID_QUERY,
-            }
-            .into());
-        }
-
-        let mut variables = HashMap::from([(
-            self.run.name_variable.to_owned(),
-            Value::String(self.reference.name().to_ascii_lowercase()),
-        )]);
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        let mut target = self.run.target.target();
+        target.require_variable(self.run.name_variable);
+        target.push_variable(
+            self.run.name_variable,
+            self.reference.name().to_ascii_lowercase(),
+        );
         if let Some(profiler_id) = &self.profiler_id {
-            variables.insert(
-                PROFILER_ID_QUERY.to_owned(),
-                Value::String(profiler_id.clone()),
-            );
+            target.require_supported_variable(PROFILER_ID_QUERY);
+            target.push_variable(PROFILER_ID_QUERY, profiler_id.as_str());
         }
-        let (target, query) = template.expand(&variables)?;
-        let mut request = AdtRequest::new(Method::POST, target);
-        for (name, value) in query {
-            request.push_query(name, value);
-        }
+        let mut request = EncodedOperation::advertised(Method::POST, target);
         request.set_accept(TEXT_PLAIN_MEDIA_TYPE);
         Ok(request)
     }
@@ -143,20 +122,29 @@ impl AnyObject {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use super::*;
     use async_trait::async_trait;
     use http::{HeaderMap, StatusCode};
 
-    use crate::{AdtResponse, Class, ObjectRef, Program, Transport};
+    use crate::{AdtRequest, AdtResponse, Class, Client, ObjectRef, Program, Ready, Transport};
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
 
-    struct UnusedTransport;
+    struct RecordingTransport {
+        requests: Arc<Mutex<Vec<AdtRequest>>>,
+    }
 
     #[async_trait]
-    impl Transport for UnusedTransport {
-        async fn send(&self, _request: AdtRequest) -> Result<AdtResponse, crate::TransportError> {
-            unreachable!("request construction tests do not send requests")
+    impl Transport for RecordingTransport {
+        async fn send(&self, request: AdtRequest) -> Result<AdtResponse, crate::TransportError> {
+            self.requests.lock().unwrap().push(request);
+            Ok(AdtResponse::new(
+                StatusCode::OK,
+                HeaderMap::new(),
+                b"program output".to_vec(),
+            ))
         }
     }
 
@@ -167,33 +155,36 @@ mod tests {
         )
     }
 
-    fn ready_client() -> Client<Ready> {
-        Client::new(UnusedTransport).with_capabilities(
+    fn ready_client() -> (Client<Ready>, Arc<Mutex<Vec<AdtRequest>>>) {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let client = Client::new(RecordingTransport {
+            requests: Arc::clone(&requests),
+        })
+        .with_capabilities(
             crate::api::discovery::parse_capabilities(DISCOVERY_XML).unwrap(),
             crate::api::discovery::parse_capabilities(DISCOVERY_XML).unwrap(),
-        )
+        );
+        (client, requests)
     }
 
-    #[test]
-    fn type_erased_runs_dispatch_through_object_descriptors() {
-        fn accepts_ready<O: Operation<Ready>>() {}
-        accepts_ready::<ObjectRun>();
+    #[tokio::test]
+    async fn type_erased_runs_dispatch_through_object_descriptors() {
+        fn accepts_advertised<O: Operation<Target = Advertised>>() {}
+        accepts_advertised::<ObjectRun>();
 
-        let client = ready_client();
+        let (client, requests) = ready_client();
         let program = program();
         let program_run = program.erase().run().unwrap();
-        let program_request = program_run.request(&client).unwrap();
-        assert_eq!(
-            program_request.target().as_str(),
-            "/sap/bc/adt/programs/programrun/zprogram"
-        );
+        let program_output = program_run.execute(&client).await.unwrap();
+        {
+            let requests_guard = requests.lock().unwrap();
+            let program_request = &requests_guard[0];
+            assert_eq!(
+                program_request.target().as_str(),
+                "/sap/bc/adt/programs/programrun/zprogram"
+            );
+        }
 
-        let program_output = program_run
-            .decode(OperationResponse::new(
-                AdtResponse::new(StatusCode::OK, HeaderMap::new(), b"program output".to_vec()),
-                program_request.target().clone(),
-            ))
-            .unwrap();
         assert_eq!(program_output.reference, program.erase());
         assert_eq!(program_output.object_type.as_str(), "PROG/P");
         assert_eq!(program_output.content, "program output");
@@ -202,13 +193,16 @@ mod tests {
             "ZCL_EXAMPLE",
             crate::AdtUri::parse("/sap/bc/adt/oo/classes/zcl_example").unwrap(),
         );
-        let class_request = class
+        class
             .erase()
             .run()
             .unwrap()
             .profiler_id("TRACE ID")
-            .request(&client)
+            .execute(&client)
+            .await
             .unwrap();
+        let requests_guard = requests.lock().unwrap();
+        let class_request = &requests_guard[1];
         assert_eq!(
             class_request.target().as_str(),
             "/sap/bc/adt/oo/classrun/zcl_example"

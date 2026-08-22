@@ -2,8 +2,8 @@ use http::{Method, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AdtRequest, AdvertisedObjectReference, CategoryId, Client, GlobalWorkbenchType, ObjectError,
-    ObjectRef, Operation, OperationError, OperationResponse, Ready, RepositoryError, ResponseError,
+    Advertised, AdvertisedObjectReference, CategoryId, EncodeError, EncodedOperation,
+    GlobalWorkbenchType, ObjectRef, Operation, OperationResponse, RepositoryError, ResponseError,
     Stateless, User, operation::CollectionTarget,
 };
 
@@ -21,13 +21,13 @@ pub(super) const FAVORITES_UPDATE_MEDIA_TYPE: &str =
 /// can be synchronized.
 ///
 /// Objects can be assigned to different lists within the favorites. By default,
-/// a list named $<sy-name> is used to store the favorited objects. Custom list
+/// a list named `$<sy-name>` is used to store the favorited objects. Custom list
 /// ids can be provided in query and update operations if needed.
 ///
 /// Backend handler: `CL_RIS_ADT_RES_VF_FAVORITES`
 #[derive(Clone, Debug, Default)]
 pub struct FavoriteObjectsQuery {
-    /// The list ID - by default $<sy-name> is used
+    /// The list ID - by default `$<sy-name>` is used
     list: Option<String>,
 }
 
@@ -62,19 +62,16 @@ impl User {
     }
 }
 
-impl Operation<Ready> for FavoriteObjectsQuery {
+impl Operation for FavoriteObjectsQuery {
     type Kind = Stateless;
     type Response = FavoriteObjectList;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
         let list = self.list.as_deref().unwrap_or("$");
-        let target = Self::TARGET
-            .collection(client)?
-            .target()
-            .and_then(|uri| uri.append_segments([list]))
-            .map_err(ObjectError::InvalidTarget)?;
+        let target = Self::TARGET.with_segment(list);
 
-        let mut request = AdtRequest::new(Method::GET, target);
+        let mut request = EncodedOperation::advertised(Method::GET, target);
         request.set_accept(FAVORITES_MEDIA_TYPE);
         Ok(request)
     }
@@ -132,19 +129,16 @@ impl FavoriteObjectsUpdate {
     }
 }
 
-impl Operation<Ready> for FavoriteObjectsUpdate {
+impl Operation for FavoriteObjectsUpdate {
     type Kind = Stateless;
     type Response = FavoriteObjectList;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
         let body = self.objects.serialize()?;
-        let target = Self::TARGET
-            .collection(client)?
-            .target()
-            .and_then(|uri| uri.append_segments([&self.list]))
-            .map_err(ObjectError::InvalidTarget)?;
+        let target = Self::TARGET.with_segment(self.list.as_str());
 
-        let mut request = AdtRequest::new(Method::POST, target);
+        let mut request = EncodedOperation::advertised(Method::POST, target);
         request.set_accept(FAVORITES_MEDIA_TYPE);
         request.set_content_type(FAVORITES_UPDATE_MEDIA_TYPE);
         request.set_body(body);

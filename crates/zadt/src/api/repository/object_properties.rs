@@ -3,8 +3,8 @@ use serde::Deserialize;
 
 use super::{common::RepositoryFacet, content::RepositoryObjectEntry};
 use crate::{
-    AdtRequest, AdtUri, AnyObject, CategoryId, Client, GlobalWorkbenchType, Object, ObjectError,
-    ObjectRef, ObjectType, Operation, OperationError, OperationResponse, Package, Ready,
+    AdtUri, Advertised, AnyObject, CategoryId, EncodeError, EncodedOperation, GlobalWorkbenchType,
+    Object, ObjectError, ObjectRef, ObjectType, Operation, OperationResponse, Package,
     RepositoryError, ResponseError, Stateless, TransportNumber, TransportStatus, User,
     operation::CollectionTarget,
     resource::{AdvertisedLink, Relations},
@@ -67,12 +67,13 @@ impl RepositoryObjectPropertiesQuery {
     }
 }
 
-impl Operation<Ready> for RepositoryObjectPropertiesQuery {
+impl Operation for RepositoryObjectPropertiesQuery {
     type Response = RepositoryObjectProperties;
     type Kind = Stateless;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        let mut request = Self::TARGET.request(client, Method::GET)?;
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        let mut request = Self::TARGET.operation(Method::GET);
         request.push_query(URI_QUERY, self.object_uri.as_str());
         for facet in &self.facets {
             request.push_query("facet", facet.as_str());
@@ -120,12 +121,13 @@ impl AssignedTransportsQuery {
     }
 }
 
-impl Operation<Ready> for AssignedTransportsQuery {
+impl Operation for AssignedTransportsQuery {
     type Kind = Stateless;
     type Response = AssignedTransportRequests;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        let mut request = Self::TARGET.request(client, Method::GET)?;
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        let mut request = Self::TARGET.operation(Method::GET);
         request.push_query(URI_QUERY, self.object_uri.as_str());
         request.set_accept(TRANSPORT_PROPERTIES_MEDIA_TYPE);
         Ok(request)

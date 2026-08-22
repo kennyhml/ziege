@@ -8,8 +8,8 @@ use serde::Deserialize;
 use url::Url;
 
 use crate::{
-    AdtRequest, AdtUri, Client, ClientState, LogonError, Operation, OperationError,
-    OperationResponse, ResponseError, Stateless, compatibility::media_types_match,
+    AdtUri, Client, ClientState, EncodeError, EncodedOperation, LogonError, Operation,
+    OperationResponse, Owned, ResponseError, Stateless, compatibility::media_types_match,
 };
 
 const SESSION_MEDIA_TYPE: &str = "application/vnd.sap.adt.core.http.session.v3+xml";
@@ -211,14 +211,15 @@ impl<S: ClientState> Client<S> {
     }
 }
 
-impl<S: ClientState> Operation<S> for Logon {
+impl Operation for Logon {
     type Response = SessionInformation;
     type Kind = Stateless;
+    type Target = Owned;
 
-    fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
         let target = AdtUri::parse(HTTP_SESSIONS_PATH)
             .expect("the HTTP sessions path must be a valid ADT URI");
-        let mut request = AdtRequest::new(Method::GET, target);
+        let mut request = EncodedOperation::owned(Method::GET, target);
         request.push_query("_", cache_buster());
         request.set_accept(SESSION_MEDIA_TYPE);
 

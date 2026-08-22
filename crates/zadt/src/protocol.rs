@@ -5,7 +5,7 @@ use http::{
     header::{self, InvalidHeaderValue},
 };
 
-use crate::{AdtUri, OperationContext, operation::UserSessionId};
+use crate::AdtUri;
 
 pub(crate) const TEXT_PLAIN_MEDIA_TYPE: &str = "text/plain";
 pub(crate) const CORE_DISCOVERY_PATH: &str = "/sap/bc/adt/core/discovery";
@@ -53,20 +53,27 @@ pub struct AdtRequest {
     query: Vec<(String, String)>,
     headers: HeaderMap,
     body: Vec<u8>,
-    response_context_targets: Vec<AdtUri>,
-    required_user_session: Option<UserSessionId>,
 }
 
 impl AdtRequest {
     pub fn new(method: Method, target: AdtUri) -> Self {
+        Self::from_parts(method, target, Vec::new(), HeaderMap::new(), Vec::new())
+    }
+
+    /// Creates a resolved request from its transport-neutral components.
+    pub fn from_parts(
+        method: Method,
+        target: AdtUri,
+        query: Vec<(String, String)>,
+        headers: HeaderMap,
+        body: Vec<u8>,
+    ) -> Self {
         Self {
             method,
             target,
-            query: Vec::new(),
-            headers: HeaderMap::new(),
-            body: Vec::new(),
-            response_context_targets: Vec::new(),
-            required_user_session: None,
+            query,
+            headers,
+            body,
         }
     }
 
@@ -134,14 +141,6 @@ impl AdtRequest {
         self.body = body.into();
     }
 
-    pub(crate) fn require_user_session(&mut self, user_session: UserSessionId) {
-        self.required_user_session = Some(user_session);
-    }
-
-    pub(crate) fn required_user_session(&self) -> Option<UserSessionId> {
-        self.required_user_session
-    }
-
     /// Formats this requests content as a batch part of a `multipart/mixed`
     /// payload. The boundary must be provided by the caller to make that
     /// responsibility explicit.
@@ -179,27 +178,6 @@ impl AdtRequest {
         }
 
         output
-    }
-
-    /// Captures the local metadata needed to decode this requests response.
-    ///
-    /// Custom executors should retain this value before giving the request to a
-    /// transport, then use [`crate::OperationResponse::with_context`] when the
-    /// response arrives.
-    ///
-    /// This helps resolve relative links in responses that do not echo the
-    /// AdtUri of the requested resource. It also enables us to associate batch
-    /// requests with their request target based on their order, because the batch
-    /// response does not mention which uri the response is for.
-    pub fn operation_context(&self) -> OperationContext {
-        OperationContext::new(
-            self.target.clone(),
-            self.response_context_targets.clone().into_boxed_slice(),
-        )
-    }
-
-    pub(crate) fn set_response_context_targets(&mut self, targets: Vec<AdtUri>) {
-        self.response_context_targets = targets;
     }
 
     /// Consumes the request and returns its transport-level components.

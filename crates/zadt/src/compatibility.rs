@@ -74,15 +74,6 @@ pub enum CompatibilityError {
     /// Central discovery did not advertise a required collection.
     #[error("ADT discovery did not advertise collection {0:?}")]
     MissingCollection(CategoryId),
-
-    /// The client and backend have no mutually supported media type.
-    #[error(
-        "none of the preferred media types {preferred:?} are accepted by the backend: {accepted:?}"
-    )]
-    NoCompatibleMediaType {
-        preferred: Vec<String>,
-        accepted: Vec<String>,
-    },
 }
 
 #[cfg(test)]

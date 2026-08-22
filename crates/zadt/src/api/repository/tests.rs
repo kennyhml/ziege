@@ -13,9 +13,10 @@ use super::{
     *,
 };
 use crate::{
-    AccessMode, AdtRequest, AdtResponse, AdtUri, Class, Client, CompatibilityError, DataElement,
-    Include, ObjectError, ObjectRef, ObjectType, Operation, OperationError, OperationResponse,
-    Package, Program, Ready, RepositoryError, Transport, TransportError,
+    AccessMode, AdtRequest, AdtResponse, AdtUri, Advertised, Class, Client, CompatibilityError,
+    DataElement, EncodedOperation, Include, ObjectError, ObjectRef, ObjectType, Operation,
+    OperationError, OperationResponse, Package, Program, Ready, RepositoryError, ResolveError,
+    Transport, TransportError,
 };
 
 const CONTENT_XML: &[u8] = include_bytes!("../../../tests/fixtures/repository-content.xml");
@@ -24,34 +25,6 @@ const OBJECT_PROPERTIES_XML: &[u8] =
     include_bytes!("../../../tests/fixtures/repository-object-properties.xml");
 const OBJECT_PROPERTIES_HIERARCHY_XML: &[u8] =
     include_bytes!("../../../tests/fixtures/repository-object-properties-hierarchy.xml");
-const REPOSITORY_DISCOVERY_XML: &[u8] = br#"
-        <app:service xmlns:app="http://www.w3.org/2007/app"
-                xmlns:atom="http://www.w3.org/2005/Atom">
-            <app:workspace>
-                <atom:title>Repository</atom:title>
-                <app:collection href="/sap/bc/adt/advertised/repository/contents">
-                    <atom:category term="contents"
-                        scheme="http://www.sap.com/adt/categories/repository/virtualfolders" />
-                </app:collection>
-                <app:collection href="/sap/bc/adt/advertised/repository/facets">
-                    <atom:category term="facets"
-                        scheme="http://www.sap.com/adt/categories/repository/virtualfolders" />
-                </app:collection>
-                <app:collection href="/sap/bc/adt/repository/favorites/lists">
-                    <atom:category term="objectFavorites"
-                        scheme="http://www.sap.com/adt/categories/repository/virtualfolders" />
-                </app:collection>
-                <app:collection href="/sap/bc/adt/advertised/repository/object-properties">
-                    <atom:category term="objectProperties"
-                        scheme="http://www.sap.com/adt/categories/repository" />
-                </app:collection>
-                <app:collection href="/sap/bc/adt/advertised/repository/transport-properties">
-                    <atom:category term="transportProperties"
-                        scheme="http://www.sap.com/adt/categories/repository" />
-                </app:collection>
-            </app:workspace>
-        </app:service>
-    "#;
 
 struct UnusedTransport;
 
@@ -71,7 +44,6 @@ fn ready_client(xml: &[u8]) -> Client<Ready> {
 
 #[test]
 fn repository_content_request_matches_the_ris_contract() {
-    let client = ready_client(REPOSITORY_DISCOVERY_XML);
     let query = RepositoryContentQuery::builder()
         .search_pattern("Z*")
         .preselection(
@@ -84,14 +56,10 @@ fn repository_content_request_matches_the_ris_contract() {
         .build()
         .unwrap();
 
-    let request = query.request(&client).unwrap();
+    let request = query.encode().unwrap();
     let body = std::str::from_utf8(request.body()).unwrap();
 
     assert_eq!(request.method(), Method::POST);
-    assert_eq!(
-        request.target().as_str(),
-        "/sap/bc/adt/advertised/repository/contents"
-    );
     assert_eq!(
         request.query(),
         [
@@ -121,7 +89,7 @@ fn repository_content_response_decodes_one_layer() {
     let response = AdtResponse::new(StatusCode::OK, HeaderMap::new(), CONTENT_XML.to_vec());
     let request_target = AdtUri::parse("/sap/bc/adt/advertised/repository/contents").unwrap();
 
-    let content = <RepositoryContentQuery as Operation<Ready>>::decode(
+    let content = <RepositoryContentQuery as Operation>::decode(
         &query,
         OperationResponse::new(response, request_target),
     )
@@ -139,14 +107,9 @@ fn repository_content_response_decodes_one_layer() {
 
 #[test]
 fn favorite_objects_response_decodes_objects() {
-    let client = ready_client(REPOSITORY_DISCOVERY_XML);
     let user = crate::User::new("DEVELOPER");
     let query = user.favorites();
-    let request = query.request(&client).unwrap();
-    assert_eq!(
-        request.target().as_str(),
-        "/sap/bc/adt/repository/favorites/lists/$DEVELOPER"
-    );
+    let request = query.encode().unwrap();
     assert_eq!(
         request.headers().get(header::ACCEPT).unwrap(),
         FAVORITES_MEDIA_TYPE
@@ -168,9 +131,12 @@ fn favorite_objects_response_decodes_objects() {
         </vf:favorites>"#
             .to_vec(),
     );
-    let favorites = <FavoriteObjectsQuery as Operation<Ready>>::decode(
+    let favorites = <FavoriteObjectsQuery as Operation>::decode(
         &query,
-        OperationResponse::new(response, request.target().clone()),
+        OperationResponse::new(
+            response,
+            AdtUri::parse("/sap/bc/adt/repository/favorites/lists/$DEVELOPER").unwrap(),
+        ),
     )
     .unwrap();
 
@@ -186,7 +152,6 @@ fn favorite_objects_response_decodes_objects() {
 
 #[test]
 fn favorite_objects_update_serializes_transactions() {
-    let client = ready_client(REPOSITORY_DISCOVERY_XML);
     let object = ObjectRef::<Program>::for_test(
         "Z_TEST",
         AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
@@ -195,14 +160,10 @@ fn favorite_objects_update_serializes_transactions() {
     let mut update = FavoriteObjectsUpdate::new("TEAM");
     update.add(&object).remove(&object);
 
-    let request = update.request(&client).unwrap();
+    let request = update.encode().unwrap();
     let body = std::str::from_utf8(request.body()).unwrap();
 
     assert_eq!(request.method(), Method::POST);
-    assert_eq!(
-        request.target().as_str(),
-        "/sap/bc/adt/repository/favorites/lists/TEAM"
-    );
     assert_eq!(
         request.headers().get(header::ACCEPT).unwrap(),
         FAVORITES_MEDIA_TYPE
@@ -223,7 +184,6 @@ fn favorite_objects_update_serializes_transactions() {
 
 #[test]
 fn object_properties_request_repeats_included_facets() {
-    let client = ready_client(REPOSITORY_DISCOVERY_XML);
     let object = ObjectRef::<Program>::for_test(
         "Z_TEST",
         AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
@@ -232,13 +192,9 @@ fn object_properties_request_repeats_included_facets() {
         .include_facet(RepositoryFacet::PACKAGE)
         .include_facet(RepositoryFacet::GROUP);
 
-    let request = query.request(&client).unwrap();
+    let request = query.encode().unwrap();
 
     assert_eq!(request.method(), Method::GET);
-    assert_eq!(
-        request.target().as_str(),
-        "/sap/bc/adt/advertised/repository/object-properties"
-    );
     assert_eq!(
         request.query(),
         [
@@ -260,9 +216,12 @@ fn object_properties_request_repeats_included_facets() {
         HeaderMap::new(),
         OBJECT_PROPERTIES_XML.to_vec(),
     );
-    let properties = <RepositoryObjectPropertiesQuery as Operation<Ready>>::decode(
+    let properties = <RepositoryObjectPropertiesQuery as Operation>::decode(
         &query,
-        OperationResponse::new(response, request.target().clone()),
+        OperationResponse::new(
+            response,
+            AdtUri::parse("/sap/bc/adt/advertised/repository/object-properties").unwrap(),
+        ),
     )
     .unwrap();
     assert_eq!(properties.object.reference.uri(), object.uri());
@@ -271,19 +230,14 @@ fn object_properties_request_repeats_included_facets() {
 
 #[test]
 fn assigned_transports_request_and_response_match_the_ris_contract() {
-    let client = ready_client(REPOSITORY_DISCOVERY_XML);
     let object = ObjectRef::<Program>::for_test(
         "Z_TEST",
         AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
     );
     let query = object.transport_requests();
-    let request = query.request(&client).unwrap();
+    let request = query.encode().unwrap();
 
     assert_eq!(request.method(), Method::GET);
-    assert_eq!(
-        request.target().as_str(),
-        "/sap/bc/adt/advertised/repository/transport-properties"
-    );
     assert_eq!(
         request.query(),
         [(
@@ -310,9 +264,12 @@ fn assigned_transports_request_and_response_match_the_ris_contract() {
         </tpr:transportProperties>"#
             .to_vec(),
     );
-    let transports = <AssignedTransportsQuery as Operation<Ready>>::decode(
+    let transports = <AssignedTransportsQuery as Operation>::decode(
         &query,
-        OperationResponse::new(response, request.target().clone()),
+        OperationResponse::new(
+            response,
+            AdtUri::parse("/sap/bc/adt/advertised/repository/transport-properties").unwrap(),
+        ),
     )
     .unwrap();
 
@@ -327,18 +284,13 @@ fn assigned_transports_request_and_response_match_the_ris_contract() {
 
 #[test]
 fn facets_request_uses_the_advertised_collection_target() {
-    let client = ready_client(REPOSITORY_DISCOVERY_XML);
+    let request: EncodedOperation<Advertised> = RepositoryFacetsQuery.encode().unwrap();
 
-    let request = client.repository_facets().request(&client).unwrap();
-
-    assert_eq!(
-        request.target().as_str(),
-        "/sap/bc/adt/advertised/repository/facets"
-    );
+    assert_eq!(request.method(), Method::GET);
 }
 
-#[test]
-fn repository_request_requires_its_discovery_collection() {
+#[tokio::test]
+async fn repository_request_requires_its_discovery_collection() {
     let client = ready_client(
         br#"<app:service xmlns:app="http://www.w3.org/2007/app"
                     xmlns:atom="http://www.w3.org/2005/Atom">
@@ -346,11 +298,17 @@ fn repository_request_requires_its_discovery_collection() {
                 </app:service>"#,
     );
 
-    let error = client.repository_content().request(&client).unwrap_err();
+    let error = client
+        .repository_content()
+        .execute(&client)
+        .await
+        .unwrap_err();
 
     assert!(matches!(
         error,
-        OperationError::Compatibility(CompatibilityError::MissingCollection(category))
+        OperationError::Resolve(ResolveError::Compatibility(
+            CompatibilityError::MissingCollection(category)
+        ))
             if category.scheme
                 == "http://www.sap.com/adt/categories/repository/virtualfolders"
                 && category.term == "contents"

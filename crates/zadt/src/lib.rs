@@ -51,11 +51,11 @@ pub use api::source::{ObjectSourceQuery, ObjectSourceUpdate, SourceCode, SourceU
 pub use api::transports::{
     QueryTransportKind, TransportCheck, TransportCheckBuilder, TransportCheckBuilderError,
     TransportCheckLinkUpMode, TransportCheckMessage, TransportCheckOperation, TransportCheckResult,
-    TransportCreate, TransportCreateBuilder, TransportCreateBuilderError, TransportCreation,
-    TransportCreationMessage, TransportKind, TransportNumber, TransportObjectKey,
-    TransportObjectLock, TransportProject, TransportPropertiesQuery, TransportRequest,
-    TransportRequests, TransportStatus, TransportTask, TransportsQuery, TransportsQueryBuilder,
-    TransportsQueryBuilderError,
+    TransportCreate, TransportCreateBuilder, TransportCreateBuilderError, TransportCreateVersion,
+    TransportCreation, TransportCreationMessage, TransportKind, TransportNumber,
+    TransportObjectKey, TransportObjectLock, TransportProject, TransportPropertiesQuery,
+    TransportRequest, TransportRequests, TransportStatus, TransportTask, TransportsQuery,
+    TransportsQueryBuilder, TransportsQueryBuilderError,
 };
 pub use api::users::{UserDetailsQuery, Users, UsersQuery};
 pub use client::{Client, ClientState, Initial, Ready};
@@ -63,8 +63,9 @@ pub use compatibility::CompatibilityError;
 #[cfg(feature = "reqwest")]
 pub use error::ReqwestTransportBuildError;
 pub use error::{
-    AdtException, AdtExceptionProperty, CtsError, DiscoveryError, LogonError, ObjectError,
-    OperationError, RepositoryError, ResponseError, TransportError, UserError,
+    AdtException, AdtExceptionProperty, CtsError, DiscoveryError, EncodeError, LogonError,
+    ObjectError, OperationError, RepositoryError, ResolveError, ResponseError, TransportError,
+    UserError,
 };
 pub use objects::{
     AbapLanguageVersion, AdvertisedObjectReference, AnyObject, Class, ClassCategory,
@@ -79,9 +80,11 @@ pub use objects::{
     SourceComponents, Structure, SyntaxConfiguration, SyntaxLanguage, UpdateProperties,
 };
 pub use operation::{
-    BatchError, BatchKey, BatchOperation, BatchResponses, Batched, Execute, IfNoneMatch, Operation,
-    OperationContext, OperationKind, OperationResponse, Revalidation, Stateful, Stateless,
-    UserSession,
+    Advertised, AdvertisedCollection, AdvertisedTarget, AdvertisedTemplate, BatchError, BatchKey,
+    BatchOperation, BatchResponses, Batched, DiscoveryDocument, EncodedOperation, Execute,
+    IfNoneMatch, Operation, OperationContext, OperationKind, OperationResponse, OperationTarget,
+    Owned, Resolve, ResolvedOperation, Revalidation, Stateful, Stateless, UserSession,
+    UserSessionId,
 };
 pub use protocol::{AdtRequest, AdtResponse, EntityTag, PostAction};
 pub use resource::{

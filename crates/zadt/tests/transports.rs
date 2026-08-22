@@ -5,7 +5,8 @@ use httpmock::prelude::*;
 use zadt::{
     AdtUri, Client, Operation, OperationError, QueryTransportKind, Ready, ReqwestTransport,
     ResponseError, TransportCheck, TransportCheckLinkUpMode, TransportCheckOperation,
-    TransportCreate, TransportKind, TransportPropertiesQuery, TransportsQuery, User,
+    TransportCreate, TransportCreateVersion, TransportKind, TransportPropertiesQuery,
+    TransportsQuery, User,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -25,18 +26,6 @@ const TRANSPORT_CREATE_V1_MEDIA_TYPE: &str =
     "application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.CreateCorrectionRequest.v1";
 const TRANSPORT_CREATE_RESULT_MEDIA_TYPE: &str =
     "application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.CorrectionRequestResult";
-const LEGACY_DISCOVERY_XML: &str = r#"
-    <app:service xmlns:app="http://www.w3.org/2007/app"
-        xmlns:atom="http://www.w3.org/2005/Atom">
-        <app:workspace>
-            <atom:title>Change and Transport System</atom:title>
-            <app:collection href="/sap/bc/adt/cts/transports">
-                <app:accept>application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.CreateCorrectionRequest</app:accept>
-                <atom:category term="transports" scheme="http://www.sap.com/adt/categories/cts" />
-            </app:collection>
-        </app:workspace>
-    </app:service>
-"#;
 const TRANSPORT_CREATION_XML: &str = r#"
     <asx:abap version="1.0" xmlns:asx="http://www.sap.com/abapxml">
         <asx:values>
@@ -351,7 +340,7 @@ async fn transport_properties_reject_non_success_statuses() {
 }
 
 #[tokio::test]
-async fn transport_creation_prefers_the_v1_asx_contract() {
+async fn transport_creation_defaults_to_the_v1_asx_contract() {
     let server = MockServer::start_async().await;
     let _discovery = mock_discovery(&server).await;
     let _core_discovery = mock_core_discovery(&server).await;
@@ -393,14 +382,9 @@ async fn transport_creation_prefers_the_v1_asx_contract() {
 }
 
 #[tokio::test]
-async fn transport_creation_falls_back_to_the_legacy_contract() {
+async fn transport_creation_uses_the_selected_legacy_contract() {
     let server = MockServer::start_async().await;
-    let _discovery = server
-        .mock_async(|when, then| {
-            when.method(GET).path("/sap/bc/adt/discovery");
-            then.status(200).body(LEGACY_DISCOVERY_XML);
-        })
-        .await;
+    let _discovery = mock_discovery(&server).await;
     let _core_discovery = mock_core_discovery(&server).await;
     let csrf = mock_csrf(&server).await;
     let create = server
@@ -423,6 +407,7 @@ async fn transport_creation_falls_back_to_the_legacy_contract() {
     let creation = TransportCreate::builder()
         .description("Legacy request")
         .package("ZPACKAGE")
+        .version(TransportCreateVersion::Legacy)
         .build()
         .unwrap()
         .execute(&client)

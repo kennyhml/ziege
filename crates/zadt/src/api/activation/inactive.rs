@@ -1,12 +1,9 @@
-use std::collections::HashMap;
-
 use http::{Method, StatusCode};
 use serde::Deserialize;
-use stduritemplate::Value;
 
 use crate::{
-    AdtRequest, AdvertisedObjectReference, CategoryId, Client, ObjectError, Operation,
-    OperationError, OperationResponse, Ready, ResponseError, Stateless, User,
+    Advertised, AdvertisedObjectReference, CategoryId, EncodeError, EncodedOperation, ObjectError,
+    Operation, OperationResponse, ResponseError, Stateless, User,
     objects::ObjectReferences,
     operation::{CollectionTarget, TemplateTarget},
 };
@@ -52,28 +49,21 @@ impl InactiveObjectsQuery {
     }
 }
 
-impl Operation<Ready> for InactiveObjectsQuery {
+impl Operation for InactiveObjectsQuery {
     type Kind = Stateless;
     type Response = ObjectReferences;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
         // Might as well use the template if we got the username even though it
         // does not provide much benefit over just using a query parameter
         let mut request = if let Some(username) = &self.username {
-            let target = TemplateTarget::new(INACTIVE_OBJECTS, QUERY_RELATION);
-            let variables = HashMap::from([(
-                "USERNAME".into(),
-                Value::String(username.as_str().to_owned()),
-            )]);
-            let (target, query) = target.template(client)?.expand(&variables)?;
-            let mut request = AdtRequest::new(Method::GET, target);
-            for (name, value) in query {
-                request.push_query(name, value);
-            }
-            request
+            let mut target = TemplateTarget::new(INACTIVE_OBJECTS, QUERY_RELATION).target();
+            target.require_variable("USERNAME");
+            target.push_variable("USERNAME", username.as_str());
+            EncodedOperation::advertised(Method::GET, target)
         } else {
-            let target = CollectionTarget::new(INACTIVE_OBJECTS);
-            target.request(client, Method::GET)?
+            CollectionTarget::new(INACTIVE_OBJECTS).operation(Method::GET)
         };
         request.set_accept(Self::MEDIA_TYPE);
         Ok(request)
@@ -130,12 +120,13 @@ impl InactiveCtsObjectsQuery {
     }
 }
 
-impl Operation<Ready> for InactiveCtsObjectsQuery {
+impl Operation for InactiveCtsObjectsQuery {
     type Kind = Stateless;
     type Response = InactiveCtsObjects;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        let mut request = self.inner.request(client)?;
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        let mut request = self.inner.encode()?;
         request.set_accept(Self::MEDIA_TYPE);
         Ok(request)
     }

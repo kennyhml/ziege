@@ -1,11 +1,9 @@
 use super::run::ObjectRun;
 use crate::{
-    CategoryId,
-    client::{Client, Ready},
-    error::{OperationError, ResponseError},
+    Advertised, CategoryId, EncodeError, EncodedOperation,
+    error::ResponseError,
     objects::{ImmediateRun, Object, ObjectRef, Program, RunCapability},
     operation::{Operation, OperationResponse, Stateless},
-    protocol::AdtRequest,
 };
 
 const PROGRAM_NAME_VARIABLE: &str = "programname";
@@ -76,12 +74,13 @@ impl ImmediateRun for Program {
     );
 }
 
-impl Operation<Ready> for ProgramRun {
+impl Operation for ProgramRun {
     type Response = ProgramRunResult;
     type Kind = Stateless;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        self.run.request(client)
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        self.run.encode()
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
@@ -106,14 +105,17 @@ impl Object<Program> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use async_trait::async_trait;
     use http::{HeaderMap, HeaderValue, StatusCode, header};
 
     use super::*;
     use crate::api::run::PROFILER_ID_QUERY;
     use crate::{
-        AdtResponse, AdtUri, CompatibilityError, EntityTag, Include, IncludePropertyVersion,
-        ObjectError, ObjectPropertiesQuery, ProgramPropertiesVersion, Revalidation,
+        AdtRequest, AdtResponse, AdtUri, Client, CompatibilityError, EntityTag, Include,
+        IncludePropertyVersion, ObjectError, ObjectPropertiesQuery, OperationError,
+        ProgramPropertiesVersion, Ready, ResolveError, Revalidation, Transport,
     };
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
@@ -128,11 +130,39 @@ mod tests {
         }
     }
 
+    struct RecordingTransport {
+        requests: Arc<Mutex<Vec<AdtRequest>>>,
+    }
+
+    #[async_trait]
+    impl Transport for RecordingTransport {
+        async fn send(&self, request: AdtRequest) -> Result<AdtResponse, crate::TransportError> {
+            self.requests.lock().unwrap().push(request);
+            Ok(AdtResponse::new(
+                StatusCode::OK,
+                HeaderMap::new(),
+                Vec::new(),
+            ))
+        }
+    }
+
     fn ready_client(xml: &[u8]) -> Client<Ready> {
         Client::new(UnusedTransport).with_capabilities(
             crate::api::discovery::parse_capabilities(xml).unwrap(),
             crate::api::discovery::parse_capabilities(xml).unwrap(),
         )
+    }
+
+    fn recording_client(xml: &[u8]) -> (Client<Ready>, Arc<Mutex<Vec<AdtRequest>>>) {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let client = Client::new(RecordingTransport {
+            requests: Arc::clone(&requests),
+        })
+        .with_capabilities(
+            crate::api::discovery::parse_capabilities(xml).unwrap(),
+            crate::api::discovery::parse_capabilities(xml).unwrap(),
+        );
+        (client, requests)
     }
 
     fn program_properties_query() -> ObjectPropertiesQuery<Program> {
@@ -184,9 +214,7 @@ mod tests {
 
     #[test]
     fn include_properties_query_defaults_to_v2() {
-        let request = include_properties_query()
-            .request(&ready_client(DISCOVERY_XML))
-            .unwrap();
+        let request = include_properties_query().encode().unwrap();
 
         assert_eq!(
             request.headers()[header::ACCEPT],
@@ -196,9 +224,7 @@ mod tests {
 
     #[test]
     fn program_properties_query_accepts_every_supported_version() {
-        let request = program_properties_query()
-            .request(&ready_client(DISCOVERY_XML))
-            .unwrap();
+        let request = program_properties_query().encode().unwrap();
 
         assert_eq!(
             request.headers()[header::ACCEPT],
@@ -206,17 +232,20 @@ mod tests {
         );
     }
 
-    #[test]
-    fn expands_namespaced_program_run_variables() {
-        let client = ready_client(DISCOVERY_XML);
-        let request = ObjectRef::<Program>::for_test(
+    #[tokio::test]
+    async fn expands_namespaced_program_run_variables() {
+        let (client, requests) = recording_client(DISCOVERY_XML);
+        ObjectRef::<Program>::for_test(
             "/DMO/PROGRAM",
             AdtUri::parse("/sap/bc/adt/programs/programs/%2Fdmo%2Fprogram").unwrap(),
         )
         .run()
         .profiler_id("TRACE ID")
-        .request(&client)
+        .execute(&client)
+        .await
         .unwrap();
+        let requests = requests.lock().unwrap();
+        let request = &requests[0];
 
         assert_eq!(
             request.target().as_str(),
@@ -228,15 +257,18 @@ mod tests {
         );
     }
 
-    #[test]
-    fn omits_an_unset_program_run_profiler() {
-        let request = program_run().request(&ready_client(DISCOVERY_XML)).unwrap();
+    #[tokio::test]
+    async fn omits_an_unset_program_run_profiler() {
+        let (client, requests) = recording_client(DISCOVERY_XML);
+        program_run().execute(&client).await.unwrap();
+        let requests = requests.lock().unwrap();
+        let request = &requests[0];
 
         assert!(request.query().is_empty());
     }
 
-    #[test]
-    fn rejects_profiling_when_the_template_does_not_advertise_it() {
+    #[tokio::test]
+    async fn rejects_profiling_when_the_template_does_not_advertise_it() {
         let client = ready_client(
             br#"<app:service xmlns:app="http://www.w3.org/2007/app"
                     xmlns:atom="http://www.w3.org/2005/Atom"
@@ -257,13 +289,15 @@ mod tests {
         );
         let error = program_run()
             .profiler_id("TRACE-ID")
-            .request(&client)
+            .execute(&client)
+            .await
             .unwrap_err();
 
         assert!(matches!(
             error,
-            OperationError::Object(ObjectError::UnsupportedTemplateParameter { parameter })
-                if parameter == PROFILER_ID_QUERY
+            OperationError::Resolve(ResolveError::Object(
+                ObjectError::UnsupportedTemplateParameter { parameter }
+            )) if parameter == PROFILER_ID_QUERY
         ));
     }
 
@@ -280,25 +314,26 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn program_run_request_requires_the_discovery_collection() {
+    #[tokio::test]
+    async fn program_run_request_requires_the_discovery_collection() {
         let client = ready_client(
             br#"<app:service xmlns:app="http://www.w3.org/2007/app"
                     xmlns:atom="http://www.w3.org/2005/Atom">
                     <app:workspace><atom:title>Programs</atom:title></app:workspace>
                 </app:service>"#,
         );
-        let error = program_run().request(&client).unwrap_err();
+        let error = program_run().execute(&client).await.unwrap_err();
 
         assert!(matches!(
             error,
-            OperationError::Compatibility(CompatibilityError::MissingCollection(category))
-                if category == PROGRAM_RUN_CATEGORY
+            OperationError::Resolve(ResolveError::Compatibility(
+                CompatibilityError::MissingCollection(category)
+            )) if category == PROGRAM_RUN_CATEGORY
         ));
     }
 
-    #[test]
-    fn program_run_request_requires_the_relation_template() {
+    #[tokio::test]
+    async fn program_run_request_requires_the_relation_template() {
         let client = ready_client(
             br#"<app:service xmlns:app="http://www.w3.org/2007/app"
                     xmlns:atom="http://www.w3.org/2005/Atom">
@@ -311,13 +346,13 @@ mod tests {
                     </app:workspace>
                 </app:service>"#,
         );
-        let error = program_run().request(&client).unwrap_err();
+        let error = program_run().execute(&client).await.unwrap_err();
 
         assert!(matches!(
             error,
-            OperationError::Object(ObjectError::MissingTemplate {
-                relation: PROGRAM_RUN_RELATION
-            })
+            OperationError::Resolve(ResolveError::Object(ObjectError::MissingTemplate {
+                relation: PROGRAM_RUN_RELATION,
+            }))
         ));
     }
 
@@ -400,11 +435,7 @@ mod tests {
         let program = program_properties_query()
             .decode(program_properties_response(ProgramPropertiesVersion::V3))
             .unwrap();
-        let request = program
-            .revalidate()
-            .unwrap()
-            .request(&ready_client(DISCOVERY_XML))
-            .unwrap();
+        let request = program.revalidate().unwrap().encode().unwrap();
 
         assert_eq!(request.headers()[header::IF_NONE_MATCH], "program-etag");
     }

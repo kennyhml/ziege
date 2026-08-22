@@ -1,11 +1,10 @@
 use http::{Method, StatusCode};
 
 use crate::{
-    client::{Client, ClientState},
-    error::{ObjectError, OperationError, ResponseError},
+    error::{EncodeError, ObjectError, ResponseError},
     objects::{AnyObject, Object, Source, SourceComponents},
-    operation::{Operation, OperationResponse, Stateful, Stateless},
-    protocol::{AdtRequest, EntityTag, TEXT_PLAIN_MEDIA_TYPE},
+    operation::{EncodedOperation, Operation, OperationResponse, Owned, Stateful, Stateless},
+    protocol::{EntityTag, TEXT_PLAIN_MEDIA_TYPE},
     resource::{SourceRef, refs::source_from_href},
 };
 
@@ -73,12 +72,13 @@ pub struct ObjectSourceQuery {
     pub source: SourceRef,
 }
 
-impl<S: ClientState> Operation<S> for ObjectSourceQuery {
+impl Operation for ObjectSourceQuery {
     type Response = SourceCode;
     type Kind = Stateless;
+    type Target = Owned;
 
-    fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
-        let mut request = AdtRequest::new(Method::GET, self.source.uri.clone());
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        let mut request = EncodedOperation::owned(Method::GET, self.source.uri.clone());
         for (name, value) in &self.source.query {
             request.push_query(name, value);
         }
@@ -171,12 +171,13 @@ impl ObjectSourceUpdate {
     }
 }
 
-impl<S: ClientState> Operation<S> for ObjectSourceUpdate {
+impl Operation for ObjectSourceUpdate {
     type Response = SourceUpdateResult;
     type Kind = Stateful;
+    type Target = Owned;
 
-    fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
-        let mut request = AdtRequest::new(Method::PUT, self.source.uri.clone());
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        let mut request = EncodedOperation::owned(Method::PUT, self.source.uri.clone());
         request.push_query(LOCK_HANDLE_QUERY, self.object_lock.handle());
         if let Some(transport_request) = &self.transport_request {
             request.push_query(TRANSPORT_REQUEST_QUERY, transport_request.as_str());
@@ -234,7 +235,10 @@ mod tests {
     use async_trait::async_trait;
     use http::{HeaderMap, HeaderValue, header};
 
-    use crate::{AccessMode, AdtResponse, AdtUri, Class, Initial, ObjectRef, Program, Transport};
+    use crate::{
+        AccessMode, AdtRequest, AdtResponse, AdtUri, Class, Client, ObjectRef, OperationError,
+        Program, ResolveError, Transport,
+    };
 
     struct UnusedTransport;
 
@@ -265,10 +269,10 @@ mod tests {
 
     #[test]
     fn source_operations_do_not_require_discovery() {
-        fn accepts_initial<O: Operation<Initial>>() {}
+        fn accepts_operation<O: Operation>() {}
 
-        accepts_initial::<ObjectSourceQuery>();
-        accepts_initial::<ObjectSourceUpdate>();
+        accepts_operation::<ObjectSourceQuery>();
+        accepts_operation::<ObjectSourceUpdate>();
     }
 
     #[test]
@@ -278,16 +282,13 @@ mod tests {
             AdtUri::parse("/sap/bc/adt/oo/classes/zcl_example").unwrap(),
         );
         let object_lock = ObjectLock::for_test(class.erase(), AccessMode::Modify);
-        let client = Client::new(UnusedTransport);
-
         for uri in [
             "/sap/bc/adt/oo/classes/zcl_example/includes/definitions",
             "/sap/bc/adt/oo/classes/zcl_example/includes/implementations",
         ] {
             let source = source_ref(&class, uri);
             let update = source.update(&object_lock, "source").unwrap();
-            let request =
-                <ObjectSourceUpdate as Operation<Initial>>::request(&update, &client).unwrap();
+            let request = <ObjectSourceUpdate as Operation>::encode(&update).unwrap();
 
             assert_eq!(request.target(), &source.uri);
             assert_eq!(
@@ -339,11 +340,7 @@ mod tests {
             ObjectLock::for_test_with_transport(program.erase(), AccessMode::Modify, "A4HK900001");
         let update = source.update(&object_lock, "REPORT zprogram.").unwrap();
 
-        let request = <ObjectSourceUpdate as Operation<Initial>>::request(
-            &update,
-            &Client::new(UnusedTransport),
-        )
-        .unwrap();
+        let request = <ObjectSourceUpdate as Operation>::encode(&update).unwrap();
 
         assert_eq!(request.method(), Method::PUT);
         assert_eq!(request.target(), &source.uri);
@@ -370,11 +367,7 @@ mod tests {
                 .update(&object_lock, "REPORT zprogram.")
                 .unwrap()
                 .transport("A4HK900002");
-            let request = <ObjectSourceUpdate as Operation<Initial>>::request(
-                &update,
-                &Client::new(UnusedTransport),
-            )
-            .unwrap();
+            let request = <ObjectSourceUpdate as Operation>::encode(&update).unwrap();
 
             assert_eq!(
                 request.query(),
@@ -395,7 +388,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(header::ETAG, HeaderValue::from_static("source-etag-2"));
 
-        let result = <ObjectSourceUpdate as Operation<Initial>>::decode(
+        let result = <ObjectSourceUpdate as Operation>::decode(
             &update,
             OperationResponse::new(
                 AdtResponse::new(StatusCode::OK, headers, b"REPORT zprogram.\n".to_vec()),
@@ -426,7 +419,7 @@ mod tests {
             </properties>
         </exc:exception>"#;
 
-        let error = <ObjectSourceUpdate as Operation<Initial>>::decode(
+        let error = <ObjectSourceUpdate as Operation>::decode(
             &update,
             OperationResponse::new(
                 AdtResponse::new(StatusCode::CONFLICT, HeaderMap::new(), body.to_vec()),
@@ -450,7 +443,7 @@ mod tests {
         let object_lock = ObjectLock::for_test(program.erase(), AccessMode::Modify);
         let update = source.update(&object_lock, "REPORT zprogram.").unwrap();
 
-        let result = <ObjectSourceUpdate as Operation<Initial>>::decode(
+        let result = <ObjectSourceUpdate as Operation>::decode(
             &update,
             OperationResponse::new(
                 AdtResponse::new(StatusCode::NO_CONTENT, HeaderMap::new(), Vec::new()),
@@ -474,6 +467,9 @@ mod tests {
 
         let error = update.execute(&session).await.unwrap_err();
 
-        assert!(matches!(error, OperationError::UserSessionMismatch));
+        assert!(matches!(
+            error,
+            OperationError::Resolve(ResolveError::UserSessionMismatch)
+        ));
     }
 }

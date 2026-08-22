@@ -5,11 +5,9 @@ use serde::Deserialize;
 
 use crate::{
     PostAction, User,
-    client::{Client, ClientState},
-    error::{ObjectError, OperationError, ResponseError},
+    error::{EncodeError, ObjectError, ResponseError},
     objects::{AnyObject, Object, ObjectRef, ObjectType},
-    operation::{Operation, OperationResponse, Stateful, UserSessionId},
-    protocol::AdtRequest,
+    operation::{EncodedOperation, Operation, OperationResponse, Owned, Stateful, UserSessionId},
 };
 
 use super::transports::TransportNumber;
@@ -178,7 +176,7 @@ impl ObjectLock {
             object,
             handle: "LOCK-HANDLE".to_owned(),
             access_mode,
-            user_session: Some(UserSessionId::new()),
+            user_session: Some(UserSessionId::generate()),
             transport_relevant: false,
             transport_request: None,
             transport_request_description: None,
@@ -289,12 +287,13 @@ impl LockRequest {
     }
 }
 
-impl<S: ClientState> Operation<S> for LockRequest {
+impl Operation for LockRequest {
     type Response = ObjectLock;
     type Kind = Stateful;
+    type Target = Owned;
 
-    fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
-        let mut request = AdtRequest::new(Method::POST, self.object.uri().clone());
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        let mut request = EncodedOperation::owned(Method::POST, self.object.uri().clone());
         request.push_query(PostAction::QUERY_PARAMETER, PostAction::Lock.as_str());
         request.push_query(ACCESS_MODE_QUERY, self.access_mode.as_str());
         request.set_accept(LOCK_RESULT_MEDIA_TYPE);
@@ -325,12 +324,14 @@ impl UnlockRequest {
     }
 }
 
-impl<S: ClientState> Operation<S> for UnlockRequest {
+impl Operation for UnlockRequest {
     type Response = ();
     type Kind = Stateful;
+    type Target = Owned;
 
-    fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
-        let mut request = AdtRequest::new(Method::POST, self.object_lock.object().uri().clone());
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        let mut request =
+            EncodedOperation::owned(Method::POST, self.object_lock.object().uri().clone());
         request.push_query(PostAction::QUERY_PARAMETER, PostAction::Unlock.as_str());
         request.push_query(LOCK_HANDLE_QUERY, self.object_lock.handle());
         if let Some(user_session) = self.object_lock.user_session() {
@@ -384,7 +385,7 @@ struct RawLockData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, Initial, Program};
+    use crate::{AdtUri, Program};
 
     const LOCK_XML: &[u8] = include_bytes!("../../tests/fixtures/object-lock.xml");
 
@@ -398,7 +399,7 @@ mod tests {
         let lock = ObjectLock::parse(
             object,
             AccessMode::Modify,
-            Some(UserSessionId::new()),
+            Some(UserSessionId::generate()),
             LOCK_XML,
         )
         .unwrap();
@@ -433,7 +434,7 @@ mod tests {
         let lock = ObjectLock::parse(
             object,
             AccessMode::Modify,
-            Some(UserSessionId::new()),
+            Some(UserSessionId::generate()),
             xml.as_bytes(),
         )
         .unwrap();
@@ -454,10 +455,10 @@ mod tests {
 
     #[test]
     fn locking_operations_do_not_require_discovery() {
-        fn accepts_initial<O: Operation<Initial>>() {}
+        fn accepts_operation<O: Operation>() {}
 
-        accepts_initial::<LockRequest>();
-        accepts_initial::<UnlockRequest>();
+        accepts_operation::<LockRequest>();
+        accepts_operation::<UnlockRequest>();
     }
 
     #[test]

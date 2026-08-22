@@ -2,14 +2,15 @@ use http::{Method, StatusCode};
 
 use crate::{
     AnyObject, Object, ObjectError, ObjectLock, TransportNumber,
-    client::{Client, ClientState, Ready},
-    error::{OperationError, ResponseError},
+    error::{EncodeError, ResponseError},
     objects::{
         ObjectRef, ObjectType, ObjectVersion, PropertyModel, RuntimeObjectTypeDescriptor,
         UpdateProperties,
     },
-    operation::{IfNoneMatch, Operation, OperationResponse, Stateful, Stateless},
-    protocol::{AdtRequest, EntityTag},
+    operation::{
+        EncodedOperation, IfNoneMatch, Operation, OperationResponse, Owned, Stateful, Stateless,
+    },
+    protocol::EntityTag,
 };
 
 use super::{locking::LOCK_HANDLE_QUERY, transports::TRANSPORT_REQUEST_QUERY};
@@ -28,7 +29,7 @@ impl<T> ObjectPropertiesQuery<T> {
             .ok_or_else(|| self.resource.unsupported_capability("object properties"))
     }
 
-    fn build_request(&self) -> Result<AdtRequest, OperationError> {
+    fn build_request(&self) -> Result<EncodedOperation<Owned>, EncodeError> {
         self.descriptor()?
             .properties_request(&self.resource.erase(), self.version)
     }
@@ -55,14 +56,15 @@ where
     }
 }
 
-impl<T> Operation<Ready> for ObjectPropertiesQuery<T>
+impl<T> Operation for ObjectPropertiesQuery<T>
 where
     T: ObjectType,
 {
     type Response = Object<T>;
     type Kind = Stateless;
+    type Target = Owned;
 
-    fn request(&self, _client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
         self.build_request()
     }
 
@@ -89,11 +91,12 @@ impl<T: ObjectType> Object<T> {
     }
 }
 
-impl Operation<Ready> for ObjectPropertiesQuery<()> {
+impl Operation for ObjectPropertiesQuery<()> {
     type Response = AnyObject;
     type Kind = Stateless;
+    type Target = Owned;
 
-    fn request(&self, _client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
         self.build_request()
     }
 
@@ -131,8 +134,8 @@ impl<T> ObjectPropertiesUpdate<T> {
         self
     }
 
-    fn build_request(&self) -> Result<AdtRequest, OperationError> {
-        let mut request = AdtRequest::new(Method::PUT, self.resource.uri().clone());
+    fn build_request(&self) -> EncodedOperation<Owned> {
+        let mut request = EncodedOperation::owned(Method::PUT, self.resource.uri().clone());
         request.push_query(LOCK_HANDLE_QUERY, self.object_lock.handle());
         if let Some(transport_request) = &self.transport_request {
             request.push_query(TRANSPORT_REQUEST_QUERY, transport_request.as_str());
@@ -143,20 +146,20 @@ impl<T> ObjectPropertiesUpdate<T> {
         request.set_accept(self.media_type);
         request.set_content_type(self.media_type);
         request.set_body(self.body.clone());
-        Ok(request)
+        request
     }
 }
 
-impl<S, T> Operation<S> for ObjectPropertiesUpdate<T>
+impl<T> Operation for ObjectPropertiesUpdate<T>
 where
-    S: ClientState,
     T: ObjectType,
 {
     type Response = Option<Object<T>>;
     type Kind = Stateful;
+    type Target = Owned;
 
-    fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
-        self.build_request()
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        Ok(self.build_request())
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
@@ -207,15 +210,13 @@ impl<T: UpdateProperties> Object<T> {
     }
 }
 
-impl<S> Operation<S> for ObjectPropertiesUpdate<()>
-where
-    S: ClientState,
-{
+impl Operation for ObjectPropertiesUpdate<()> {
     type Response = Option<AnyObject>;
     type Kind = Stateful;
+    type Target = Owned;
 
-    fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
-        self.build_request()
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        Ok(self.build_request())
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {

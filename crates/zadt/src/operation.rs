@@ -6,31 +6,30 @@ use secrecy::{ExposeSecret, SecretString};
 use uuid::Uuid;
 
 use crate::{
-    AdtRequest, AdtResponse, AdtUri, Client, ClientState, EntityTag, OperationError, Ready,
-    ResponseError, TransportError, compatibility::media_types_match, protocol::CORE_DISCOVERY_PATH,
+    AdtRequest, AdtResponse, AdtUri, Client, ClientState, EncodeError, EntityTag, OperationError,
+    Ready, ResolveError, ResponseError, TransportError, compatibility::media_types_match,
+    protocol::CORE_DISCOVERY_PATH,
 };
 
 mod batch;
+mod encoded;
 mod revalidation;
 mod target;
 
 pub use batch::{BatchError, BatchKey, BatchOperation, BatchResponses, Batched};
+use encoded::EncodedTarget;
+pub use encoded::{
+    Advertised, AdvertisedCollection, AdvertisedTarget, AdvertisedTemplate, DiscoveryDocument,
+    EncodedOperation, OperationTarget, Owned,
+};
 pub use revalidation::{IfNoneMatch, Revalidation};
+use target::resolve_advertised;
 pub(crate) use target::{CollectionTarget, TemplateTarget};
 
 const ADT_SESSION_TYPE: &str = "x-sap-adt-sessiontype";
 const STATEFUL_SESSION_TYPE: &str = "stateful";
 const STATELESS_SESSION_TYPE: &str = "stateless";
 const USER_SESSION_COOKIE: &str = "sap-contextid";
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct UserSessionId(Uuid);
-
-impl UserSessionId {
-    pub(crate) fn new() -> Self {
-        Self(Uuid::new_v4())
-    }
-}
 
 mod private {
     pub trait Sealed {}
@@ -65,32 +64,100 @@ impl private::Sealed for Stateful {}
 impl OperationKind for Stateless {}
 impl OperationKind for Stateful {}
 
+/// A typed ADT operation.
+///
+/// ADT uses HTTP resource semantics, including methods such as `GET`, `POST`,
+/// and `PUT`, resource URIs, headers, and representation bodies.
+///
+/// [`EncodedOperation`] represents those semantics before an owned or advertised
+/// target is resolved into an [`AdtRequest`]. An HTTP transport sends the resolved
+/// request as HTTP, while an RFC transport can map the same fields into SAP's
+/// `SADT_REST_REQUEST` structure. It does not tunnel a serialized raw HTTP message.
+///
+/// The operation's [`OperationKind`] and [`Operation::Target`] determine which
+/// [`Execute`] can run it.
+///
+/// Consumers of the API should construct operations manually only in exceptional
+/// cases. In most scenarios, a callable operation can be constructed - or at least
+/// partially derived - from an existing context, such as an object reference.
+pub trait Operation: Send + Sync {
+    type Response: Send;
+    type Kind: OperationKind;
+    type Target: OperationTarget;
+
+    /// Encodes the operation without consulting client or transport state.
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError>;
+
+    /// Converts the raw transport response into this operations response type.
+    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError>;
+
+    /// Convenient forward of [`Execute::execute`] to the operation itself
+    fn execute<E>(
+        &self,
+        executor: &E,
+    ) -> impl Future<Output = Result<Self::Response, OperationError>> + Send
+    where
+        E: Execute<Self>,
+        Self: Sized,
+    {
+        executor.execute(self)
+    }
+}
+
+/// An execution context capable of running operation `O`.
+///
+/// `Operation` describes how to build and decode a request, while `Execute`
+/// controls how that request is carried out. This separates the operations
+/// protocol contract from execution concerns such as target resolution,
+/// user-session affinity, session headers, and transport access.
+///
+/// [`Client<S>`](Client) implements this trait only for [`Stateless`]
+/// operations. Consequently, a [`Stateful`] operation cannot execute directly
+/// through a client. A [`UserSession`] implements this trait while retaining
+/// the required `sap-contextid` and delegating request delivery to its client.
+///
+/// Callers should use [`Operation::execute`] rather than invoking this directly.
+pub trait Execute<O>: Send + Sync
+where
+    O: Operation,
+{
+    /// Builds, sends, and decodes one operation within this execution context.
+    fn execute(
+        &self,
+        operation: &O,
+    ) -> impl Future<Output = Result<O::Response, OperationError>> + Send;
+}
+
+/// An opaque local identity used to preserve stateful-operation affinity.
+///
+/// This is not the SAP `sap-contextid` cookie and contains no server credential.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct UserSessionId(Uuid);
+
+impl UserSessionId {
+    /// Creates an opaque local identity for one stateful execution context.
+    pub fn generate() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
 /// Local request metadata retained until an operation decodes its response.
 ///
-/// Obtain this context from [`AdtRequest::operation_context`] before passing a
-/// request to a consuming transport. Most callers use the built-in executors,
-/// which preserve it automatically.
+/// [`Resolve::resolve`] returns this alongside the transport request. Most
+/// callers use the built-in executors, which preserve it automatically.
 #[derive(Clone, Debug)]
 pub struct OperationContext {
     request_target: AdtUri,
-    related_request_targets: Box<[AdtUri]>,
 }
 
 impl OperationContext {
-    pub(crate) fn new(request_target: AdtUri, related_request_targets: Box<[AdtUri]>) -> Self {
-        Self {
-            request_target,
-            related_request_targets,
-        }
+    pub(crate) fn new(request_target: AdtUri) -> Self {
+        Self { request_target }
     }
 
     /// Returns the target of the originating request.
     pub fn request_target(&self) -> &AdtUri {
         &self.request_target
-    }
-
-    pub(crate) fn related_request_targets(&self) -> &[AdtUri] {
-        &self.related_request_targets
     }
 }
 
@@ -110,10 +177,7 @@ pub struct OperationResponse {
 impl OperationResponse {
     /// Pairs a raw response with the target of its originating request.
     pub fn new(response: AdtResponse, request_target: AdtUri) -> Self {
-        Self::with_context(
-            response,
-            OperationContext::new(request_target, Box::default()),
-        )
+        Self::with_context(response, OperationContext::new(request_target))
     }
 
     /// Pairs a raw response with context captured from its originating request.
@@ -125,12 +189,14 @@ impl OperationResponse {
         }
     }
 
-    pub(crate) fn in_user_session(mut self, user_session: UserSessionId) -> Self {
+    /// Marks the response as executed through one local user-session identity.
+    pub fn in_user_session(mut self, user_session: UserSessionId) -> Self {
         self.user_session = Some(user_session);
         self
     }
 
-    pub(crate) fn user_session(&self) -> Option<UserSessionId> {
+    /// Returns the local user-session identity that produced this response.
+    pub fn user_session(&self) -> Option<UserSessionId> {
         self.user_session
     }
 
@@ -224,84 +290,93 @@ impl OperationResponse {
     pub fn into_parts(self) -> (AdtResponse, AdtUri) {
         (self.response, self.context.request_target)
     }
+}
 
-    pub(crate) fn into_context_parts(self) -> (AdtResponse, OperationContext) {
-        (self.response, self.context)
+/// A transport request paired with local metadata retained for response decoding.
+pub struct ResolvedOperation {
+    request: AdtRequest,
+    context: OperationContext,
+    required_user_session: Option<UserSessionId>,
+}
+
+impl ResolvedOperation {
+    /// Returns the transport-ready ADT request.
+    pub fn request(&self) -> &AdtRequest {
+        &self.request
+    }
+
+    /// Returns the local context to retain while the request is in flight.
+    pub fn context(&self) -> &OperationContext {
+        &self.context
+    }
+
+    /// Returns the user-session identity required by this operation, if any.
+    pub fn required_user_session(&self) -> Option<UserSessionId> {
+        self.required_user_session
+    }
+
+    /// Separates the transport request, response context, and session requirement.
+    pub fn into_parts(self) -> (AdtRequest, OperationContext, Option<UserSessionId>) {
+        (self.request, self.context, self.required_user_session)
     }
 }
 
-/// A typed ADT operation possible only with client state `S`.
-///
-/// ADT uses HTTP resource semantics, including methods such as `GET`, `POST`,
-/// and `PUT`, resource URIs, headers, and representation bodies.
-///
-/// [`AdtRequest`] represents those semantics independently of the transport.
-/// An HTTP transport sends them as an HTTP request, while an RFC transport can
-/// map the same fields into SAP's `SADT_REST_REQUEST` structure. It does not
-/// tunnel a serialized raw HTTP message.
-///
-/// The operation's [`OperationKind`] and the client state determine which
-/// [`Execute`] can run it.
-///
-/// Consumers of the API should construct operations manually only in exceptional
-/// cases. In most scenarios, a callable operation can be constructed - or at least
-/// partially derived - from an existing context, such as an object reference.
-///
-/// TODO: Currently, many operatios take a client to build the request without
-/// actually needing one, usually because they do not rely on discovered elements.
-/// This should be cleand up if possible. Ideally, the operation itself should
-/// only concern itself with encode / decode
-pub trait Operation<S: ClientState>: Send + Sync {
-    type Response: Send;
-    type Kind: OperationKind;
+/// Resolves an encoded target using an execution context's available state.
+pub trait Resolve<T: OperationTarget> {
+    fn resolve(&self, operation: EncodedOperation<T>) -> Result<ResolvedOperation, ResolveError>;
+}
 
-    /// Builds the transport-neutral request for this operation.
-    fn request(&self, client: &Client<S>) -> Result<AdtRequest, OperationError>;
-
-    /// Converts the raw transport response into this operation's response type.
-    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError>;
-
-    /// Convenient forward of [`Execute::execute`] to the operation itself
-    fn execute<E>(
+impl<S: ClientState> Resolve<Owned> for Client<S> {
+    fn resolve(
         &self,
-        executor: &E,
-    ) -> impl Future<Output = Result<Self::Response, OperationError>> + Send
-    where
-        E: Execute<S, Self>,
-        Self: Sized,
-    {
-        executor.execute(self)
+        operation: EncodedOperation<Owned>,
+    ) -> Result<ResolvedOperation, ResolveError> {
+        let operation = operation.request;
+        let EncodedTarget::Owned(target) = operation.target else {
+            unreachable!("an owned encoded operation must contain an owned target");
+        };
+        let context = OperationContext::new(target.clone());
+        let request = AdtRequest::from_parts(
+            operation.method,
+            target,
+            operation.query,
+            operation.headers,
+            operation.body,
+        );
+        Ok(ResolvedOperation {
+            request,
+            context,
+            required_user_session: operation.required_user_session,
+        })
     }
 }
 
-/// An execution context capable of running operation `O` with client state `S`.
-///
-/// `Operation` describes how to build and decode a request, while `Execute`
-/// controls how that request is carried out. This separates the operations
-/// protocol contract from execution concerns such as user-session affinity,
-/// session headers, serialization, and transport access.
-///
-/// The generic parameters express two independent requirements:
-///
-/// - `S` is the discovery state needed to build the operations request.
-/// - `O` is the concrete operation and determines response and [`OperationKind`].
-///
-/// [`Client<S>`](Client) implements this trait only for [`Stateless`]
-/// operations. Consequently, a [`Stateful`] operation cannot execute directly
-/// through a client. A [`UserSession`] implements this trait while retaining
-/// the required `sap-contextid` and delegating request delivery to its client.
-///
-/// Callers should use [`Operation::execute`] rather than invoking this directly.
-pub trait Execute<S, O>: Send + Sync
-where
-    S: ClientState,
-    O: Operation<S>,
-{
-    /// Builds, sends, and decodes one operation within this execution context.
-    fn execute(
+impl Resolve<Advertised> for Client<Ready> {
+    fn resolve(
         &self,
-        operation: &O,
-    ) -> impl Future<Output = Result<O::Response, OperationError>> + Send;
+        operation: EncodedOperation<Advertised>,
+    ) -> Result<ResolvedOperation, ResolveError> {
+        let operation = operation.request;
+        let EncodedTarget::Advertised(target) = operation.target else {
+            unreachable!("an advertised encoded operation must contain an advertised target");
+        };
+        let resolved = resolve_advertised(self, target)?;
+        let mut query = resolved.query;
+        query.extend(operation.query);
+        let context = OperationContext::new(resolved.target.clone());
+        let request = AdtRequest::from_parts(
+            operation.method,
+            resolved.target,
+            query,
+            operation.headers,
+            operation.body,
+        );
+        Ok(ResolvedOperation {
+            request,
+            context,
+            required_user_session: operation.required_user_session,
+        })
+    }
 }
 
 /// A long-lived SAP user session for stateful ADT operations.
@@ -327,41 +402,69 @@ pub struct UserSession<S: ClientState> {
 }
 
 // Execution of a stateless request
-impl<S, O> Execute<S, O> for Client<S>
+impl<S, O> Execute<O> for Client<S>
 where
     S: ClientState,
-    O: Operation<S, Kind = Stateless>,
+    O: Operation<Kind = Stateless>,
+    Client<S>: Resolve<O::Target>,
 {
     async fn execute(&self, operation: &O) -> Result<O::Response, OperationError> {
-        let request = operation.request(self)?;
-        let context = request.operation_context();
-        let response = self.transport().send(request).await?;
-        Ok(operation.decode(OperationResponse::with_context(response, context))?)
+        let resolved = self.resolve(operation.encode()?)?;
+        let response = self.execute_resolved(resolved).await?;
+        Ok(operation.decode(response)?)
     }
 }
 
 // Execution within a retained user session. Stateless operations can opt into
 // the session when they need affinity with an existing stateful workflow.
-impl<S, O> Execute<S, O> for UserSession<S>
+impl<S, O> Execute<O> for UserSession<S>
 where
     S: ClientState,
-    O: Operation<S>,
+    O: Operation,
+    Client<S>: Resolve<O::Target>,
 {
     async fn execute(&self, operation: &O) -> Result<O::Response, OperationError> {
+        let resolved = self.client.resolve(operation.encode()?)?;
+        let response = self.execute_resolved(resolved).await?;
+        Ok(operation.decode(response)?)
+    }
+}
+
+impl<S> Client<S>
+where
+    S: ClientState,
+{
+    pub(crate) async fn execute_resolved(
+        &self,
+        resolved: ResolvedOperation,
+    ) -> Result<OperationResponse, OperationError> {
+        if resolved.required_user_session.is_some() {
+            return Err(ResolveError::UserSessionMismatch.into());
+        }
+        let response = self.transport().send(resolved.request).await?;
+        Ok(OperationResponse::with_context(response, resolved.context))
+    }
+}
+
+impl<S> UserSession<S>
+where
+    S: ClientState,
+{
+    pub(crate) async fn execute_resolved(
+        &self,
+        mut resolved: ResolvedOperation,
+    ) -> Result<OperationResponse, OperationError> {
         let mut session = self.state.lock().await;
-        let mut request = operation.request(&self.client)?;
-        if request
-            .required_user_session()
+        if resolved
+            .required_user_session
             .is_some_and(|required| required != self.id)
         {
-            return Err(OperationError::UserSessionMismatch);
+            return Err(ResolveError::UserSessionMismatch.into());
         }
-        session.decorate(&mut request)?;
-        let context = request.operation_context();
-        let response = self.client.transport().send(request).await?;
+        session.decorate(&mut resolved.request)?;
+        let response = self.client.transport().send(resolved.request).await?;
         session.update(response.headers());
-        Ok(operation
-            .decode(OperationResponse::with_context(response, context).in_user_session(self.id))?)
+        Ok(OperationResponse::with_context(response, resolved.context).in_user_session(self.id))
     }
 }
 
@@ -426,7 +529,7 @@ where
 {
     pub(crate) fn new(client: Client<S>) -> Self {
         Self {
-            id: UserSessionId::new(),
+            id: UserSessionId::generate(),
             client,
             state: Mutex::new(UserSessionState::default()),
         }
@@ -466,9 +569,9 @@ where
 }
 
 impl UserSession<Ready> {
-    /// Creates an empty stateful batch bound to this user session's client.
-    pub fn batch(&self) -> Result<BatchOperation<Stateful>, OperationError> {
-        BatchOperation::new(&self.client)
+    /// Creates an empty stateful batch bound to this session.
+    pub fn batch(&self) -> BatchOperation<'_, Stateful> {
+        BatchOperation::for_user_session(self)
     }
 }
 
@@ -483,18 +586,19 @@ mod tests {
     use http::{HeaderMap, Method, StatusCode};
 
     use super::*;
-    use crate::{AdtUri, Initial, Transport};
+    use crate::{AdtUri, Transport};
 
     struct StatefulProbe;
 
     struct StatelessProbe;
 
-    impl Operation<Initial> for StatefulProbe {
+    impl Operation for StatefulProbe {
         type Response = AdtUri;
         type Kind = Stateful;
+        type Target = Owned;
 
-        fn request(&self, _client: &Client<Initial>) -> Result<AdtRequest, OperationError> {
-            Ok(AdtRequest::new(
+        fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+            Ok(EncodedOperation::owned(
                 Method::GET,
                 AdtUri::parse("/sap/bc/adt/stateful-probe").unwrap(),
             ))
@@ -506,12 +610,13 @@ mod tests {
         }
     }
 
-    impl Operation<Initial> for StatelessProbe {
+    impl Operation for StatelessProbe {
         type Response = AdtUri;
         type Kind = Stateless;
+        type Target = Owned;
 
-        fn request(&self, _client: &Client<Initial>) -> Result<AdtRequest, OperationError> {
-            Ok(AdtRequest::new(
+        fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+            Ok(EncodedOperation::owned(
                 Method::GET,
                 AdtUri::parse("/sap/bc/adt/stateless-probe").unwrap(),
             ))

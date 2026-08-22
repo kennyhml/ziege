@@ -5,9 +5,9 @@ use http::{Method, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AdtRequest, AdtUri, CategoryId, Client, CtsError, ObjectError, Operation, OperationError,
-    OperationResponse, PostAction, Ready, ResponseError, Stateless, User,
-    compatibility::media_types_match, operation::CollectionTarget, protocol::TEXT_PLAIN_MEDIA_TYPE,
+    AdtUri, Advertised, CategoryId, CtsError, EncodeError, EncodedOperation, Operation,
+    OperationResponse, PostAction, ResponseError, Stateless, User, operation::CollectionTarget,
+    protocol::TEXT_PLAIN_MEDIA_TYPE,
 };
 
 const ABAP_XML_NAMESPACE: &str = "http://www.sap.com/abapxml";
@@ -87,11 +87,12 @@ impl TransportCheck {
     }
 }
 
-impl Operation<Ready> for TransportCheck {
+impl Operation for TransportCheck {
     type Response = TransportCheckResult;
     type Kind = Stateless;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
         let body = TransportCheckRequest::new(
             &self.uri,
             self.operation.as_str(),
@@ -101,7 +102,7 @@ impl Operation<Ready> for TransportCheck {
         )
         .serialize()?;
 
-        let mut request = Self::TARGET.request(client, Method::POST)?;
+        let mut request = Self::TARGET.operation(Method::POST);
         if let Some(link_up_mode) = self.link_up_mode {
             request.push_query("linkUpMode", link_up_mode.as_str());
         }
@@ -175,12 +176,13 @@ impl User {
     }
 }
 
-impl Operation<Ready> for TransportsQuery {
+impl Operation for TransportsQuery {
     type Response = TransportRequests;
     type Kind = Stateless;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        let mut request = Self::TARGET.request(client, Method::GET)?;
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        let mut request = Self::TARGET.operation(Method::GET);
         request.push_query(PostAction::QUERY_PARAMETER, PostAction::Find.as_str());
         if let Some(user) = &self.user {
             request.push_query("user", user.as_str());
@@ -230,18 +232,14 @@ impl TransportPropertiesQuery {
     }
 }
 
-impl Operation<Ready> for TransportPropertiesQuery {
+impl Operation for TransportPropertiesQuery {
     type Response = Option<TransportRequest>;
     type Kind = Stateless;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        let collection = Self::TARGET.collection(client)?;
-        let target = collection
-            .target()
-            .map_err(ObjectError::InvalidTarget)?
-            .append_segments([self.transport_number.as_str()])
-            .map_err(ObjectError::InvalidTarget)?;
-        let mut request = AdtRequest::new(Method::GET, target);
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        let target = Self::TARGET.with_segment(self.transport_number.as_str());
+        let mut request = EncodedOperation::advertised(Method::GET, target);
         request.set_accept(TRANSPORT_REQUEST_MEDIA_TYPE);
         Ok(request)
     }
@@ -269,9 +267,9 @@ impl TransportRequest {
 
 /// Creates a CTS transport request.
 ///
-/// The modern ASX contract is preferred when advertised by discovery, with a
-/// fallback to the legacy contract. The backend determines whether the created
-/// request is Workbench or Customizing from the referenced object.
+/// The modern ASX contract is used by default. Callers can explicitly request
+/// the legacy contract through [`TransportCreateVersion`]. The backend determines
+/// whether the created request is Workbench or Customizing from the referenced object.
 ///
 /// Backend handler: `CL_CTS_ADT_RES_OBJ_RECORD`
 #[derive(Builder, Clone, Debug)]
@@ -291,6 +289,10 @@ pub struct TransportCreate {
     /// A transport layer used when creating a transport for a new package.
     #[builder(default, setter(strip_option))]
     transport_layer: Option<String>,
+
+    /// The request and response representation contract.
+    #[builder(default)]
+    version: TransportCreateVersion,
 }
 
 impl TransportCreate {
@@ -302,14 +304,12 @@ impl TransportCreate {
     }
 }
 
-impl Operation<Ready> for TransportCreate {
+impl Operation for TransportCreate {
     type Response = TransportCreation;
     type Kind = Stateless;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        let collection = Self::TARGET.collection(client)?;
-        let media_version =
-            TransportCreateMediaVersion::from_accepted(collection.accepted_media_types())?;
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
         let body = TransportCreateRequest::new(
             self.package.as_deref(),
             &self.description,
@@ -317,13 +317,12 @@ impl Operation<Ready> for TransportCreate {
         )
         .serialize()?;
 
-        let target = collection.target().map_err(ObjectError::InvalidTarget)?;
-        let mut request = AdtRequest::new(Method::POST, target);
+        let mut request = Self::TARGET.operation(Method::POST);
         if let Some(transport_layer) = &self.transport_layer {
             request.push_query("transportLayer", transport_layer);
         }
-        request.set_accept(media_version.response_media_type());
-        request.set_content_type(media_version.media_type());
+        request.set_content_type(self.version.request_media_type());
+        request.set_accept(self.version.response_media_type());
         request.set_body(body);
         Ok(request)
     }
@@ -334,49 +333,36 @@ impl Operation<Ready> for TransportCreate {
             return Err(CtsError::MissingTransportCreationResponse.into());
         }
 
-        let content_type = response
-            .require_content_type(&[TRANSPORT_CREATE_RESULT_MEDIA_TYPE, TEXT_PLAIN_MEDIA_TYPE])?;
+        response.require_content_type(&[self.version.response_media_type()])?;
 
-        if media_types_match(TRANSPORT_CREATE_RESULT_MEDIA_TYPE, content_type) {
-            TransportCreation::parse(response.body()).map_err(Into::into)
-        } else {
-            TransportCreation::parse_legacy(response.body()).map_err(Into::into)
+        match self.version {
+            TransportCreateVersion::V1 => {
+                TransportCreation::parse(response.body()).map_err(Into::into)
+            }
+            TransportCreateVersion::Legacy => {
+                TransportCreation::parse_legacy(response.body()).map_err(Into::into)
+            }
         }
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum TransportCreateMediaVersion {
+/// Wire contract used to create a CTS transport request.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TransportCreateVersion {
+    /// The structured V1 request and result representations.
+    #[default]
     V1,
+
+    /// The legacy request representation with a plain-text result.
     Legacy,
 }
 
-impl TransportCreateMediaVersion {
-    const SUPPORTED: &'static [Self] = &[Self::V1, Self::Legacy];
-
-    fn media_type(self) -> &'static str {
+impl TransportCreateVersion {
+    fn request_media_type(self) -> &'static str {
         match self {
             Self::V1 => TRANSPORT_CREATE_V1_MEDIA_TYPE,
             Self::Legacy => TRANSPORT_CREATE_LEGACY_MEDIA_TYPE,
         }
-    }
-
-    fn from_accepted(accepted: &[String]) -> Result<Self, crate::CompatibilityError> {
-        Self::SUPPORTED
-            .iter()
-            .copied()
-            .find(|version| {
-                accepted
-                    .iter()
-                    .any(|media_type| media_types_match(version.media_type(), media_type))
-            })
-            .ok_or_else(|| crate::CompatibilityError::NoCompatibleMediaType {
-                preferred: Self::SUPPORTED
-                    .iter()
-                    .map(|version| version.media_type().to_owned())
-                    .collect(),
-                accepted: accepted.to_vec(),
-            })
     }
 
     fn response_media_type(self) -> &'static str {
@@ -1620,5 +1606,38 @@ mod tests {
             TransportCreation::parse_legacy(b"/com.sap.cts/object_record/DEVK900004\n").unwrap();
         assert_eq!(legacy.transport_number.as_str(), "DEVK900004");
         assert_eq!(legacy.message, None);
+    }
+
+    #[test]
+    fn transport_creation_requires_the_selected_response_version() {
+        let operation = TransportCreate::builder()
+            .description("Create transport")
+            .build()
+            .unwrap();
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            http::header::CONTENT_TYPE,
+            http::HeaderValue::from_static(TEXT_PLAIN_MEDIA_TYPE),
+        );
+        let response = OperationResponse::new(
+            crate::AdtResponse::new(
+                StatusCode::CREATED,
+                headers,
+                b"/com.sap.cts/object_record/DEVK900004".to_vec(),
+            ),
+            AdtUri::parse("/sap/bc/adt/cts/transports").unwrap(),
+        );
+
+        let error = operation.decode(response).unwrap_err();
+
+        assert!(matches!(
+            error,
+            ResponseError::UnsupportedContentType {
+                content_type,
+                supported,
+                ..
+            } if content_type == TEXT_PLAIN_MEDIA_TYPE
+                && supported == [TRANSPORT_CREATE_RESULT_MEDIA_TYPE]
+        ));
     }
 }

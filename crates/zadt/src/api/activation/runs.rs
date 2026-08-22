@@ -2,8 +2,8 @@ use http::{Method, StatusCode};
 use serde::Deserialize;
 
 use crate::{
-    AdtRequest, AdvertisedLink, AdvertisedObjectReference, AnyObject, CategoryId, Client, Object,
-    ObjectError, ObjectRef, ObjectType, Operation, OperationError, OperationResponse, Ready,
+    Advertised, AdvertisedLink, AdvertisedObjectReference, AnyObject, CategoryId, EncodeError,
+    EncodedOperation, Object, ObjectError, ObjectRef, ObjectType, Operation, OperationResponse,
     ResponseError, Stateless, objects::ObjectReferences, operation::CollectionTarget,
 };
 
@@ -90,17 +90,17 @@ impl ActivationRun {
     }
 }
 
-impl Operation<Ready> for ActivationRun {
+impl Operation for ActivationRun {
     type Kind = Stateless;
     type Response = ActivationRunMessages;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
         let body = serde_xml_rs::SerdeXml::new()
             .namespace("adtcore", "http://www.sap.com/adt/core")
             .to_string(&self.objects)
             .map_err(ObjectError::InvalidRequest)?;
-        let target = CollectionTarget::new(ACTIVATE_OBJECTS);
-        let mut request = target.request(client, Method::POST)?;
+        let mut request = CollectionTarget::new(ACTIVATE_OBJECTS).operation(Method::POST);
         request.push_query("method", self.mode.as_str());
         request.push_query("preaudit", self.preaudit.to_string());
         if let Some(forced) = self.forced {
@@ -221,42 +221,12 @@ pub struct ActivationRunMessageText {
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::discovery::parse_capabilities;
     use super::*;
-    use crate::{AdtResponse, AdtUri, Class, Transport, TransportError};
+    use crate::{AdtUri, Class};
     use http::header;
 
     const ACTIVATION_MESSAGES_XML: &[u8] =
         include_bytes!("../../../tests/fixtures/activation-run-messages.xml");
-    const ACTIVATION_DISCOVERY_XML: &[u8] = br#"<?xml version="1.0" encoding="utf-8"?>
-        <app:service xmlns:app="http://www.w3.org/2007/app"
-                     xmlns:atom="http://www.w3.org/2005/Atom">
-            <app:workspace>
-                <atom:title>Activation</atom:title>
-                <app:collection href="/sap/bc/adt/activation">
-                    <atom:title>Activation Runs</atom:title>
-                    <atom:category term="activationruns"
-                        scheme="http://www.sap.com/adt/categories/activation"/>
-                </app:collection>
-            </app:workspace>
-        </app:service>"#;
-
-    struct UnusedTransport;
-
-    #[async_trait::async_trait]
-    impl Transport for UnusedTransport {
-        async fn send(&self, _request: AdtRequest) -> Result<AdtResponse, TransportError> {
-            unreachable!("request construction tests do not send requests")
-        }
-    }
-
-    fn activation_client() -> Client<Ready> {
-        Client::new(UnusedTransport).with_capabilities(
-            parse_capabilities(ACTIVATION_DISCOVERY_XML).unwrap(),
-            parse_capabilities(ACTIVATION_DISCOVERY_XML).unwrap(),
-        )
-    }
-
     #[test]
     fn activation_run_posts_flags_and_namespaced_object_references() {
         let object = ObjectRef::<Class>::for_test(
@@ -266,10 +236,9 @@ mod tests {
         let mut run = object.activation();
         run.allow_distinct_transports(true).forced(true);
 
-        let request = run.request(&activation_client()).unwrap();
+        let request = run.encode().unwrap();
 
         assert_eq!(request.method(), Method::POST);
-        assert_eq!(request.target().as_str(), "/sap/bc/adt/activation");
         assert_eq!(
             request.query(),
             [

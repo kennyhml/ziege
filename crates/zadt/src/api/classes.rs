@@ -1,6 +1,6 @@
 use super::run::ObjectRun;
 use crate::{
-    AdtRequest, CategoryId, Client, Operation, OperationError, OperationResponse, Ready,
+    Advertised, CategoryId, EncodeError, EncodedOperation, Operation, OperationResponse,
     ResponseError, Stateless,
     objects::{Class, ImmediateRun, Object, ObjectRef, RunCapability},
 };
@@ -54,12 +54,13 @@ impl ImmediateRun for Class {
         RunCapability::new(CLASS_RUN_CATEGORY, CLASS_RUN_RELATION, CLASS_NAME_VARIABLE);
 }
 
-impl Operation<Ready> for ClassRun {
+impl Operation for ClassRun {
     type Response = ClassRunResult;
     type Kind = Stateless;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        self.run.request(client)
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        self.run.encode()
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {

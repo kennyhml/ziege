@@ -3,8 +3,9 @@ use serde::Deserialize;
 use url::Url;
 
 use crate::{
-    AdtRequest, AdtUri, Client, ClientState, DiscoveryError, Initial, Operation, OperationError,
-    OperationResponse, Ready, ResponseError, Stateless, protocol::CORE_DISCOVERY_PATH,
+    AdtUri, Client, DiscoveryError, EncodeError, EncodedOperation, Initial, Operation,
+    OperationError, OperationResponse, Owned, Ready, ResponseError, Stateless,
+    protocol::CORE_DISCOVERY_PATH,
 };
 
 const DISCOVERY_MEDIA_TYPE: &str = "application/atomsvc+xml";
@@ -29,7 +30,7 @@ pub struct CategoryId {
 /// both documents in the resulting [`Ready`] client.
 ///
 /// The endpoint is known in advance, so this operation can execute with any
-/// [`ClientState`]. Executing it returns [`Capabilities`] but does not perform
+/// [`crate::ClientState`]. Executing it returns [`Capabilities`] but does not perform
 /// the [`Client::discover`] typestate transition.
 ///
 /// # Observed server handlers
@@ -41,14 +42,15 @@ pub struct CategoryId {
 #[derive(Debug, Default)]
 pub struct CoreDiscoveryQuery;
 
-impl<S: ClientState> Operation<S> for CoreDiscoveryQuery {
+impl Operation for CoreDiscoveryQuery {
     type Response = Capabilities;
     type Kind = Stateless;
+    type Target = Owned;
 
-    fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
         let target = AdtUri::parse(CORE_DISCOVERY_PATH)
             .expect("the core discovery path must be a valid ADT URI");
-        let mut request = AdtRequest::new(Method::GET, target);
+        let mut request = EncodedOperation::owned(Method::GET, target);
         request.set_accept(DISCOVERY_MEDIA_TYPE);
         Ok(request)
     }
@@ -66,7 +68,7 @@ impl<S: ClientState> Operation<S> for CoreDiscoveryQuery {
 /// types, and URI template links.
 ///
 /// The endpoint is known in advance, so this operation can execute with any
-/// [`ClientState`]. [`Client::discover`] executes it and stores the resulting
+/// [`crate::ClientState`]. [`Client::discover`] executes it and stores the resulting
 /// [`Capabilities`] while transitioning to [`Ready`].
 ///
 /// # Observed server handlers
@@ -78,14 +80,15 @@ impl<S: ClientState> Operation<S> for CoreDiscoveryQuery {
 #[derive(Debug, Default)]
 pub struct DiscoveryQuery;
 
-impl<S: ClientState> Operation<S> for DiscoveryQuery {
+impl Operation for DiscoveryQuery {
     type Response = Capabilities;
     type Kind = Stateless;
+    type Target = Owned;
 
-    fn request(&self, _client: &Client<S>) -> Result<AdtRequest, OperationError> {
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
         let target = AdtUri::parse(CENTRAL_DISCOVERY_PATH)
             .expect("the central discovery path must be a valid ADT URI");
-        let mut request = AdtRequest::new(Method::GET, target);
+        let mut request = EncodedOperation::owned(Method::GET, target);
         request.set_accept(DISCOVERY_MEDIA_TYPE);
         Ok(request)
     }

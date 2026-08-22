@@ -3,8 +3,8 @@ use serde::Deserialize;
 
 use super::common::RepositoryFacet;
 use crate::{
-    AdtRequest, CategoryId, Client, Operation, OperationError, OperationResponse, Ready,
-    RepositoryError, ResponseError, Stateless, operation::CollectionTarget,
+    Advertised, CategoryId, Client, EncodeError, EncodedOperation, Operation, OperationResponse,
+    Ready, RepositoryError, ResponseError, Stateless, operation::CollectionTarget,
 };
 
 /// Fetches the facets supported by the repository information system.
@@ -32,12 +32,13 @@ impl Client<Ready> {
     }
 }
 
-impl Operation<Ready> for RepositoryFacetsQuery {
+impl Operation for RepositoryFacetsQuery {
     type Response = RepositoryFacets;
     type Kind = Stateless;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        Self::TARGET.request(client, Method::GET)
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        Ok(Self::TARGET.operation(Method::GET))
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {

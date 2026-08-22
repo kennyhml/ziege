@@ -4,10 +4,13 @@ use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use thiserror::Error;
 use uuid::Uuid;
 
-use super::{Execute, Operation, OperationKind, Stateful, Stateless, UserSession};
+use super::{
+    Advertised, CollectionTarget, EncodedOperation, Operation, OperationContext, OperationKind,
+    Resolve, Stateful, Stateless, UserSession, UserSessionId,
+};
 use crate::{
-    AdtRequest, AdtResponse, AdtUri, CategoryId, Client, ObjectError, OperationError,
-    OperationResponse, Ready, ResponseError,
+    AdtRequest, AdtResponse, CategoryId, Client, EncodeError, OperationError, OperationResponse,
+    Ready, ResolveError, ResponseError,
 };
 
 const BATCH_CATEGORY: CategoryId = CategoryId {
@@ -29,184 +32,188 @@ type ErasedResponse = Box<dyn Any + Send>;
 /// cast safely by inserting type id checks. This relies on the fact that operations
 /// come out in the same order they go in - which the ADT backend guarantees.
 trait ErasedOperation: Send + Sync {
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError>;
-
     fn decode(&self, response: OperationResponse) -> Result<ErasedResponse, ResponseError>;
 }
 
 impl<O> ErasedOperation for O
 where
-    O: Operation<Ready> + 'static,
+    O: Operation + 'static,
     O::Response: 'static,
 {
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        // `O` could also be `ErasedOperation` so we gotta be specific
-        <O as Operation<Ready>>::request(self, client)
+    fn decode(&self, response: OperationResponse) -> Result<ErasedResponse, ResponseError> {
+        <O as Operation>::decode(self, response)
+            .map(|response| Box::new(response) as ErasedResponse)
+    }
+}
+
+struct BatchEntry {
+    operation: Box<dyn ErasedOperation>,
+    request: AdtRequest,
+    context: OperationContext,
+}
+
+enum BoundExecutor<'a> {
+    Client(&'a Client<Ready>),
+    UserSession(&'a UserSession<Ready>),
+}
+
+impl BoundExecutor<'_> {
+    fn client(&self) -> &Client<Ready> {
+        match self {
+            Self::Client(client) => client,
+            Self::UserSession(session) => session.client(),
+        }
     }
 
-    fn decode(&self, response: OperationResponse) -> Result<ErasedResponse, ResponseError> {
-        <O as Operation<Ready>>::decode(self, response)
-            .map(|response| Box::new(response) as ErasedResponse)
+    fn validate_user_session(
+        &self,
+        required_user_session: Option<UserSessionId>,
+    ) -> Result<(), ResolveError> {
+        match (self, required_user_session) {
+            (_, None) => Ok(()),
+            (Self::UserSession(session), Some(required)) if required == session.id => Ok(()),
+            _ => Err(ResolveError::UserSessionMismatch),
+        }
     }
 }
 
 /// A kind-heterogeneous group of ADT operations executed in one HTTP round trip.
 ///
-/// Every operation in a batch uses a [`Ready`] executor and the same operation
-/// kind `K`. Individual response types remain available through the [`BatchKey`]
-/// returned by [`BatchOperation::push`].
+/// The batch borrows the [`Ready`] client or user session that created it. Each
+/// operation is encoded and resolved when passed to [`BatchOperation::push`].
+/// Individual response types remain available through the returned [`BatchKey`].
 ///
 /// Create a batch operation through [`Client::batch`] or [`UserSession::batch`]
-/// such that it can automatically be bound to an operation kind `K`.
+/// which binds it to an operation kind `K` and the originating executor.
 ///
 /// ADT executes its subrequests and returns their responses in request order.
+/// Batch operations cannot be nested.
 ///
 /// If you have a collection of operations of the same type, in other words,
 /// they all share the same response, you may also use the [`Batched`] trait.
 ///
 /// TODO: Implement max batch size and max worker count for parallelism even
 /// using batching, sweet middle spot for many operations
-pub struct BatchOperation<K: OperationKind> {
+pub struct BatchOperation<'a, K: OperationKind> {
+    executor: BoundExecutor<'a>,
     identity: Arc<()>,
-    endpoint: AdtUri,
-    operations: Vec<Box<dyn ErasedOperation>>,
+    entries: Vec<BatchEntry>,
+    required_user_session: Option<UserSessionId>,
     kind: PhantomData<fn() -> K>,
 }
 
-impl<K> BatchOperation<K>
+impl<'a> BatchOperation<'a, Stateless> {
+    pub(crate) fn for_client(client: &'a Client<Ready>) -> Self {
+        Self::new(BoundExecutor::Client(client))
+    }
+}
+
+impl<'a> BatchOperation<'a, Stateful> {
+    pub(crate) fn for_user_session(session: &'a UserSession<Ready>) -> Self {
+        Self::new(BoundExecutor::UserSession(session))
+    }
+}
+
+impl<'a, K> BatchOperation<'a, K>
 where
     K: OperationKind,
 {
-    /// Creates an empty batch using the endpoint advertised to a ready client.
-    pub(crate) fn new(client: &Client<Ready>) -> Result<Self, OperationError> {
-        let collection = client.require_core_collection(BATCH_CATEGORY)?;
-
-        Ok(Self {
+    fn new(executor: BoundExecutor<'a>) -> Self {
+        Self {
+            executor,
             identity: Arc::new(()),
-            endpoint: collection.target().map_err(ObjectError::InvalidTarget)?,
-            operations: Vec::new(),
+            entries: Vec::new(),
+            required_user_session: None,
             kind: PhantomData,
-        })
-    }
-
-    /// Returns the endpoint advertised for batch execution.
-    pub fn endpoint(&self) -> &AdtUri {
-        &self.endpoint
+        }
     }
 
     /// Returns the number of operations in this batch.
     pub fn len(&self) -> usize {
-        self.operations.len()
+        self.entries.len()
     }
 
     /// Returns whether this batch contains no operations.
     pub fn is_empty(&self) -> bool {
-        self.operations.is_empty()
+        self.entries.is_empty()
     }
 
-    /// Appends an operation and returns a typed key for its eventual response.
+    /// Resolves an operation and returns a typed key for its eventual response.
     ///
     /// See [`BatchKey`] for the magic this performs.
-    pub fn push<O>(&mut self, operation: O) -> BatchKey<O::Response>
+    ///
+    /// Encoding and target-resolution failures are returned immediately. The
+    /// operation is added only after both steps succeed.
+    pub fn push<O>(&mut self, operation: O) -> Result<BatchKey<O::Response>, OperationError>
     where
-        O: Operation<Ready, Kind = K> + 'static,
+        O: Operation<Kind = K> + 'static,
         O::Response: 'static,
+        Client<Ready>: Resolve<O::Target>,
     {
+        let resolved = self.executor.client().resolve(operation.encode()?)?;
+        self.executor
+            .validate_user_session(resolved.required_user_session)?;
         let key = BatchKey {
             identity: Arc::clone(&self.identity),
-            index: self.operations.len(),
+            index: self.entries.len(),
             response: PhantomData::<fn() -> O::Response>,
         };
-        self.operations.push(Box::new(operation));
-        key
+        if let Some(required) = resolved.required_user_session {
+            self.required_user_session = Some(required);
+        }
+        self.entries.push(BatchEntry {
+            operation: Box::new(operation),
+            request: resolved.request,
+            context: resolved.context,
+        });
+        Ok(key)
     }
-}
 
-impl<K> Operation<Ready> for BatchOperation<K>
-where
-    K: OperationKind,
-{
-    type Response = BatchResponses;
-    type Kind = K;
-
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        if self.operations.is_empty() {
+    fn encode(&self) -> Result<EncodedOperation<Advertised>, EncodeError> {
+        if self.entries.is_empty() {
             return Err(BatchError::Empty.into());
         }
 
-        let mut requests = Vec::with_capacity(self.operations.len());
-        let mut targets = Vec::with_capacity(self.operations.len());
-        let mut required_user_session = None;
-        for operation in &self.operations {
-            let request = operation.request(client)?;
-            if let Some(required) = request.required_user_session() {
-                if required_user_session.is_some_and(|current| current != required) {
-                    return Err(OperationError::UserSessionMismatch);
-                }
-                required_user_session = Some(required);
-            }
-            targets.push(request.target().clone());
-            requests.push(request);
-        }
-
-        let boundary = format!("batch_{}", Uuid::new_v4());
-        let mut request = AdtRequest::new(Method::POST, self.endpoint.clone());
+        let (content_type, body) =
+            encode_batch_body(self.entries.iter().map(|entry| &entry.request));
+        let mut request = CollectionTarget::core(BATCH_CATEGORY).operation(Method::POST);
         request.set_accept(BATCH_MEDIA_TYPE);
-        request.headers_mut().insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_str(&format!("{BATCH_MEDIA_TYPE}; boundary={boundary}"))
-                .expect("a UUID batch boundary is a valid Content-Type parameter"),
-        );
-        let closing_boundary = format!("--{boundary}--");
-        request.set_body(
-            requests
-                .iter()
-                .flat_map(|request| request.format_batch_part(&boundary))
-                .chain(closing_boundary.bytes())
-                .collect::<Vec<_>>(),
-        );
-        request.set_response_context_targets(targets);
-        if let Some(required) = required_user_session {
+        request
+            .headers_mut()
+            .insert(header::CONTENT_TYPE, content_type);
+        request.set_body(body);
+        if let Some(required) = self.required_user_session {
             request.require_user_session(required);
         }
         Ok(request)
     }
 
-    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+    fn decode(&self, response: OperationResponse) -> Result<BatchResponses, ResponseError> {
         response.require_status(StatusCode::ACCEPTED)?;
         let user_session = response.user_session();
-        let (response, context) = response.into_context_parts();
+        let (response, _) = response.into_parts();
 
         let boundary = response_boundary(response.headers())?;
         let responses = decode_batch(response.body(), &boundary)?;
-        let targets = context.related_request_targets();
-        if targets.len() != self.operations.len() {
-            return Err(BatchError::RequestContextCount {
-                expected: self.operations.len(),
-                actual: targets.len(),
-            }
-            .into());
-        }
-        if responses.len() != self.operations.len() {
+        if responses.len() != self.entries.len() {
             return Err(BatchError::ResponseCount {
-                expected: self.operations.len(),
+                expected: self.entries.len(),
                 actual: responses.len(),
             }
             .into());
         }
 
         let slots = self
-            .operations
+            .entries
             .iter()
-            .zip(targets.iter().cloned())
             .zip(responses)
-            .map(|((operation, target), response)| {
-                let response = OperationResponse::new(response, target);
+            .map(|(entry, response)| {
+                let response = OperationResponse::with_context(response, entry.context.clone());
                 let response = match user_session {
                     Some(user_session) => response.in_user_session(user_session),
                     None => response,
                 };
-                operation.decode(response)
+                entry.operation.decode(response)
             })
             .map(Some)
             .collect();
@@ -216,6 +223,35 @@ where
             slots,
         })
     }
+
+    /// Sends this batch through the client or user session that created it.
+    ///
+    /// The outer batch endpoint is resolved for each execution. This permits a
+    /// prepared batch to be reused while retaining stateful session cookies.
+    pub async fn execute(&self) -> Result<BatchResponses, OperationError> {
+        let encoded = self.encode()?;
+        let resolved = self.executor.client().resolve(encoded)?;
+        let response = match &self.executor {
+            BoundExecutor::Client(client) => client.execute_resolved(resolved).await?,
+            BoundExecutor::UserSession(session) => session.execute_resolved(resolved).await?,
+        };
+        Ok(self.decode(response)?)
+    }
+}
+
+fn encode_batch_body<'a>(
+    requests: impl IntoIterator<Item = &'a AdtRequest>,
+) -> (HeaderValue, Vec<u8>) {
+    let boundary = format!("batch_{}", Uuid::new_v4());
+    let content_type = HeaderValue::from_str(&format!("{BATCH_MEDIA_TYPE}; boundary={boundary}"))
+        .expect("a UUID batch boundary is a valid Content-Type parameter");
+    let closing_boundary = format!("--{boundary}--");
+    let body = requests
+        .into_iter()
+        .flat_map(|request| request.format_batch_part(&boundary))
+        .chain(closing_boundary.bytes())
+        .collect();
+    (content_type, body)
 }
 
 /// A typed reference to one response slot in a batch.
@@ -286,21 +322,21 @@ impl BatchResponses {
 ///
 /// This is needed so we can treat both, a [`UserSession`] and [`Client`] as
 /// capable of creating a batch for their associated statefulness.
-trait CreateBatch<K>: Execute<Ready, BatchOperation<K>>
+trait CreateBatch<K>: Sync
 where
     K: OperationKind,
 {
-    fn create_batch(&self) -> Result<BatchOperation<K>, OperationError>;
+    fn create_batch(&self) -> BatchOperation<'_, K>;
 }
 
 impl CreateBatch<Stateless> for Client<Ready> {
-    fn create_batch(&self) -> Result<BatchOperation<Stateless>, OperationError> {
+    fn create_batch(&self) -> BatchOperation<'_, Stateless> {
         Client::batch(self)
     }
 }
 
 impl CreateBatch<Stateful> for UserSession<Ready> {
-    fn create_batch(&self) -> Result<BatchOperation<Stateful>, OperationError> {
+    fn create_batch(&self) -> BatchOperation<'_, Stateful> {
         UserSession::batch(self)
     }
 }
@@ -325,23 +361,29 @@ pub trait Batched<E> {
 impl<I, E> Batched<E> for I
 where
     I: IntoIterator + Send,
-    I::Item: Operation<Ready> + 'static,
-    <I::Item as Operation<Ready>>::Response: 'static,
-    E: CreateBatch<<I::Item as Operation<Ready>>::Kind>,
+    I::Item: Operation + 'static,
+    <I::Item as Operation>::Response: 'static,
+    E: CreateBatch<<I::Item as Operation>::Kind>,
+    Client<Ready>: Resolve<<I::Item as Operation>::Target>,
 {
-    type Response = <I::Item as Operation<Ready>>::Response;
+    type Response = <I::Item as Operation>::Response;
 
     /// This is the main boilerplate this function saves us from writing
     async fn batched(self, executor: &E) -> Result<Vec<Self::Response>, OperationError> {
-        let mut batch = executor.create_batch()?;
+        let mut batch = executor.create_batch();
         let keys = self
             .into_iter()
             .map(|operation| batch.push(operation))
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
 
-        let mut responses = batch.execute(executor).await?;
+        let mut responses = batch.execute().await?;
         keys.into_iter()
-            .map(|key| responses.take(key).map_err(Into::into))
+            .map(|key| {
+                responses
+                    .take(key)
+                    .map_err(ResponseError::from)
+                    .map_err(OperationError::from)
+            })
             .collect()
     }
 }
@@ -370,9 +412,6 @@ pub enum BatchError {
 
     #[error("invalid multipart batch response part {index}: {reason}")]
     InvalidPart { index: usize, reason: String },
-
-    #[error("batch request context retained {actual} targets for {expected} operations")]
-    RequestContextCount { expected: usize, actual: usize },
 
     #[error("batch returned {actual} response parts for {expected} operations")]
     ResponseCount { expected: usize, actual: usize },
@@ -592,7 +631,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        Ready, Stateful, Stateless, Transport, TransportError, api::discovery::parse_capabilities,
+        AdtUri, Owned, Ready, ResolveError, Stateful, Stateless, Transport, TransportError,
+        api::discovery::parse_capabilities,
     };
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
@@ -601,13 +641,16 @@ mod tests {
 
     struct TextOperation;
 
-    impl Operation<Ready> for TextOperation {
+    impl Operation for TextOperation {
         type Response = String;
         type Kind = Stateless;
+        type Target = Owned;
 
-        fn request(&self, _client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-            let mut request =
-                AdtRequest::new(Method::GET, AdtUri::parse("/sap/bc/adt/test/text").unwrap());
+        fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+            let mut request = EncodedOperation::owned(
+                Method::GET,
+                AdtUri::parse("/sap/bc/adt/test/text").unwrap(),
+            );
             request.push_query("name", "hello world");
             request
                 .headers_mut()
@@ -623,12 +666,13 @@ mod tests {
 
     struct CountOperation;
 
-    impl Operation<Ready> for CountOperation {
+    impl Operation for CountOperation {
         type Response = usize;
         type Kind = Stateless;
+        type Target = Owned;
 
-        fn request(&self, _client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-            Ok(AdtRequest::new(
+        fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+            Ok(EncodedOperation::owned(
                 Method::GET,
                 AdtUri::parse("/sap/bc/adt/test/count").unwrap(),
             ))
@@ -641,14 +685,35 @@ mod tests {
         }
     }
 
+    struct MissingAdvertisedOperation;
+
+    impl Operation for MissingAdvertisedOperation {
+        type Response = ();
+        type Kind = Stateless;
+        type Target = Advertised;
+
+        fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+            Ok(CollectionTarget::new(CategoryId {
+                scheme: "https://example.test/categories",
+                term: "missing",
+            })
+            .operation(Method::GET))
+        }
+
+        fn decode(&self, _response: OperationResponse) -> Result<Self::Response, ResponseError> {
+            Ok(())
+        }
+    }
+
     struct StatefulTextOperation;
 
-    impl Operation<Ready> for StatefulTextOperation {
+    impl Operation for StatefulTextOperation {
         type Response = String;
         type Kind = Stateful;
+        type Target = Owned;
 
-        fn request(&self, _client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-            Ok(AdtRequest::new(
+        fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+            Ok(EncodedOperation::owned(
                 Method::GET,
                 AdtUri::parse("/sap/bc/adt/test/stateful").unwrap(),
             ))
@@ -661,12 +726,13 @@ mod tests {
 
     struct SessionBoundOperation(super::super::UserSessionId);
 
-    impl Operation<Ready> for SessionBoundOperation {
+    impl Operation for SessionBoundOperation {
         type Response = ();
         type Kind = Stateful;
+        type Target = Owned;
 
-        fn request(&self, _client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-            let mut request = AdtRequest::new(
+        fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+            let mut request = EncodedOperation::owned(
                 Method::PUT,
                 AdtUri::parse("/sap/bc/adt/test/session-bound").unwrap(),
             );
@@ -755,11 +821,11 @@ mod tests {
             ("hello", StatusCode::OK),
             ("42", StatusCode::OK),
         ])]);
-        let mut batch = client.batch().unwrap();
-        let text = batch.push(TextOperation);
-        let count = batch.push(CountOperation);
+        let mut batch = client.batch();
+        let text = batch.push(TextOperation).unwrap();
+        let count = batch.push(CountOperation).unwrap();
 
-        let mut responses = batch.execute(&client).await.unwrap();
+        let mut responses = batch.execute().await.unwrap();
 
         assert_eq!(responses.len(), 2);
         assert_eq!(responses.take(text).unwrap(), "hello");
@@ -768,7 +834,7 @@ mod tests {
         let requests = requests.lock().unwrap();
         let request = &requests[0];
         assert_eq!(request.method(), Method::POST);
-        assert_eq!(request.target(), batch.endpoint());
+        assert_eq!(request.target().as_str(), "/sap/bc/adt/communication/batch");
         assert_eq!(
             request.headers().get(header::ACCEPT).unwrap(),
             BATCH_MEDIA_TYPE
@@ -781,6 +847,25 @@ mod tests {
         assert!(body.contains("accept:text/plain\r\n\r\n"));
         assert!(body.contains("GET /sap/bc/adt/test/count HTTP/1.1\r\n\r\n"));
         assert!(body.ends_with(&format!("--{boundary}--")));
+    }
+
+    #[test]
+    fn push_resolves_an_operation_before_transport() {
+        let (client, requests) = fixture_client(Vec::new());
+        let mut batch = client.batch();
+
+        let Err(error) = batch.push(MissingAdvertisedOperation) else {
+            panic!("operation with a missing advertised target was accepted");
+        };
+
+        assert!(matches!(
+            error,
+            OperationError::Resolve(ResolveError::Compatibility(
+                crate::CompatibilityError::MissingCollection(_)
+            ))
+        ));
+        assert!(batch.is_empty());
+        assert!(requests.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -837,27 +922,33 @@ content-type:application/xml\r\n\r\n\
     #[tokio::test]
     async fn rejects_an_empty_batch_before_transport() {
         let (client, requests) = fixture_client(Vec::new());
-        let batch = client.batch().unwrap();
+        let batch = client.batch();
 
-        let Err(error) = batch.execute(&client).await else {
+        let Err(error) = batch.execute().await else {
             panic!("empty batch succeeded");
         };
 
-        assert!(matches!(error, OperationError::Batch(BatchError::Empty)));
+        assert!(matches!(
+            error,
+            OperationError::Encode(EncodeError::Batch(BatchError::Empty))
+        ));
         assert!(requests.lock().unwrap().is_empty());
     }
 
     #[test]
-    fn rejects_operations_bound_to_different_user_sessions() {
+    fn rejects_an_operation_bound_to_a_different_user_session_during_push() {
         let (client, _) = fixture_client(Vec::new());
-        let mut batch = BatchOperation::<Stateful>::new(&client).unwrap();
-        batch.push(SessionBoundOperation(super::super::UserSessionId::new()));
-        batch.push(SessionBoundOperation(super::super::UserSessionId::new()));
+        let session = client.create_user_session();
+        let mut batch = session.batch();
 
-        let error =
-            <BatchOperation<Stateful> as Operation<Ready>>::request(&batch, &client).unwrap_err();
+        let Err(error) = batch.push(SessionBoundOperation(UserSessionId::generate())) else {
+            panic!("operation bound to a different user session was accepted");
+        };
 
-        assert!(matches!(error, OperationError::UserSessionMismatch));
+        assert!(matches!(
+            error,
+            OperationError::Resolve(ResolveError::UserSessionMismatch)
+        ));
     }
 
     #[tokio::test]
@@ -866,11 +957,11 @@ content-type:application/xml\r\n\r\n\
             ("missing", StatusCode::NOT_FOUND),
             ("7", StatusCode::OK),
         ])]);
-        let mut batch = client.batch().unwrap();
-        let failed = batch.push(TextOperation);
-        let successful = batch.push(CountOperation);
+        let mut batch = client.batch();
+        let failed = batch.push(TextOperation).unwrap();
+        let successful = batch.push(CountOperation).unwrap();
 
-        let mut responses = batch.execute(&client).await.unwrap();
+        let mut responses = batch.execute().await.unwrap();
 
         assert!(matches!(
             responses.take(failed),
@@ -882,11 +973,11 @@ content-type:application/xml\r\n\r\n\
     #[tokio::test]
     async fn rejects_wrong_response_count() {
         let (client, _) = fixture_client(vec![fixture_response(&[("hello", StatusCode::OK)])]);
-        let mut batch = client.batch().unwrap();
-        batch.push(TextOperation);
-        batch.push(CountOperation);
+        let mut batch = client.batch();
+        batch.push(TextOperation).unwrap();
+        batch.push(CountOperation).unwrap();
 
-        let Err(error) = batch.execute(&client).await else {
+        let Err(error) = batch.execute().await else {
             panic!("batch with a missing response part succeeded");
         };
 
@@ -902,11 +993,11 @@ content-type:application/xml\r\n\r\n\
     #[tokio::test]
     async fn rejects_response_keys_from_another_batch() {
         let (client, _) = fixture_client(vec![fixture_response(&[("hello", StatusCode::OK)])]);
-        let mut batch = client.batch().unwrap();
-        let text = batch.push(TextOperation);
-        let mut other = client.batch().unwrap();
-        let foreign = other.push(TextOperation);
-        let mut responses = batch.execute(&client).await.unwrap();
+        let mut batch = client.batch();
+        let text = batch.push(TextOperation).unwrap();
+        let mut other = client.batch();
+        let foreign = other.push(TextOperation).unwrap();
+        let mut responses = batch.execute().await.unwrap();
 
         assert!(matches!(
             responses.take(foreign),
@@ -927,12 +1018,12 @@ content-type:application/xml\r\n\r\n\
         let second_response = fixture_response(&[("second", StatusCode::OK)]);
         let (client, requests) = fixture_client(vec![first_response, second_response]);
         let session = client.create_user_session();
-        let mut batch = session.batch().unwrap();
-        let first = batch.push(StatefulTextOperation);
+        let mut batch = session.batch();
+        let first = batch.push(StatefulTextOperation).unwrap();
 
-        let mut responses = batch.execute(&session).await.unwrap();
+        let mut responses = batch.execute().await.unwrap();
         assert_eq!(responses.take(first).unwrap(), "first");
-        batch.execute(&session).await.unwrap();
+        batch.execute().await.unwrap();
 
         let requests = requests.lock().unwrap();
         assert_eq!(

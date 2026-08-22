@@ -414,7 +414,7 @@ mod test_support {
     use http::{HeaderMap, StatusCode};
     use zadt::{
         AdtResponse, AdtUri, AnyObject, Object, ObjectPropertiesQuery, ObjectRef, ObjectType,
-        Operation, OperationResponse, Ready, RepositoryContentQuery, RepositoryObjectEntry,
+        Operation, OperationResponse, RepositoryContentQuery, RepositoryObjectEntry,
     };
 
     pub fn repository_entry(name: &str, object_type: &str, uri: &str) -> RepositoryObjectEntry {
@@ -428,7 +428,7 @@ mod test_support {
         let target =
             AdtUri::parse("/sap/bc/adt/repository/informationsystem/virtualfolders/contents")
                 .unwrap();
-        let mut content = <RepositoryContentQuery as Operation<Ready>>::decode(
+        let mut content = <RepositoryContentQuery as Operation>::decode(
             &RepositoryContentQuery::new(),
             OperationResponse::new(response, target),
         )
@@ -457,7 +457,7 @@ mod test_support {
         let response = AdtResponse::new(StatusCode::OK, headers, body.to_vec());
         let target = reference.uri().clone();
         let query = reference.query();
-        <ObjectPropertiesQuery<T> as Operation<Ready>>::decode(
+        <ObjectPropertiesQuery<T> as Operation>::decode(
             &query,
             OperationResponse::new(response, target),
         )
@@ -480,7 +480,7 @@ mod test_support {
         headers.insert(http::header::ETAG, etag.parse().unwrap());
         let response = AdtResponse::new(StatusCode::OK, headers, body.to_vec());
         let target = reference.uri().clone();
-        <ObjectPropertiesQuery<()> as Operation<Ready>>::decode(
+        <ObjectPropertiesQuery<()> as Operation>::decode(
             &query,
             OperationResponse::new(response, target),
         )

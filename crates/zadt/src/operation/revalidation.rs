@@ -3,7 +3,7 @@
 use http::StatusCode;
 
 use super::{Operation, OperationResponse};
-use crate::{AdtRequest, Client, ClientState, EntityTag, OperationError, ResponseError};
+use crate::{EncodeError, EncodedOperation, EntityTag, ResponseError};
 
 /// The outcome of a request using a cache validator such as `If-None-Match`.
 #[derive(Clone, Debug)]
@@ -28,16 +28,16 @@ impl<O> IfNoneMatch<O> {
     }
 }
 
-impl<S, O> Operation<S> for IfNoneMatch<O>
+impl<O> Operation for IfNoneMatch<O>
 where
-    S: ClientState,
-    O: Operation<S>,
+    O: Operation,
 {
     type Response = Revalidation<O::Response>;
     type Kind = O::Kind;
+    type Target = O::Target;
 
-    fn request(&self, client: &Client<S>) -> Result<AdtRequest, OperationError> {
-        let mut request = self.inner.request(client)?;
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        let mut request = self.inner.encode()?;
         request.set_cache_revalidation(Some(&self.etag));
         Ok(request)
     }

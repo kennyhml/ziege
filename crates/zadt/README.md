@@ -111,6 +111,7 @@ flowchart TB
     subgraph EXECUTION["Shared execution layer"]
         direction LR
         EXECUTOR["Client or UserSession"]
+        ENCODED["EncodedOperation&lt;Owned / Advertised&gt;"]
         REQUEST["AdtRequest"]
         TRANSPORT["Transport"]
         SAP["SAP ADT API"]
@@ -131,15 +132,16 @@ flowchart TB
     REGISTRY -->|selected by Workbench type| RUNTIME_CALL
     DESCRIPTOR -->|forwards to static trait implementations| CAPABILITIES
 
-    TYPED_CALL --> LOGIC["Shared monomorphized logic<br>request construction<br>XML / JSON conversion<br>response decoding"]
+    TYPED_CALL --> LOGIC["Shared monomorphized logic<br>operation encoding<br>XML / JSON conversion<br>response decoding"]
     RUNTIME_CALL -->|vtable forwards with T = Class| LOGIC
     LOGIC -->|typed caller preserves T| TYPED_OBJECT
     LOGIC -->|descriptor erases properties| RUNTIME_OBJECT
 
-    REQUEST --> EXECUTOR
-    EXECUTOR --> TRANSPORT
+    ENCODED --> EXECUTOR
+    EXECUTOR -->|resolves target| REQUEST
+    REQUEST --> TRANSPORT
     TRANSPORT --> SAP
-    LOGIC --> REQUEST
+    LOGIC --> ENCODED
 
     DECLARATION@{ shape: event }
     FAMILY@{ shape: rounded }
@@ -154,7 +156,7 @@ flowchart TB
     class DECLARATION declaration
     class FAMILY,UPDATE,RUN accent
     class CREATE,SOURCE,IDENTITY,CAPABILITIES,TYPED_CALL,DESCRIPTOR,REGISTRY,RUNTIME_CALL node
-    class TYPED_OBJECT,RUNTIME_OBJECT,LOGIC,REQUEST,EXECUTOR,TRANSPORT muted
+    class TYPED_OBJECT,RUNTIME_OBJECT,LOGIC,ENCODED,REQUEST,EXECUTOR,TRANSPORT muted
     class SAP backend
 
     style DEFINITION fill:#f8fafc,stroke:#cbd5e1,color:#334155

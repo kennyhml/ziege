@@ -8,9 +8,8 @@ use super::{
 };
 use crate::{
     CategoryId,
-    error::{ObjectError, OperationError, ResponseError},
-    operation::{Operation, OperationResponse},
-    protocol::AdtRequest,
+    error::{EncodeError, ObjectError, ResponseError},
+    operation::{EncodedOperation, Operation, OperationResponse, Owned},
 };
 
 /// Runtime capabilities for one modeled ADT object type.
@@ -52,7 +51,7 @@ pub(crate) trait RuntimeObjectTypeDescriptor: std::fmt::Debug + Sync {
         &self,
         object: &ObjectRef<()>,
         version: Option<ObjectVersion>,
-    ) -> Result<AdtRequest, OperationError>;
+    ) -> Result<EncodedOperation<Owned>, EncodeError>;
 
     fn properties_to_json(
         &self,
@@ -186,7 +185,7 @@ where
         &self,
         object: &ObjectRef<()>,
         version: Option<ObjectVersion>,
-    ) -> Result<AdtRequest, OperationError> {
+    ) -> Result<EncodedOperation<Owned>, EncodeError> {
         if object.object_type() != &T::WORKBENCH_TYPE {
             return Err(ObjectError::UnexpectedObjectType {
                 expected: T::WORKBENCH_TYPE,
@@ -194,7 +193,7 @@ where
             }
             .into());
         }
-        let mut request = AdtRequest::new(Method::GET, object.uri().clone());
+        let mut request = EncodedOperation::owned(Method::GET, object.uri().clone());
         if let Some(version) = version {
             request.push_query(ObjectVersion::QUERY_PARAMETER, version.as_str());
         }

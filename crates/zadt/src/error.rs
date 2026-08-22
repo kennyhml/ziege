@@ -424,9 +424,27 @@ impl ResponseError {
     }
 }
 
+/// An error encoding an operation into its transport-neutral representation.
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum OperationError {
+pub enum EncodeError {
+    #[error(transparent)]
+    Batch(#[from] BatchError),
+
+    #[error(transparent)]
+    Object(#[from] ObjectError),
+
+    #[error(transparent)]
+    Repository(#[from] RepositoryError),
+
+    #[error(transparent)]
+    Cts(#[from] CtsError),
+}
+
+/// An error resolving an encoded operation against client capabilities.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum ResolveError {
     #[error("operation uses a lock acquired by another user session")]
     UserSessionMismatch,
 
@@ -434,22 +452,23 @@ pub enum OperationError {
     Compatibility(#[from] CompatibilityError),
 
     #[error(transparent)]
-    Batch(#[from] BatchError),
+    Object(#[from] ObjectError),
+}
+
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum OperationError {
+    #[error(transparent)]
+    Encode(#[from] EncodeError),
+
+    #[error(transparent)]
+    Resolve(#[from] ResolveError),
 
     #[error(transparent)]
     Transport(#[from] TransportError),
 
     #[error(transparent)]
-    Object(#[from] ObjectError),
-
-    #[error(transparent)]
     Response(#[from] ResponseError),
-
-    #[error(transparent)]
-    Repository(#[from] RepositoryError),
-
-    #[error(transparent)]
-    Cts(#[from] CtsError),
 }
 
 /// An error produced while carrying a request through a transport.

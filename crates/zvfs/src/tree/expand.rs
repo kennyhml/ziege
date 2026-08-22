@@ -5,9 +5,9 @@ use std::{cmp::Ordering, sync::Arc};
 use async_lock::MutexGuardArc;
 use futures_util::future::try_join_all;
 use zadt::{
-    BatchKey, Batched, Client, Operation, Package, Ready, RepositoryContent,
-    RepositoryContentOperation, RepositoryContentQuery, RepositoryFacet, RepositoryObjectEntry,
-    RepositoryPreselection, RepositoryVirtualFolder,
+    BatchKey, Batched, Client, CompatibilityError, Operation, OperationError, Package, Ready,
+    RepositoryContent, RepositoryContentOperation, RepositoryContentQuery, RepositoryFacet,
+    RepositoryObjectEntry, RepositoryPreselection, RepositoryVirtualFolder, ResolveError,
 };
 
 use super::VirtualRepositoryTree;
@@ -722,8 +722,14 @@ impl VirtualRepositoryTree {
         &self,
         requests: Vec<RepositoryContentQuery>,
     ) -> Result<Vec<RepositoryContent>, VfsError> {
-        if requests.len() > 1 && self.inner.client.batch().is_ok() {
-            return Ok(requests.batched(&self.inner.client).await?);
+        if requests.len() > 1 {
+            match requests.clone().batched(&self.inner.client).await {
+                Ok(responses) => return Ok(responses),
+                Err(OperationError::Resolve(ResolveError::Compatibility(
+                    CompatibilityError::MissingCollection(_),
+                ))) => {}
+                Err(error) => return Err(error.into()),
+            }
         }
 
         // Fall back to sequential requests if batching it not supported
@@ -774,9 +780,7 @@ impl VirtualRepositoryTree {
         }
 
         while !pending.is_empty() {
-            let Ok(mut batch) = self.inner.client.batch() else {
-                return;
-            };
+            let mut batch = self.inner.client.batch();
             let mut routes: Vec<(usize, usize, BatchKey<RepositoryContent>)> = Vec::new();
             let mut failed = vec![false; pending.len()];
 
@@ -784,7 +788,10 @@ impl VirtualRepositoryTree {
                 for (expansion_index, expansion) in preload.expansions.iter().enumerate() {
                     match expansion.request() {
                         Ok(request) => {
-                            routes.push((index, expansion_index, batch.push(request)));
+                            let Ok(key) = batch.push(request) else {
+                                return;
+                            };
+                            routes.push((index, expansion_index, key));
                         }
                         Err(_) => failed[index] = true,
                     }
@@ -794,7 +801,7 @@ impl VirtualRepositoryTree {
             if routes.is_empty() {
                 return;
             }
-            let Ok(mut batch_responses) = batch.execute(&self.inner.client).await else {
+            let Ok(mut batch_responses) = batch.execute().await else {
                 return;
             };
             let mut responses = pending

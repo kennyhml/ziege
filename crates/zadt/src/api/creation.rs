@@ -1,8 +1,8 @@
 use http::Method;
 
 use crate::{
-    AdtRequest, AnyObject, CategoryId, Client, Object, ObjectError, ObjectRef, Operation,
-    OperationError, OperationResponse, PropertyModel, Ready, ResponseError, Stateless,
+    Advertised, AnyObject, CategoryId, EncodeError, EncodedOperation, Object, ObjectError,
+    ObjectRef, Operation, OperationResponse, PropertyModel, ResponseError, Stateless,
     TransportNumber,
     objects::{Create, CreationPropertyModel},
     operation::CollectionTarget,
@@ -40,12 +40,10 @@ impl<T, P> CreateObjectRequest<T, P> {
     /// Creates the request and attaches the normalized body bytes.
     fn build_request(
         &self,
-        client: &Client<Ready>,
         object_category: CategoryId,
         body: Vec<u8>,
-    ) -> Result<AdtRequest, OperationError> {
-        let target = CollectionTarget::new(object_category);
-        let mut request = target.request(client, Method::POST)?;
+    ) -> Result<EncodedOperation<Advertised>, EncodeError> {
+        let mut request = CollectionTarget::new(object_category).operation(Method::POST);
         request.set_content_type(self.media_type);
         request.set_body(body);
         if let Some(transport) = &self.transport_request {
@@ -56,20 +54,17 @@ impl<T, P> CreateObjectRequest<T, P> {
 }
 
 /// Implementation for typed objects
-impl<T, P> Operation<Ready> for CreateObjectRequest<T, P>
+impl<T, P> Operation for CreateObjectRequest<T, P>
 where
     T: Create<CreateProperties = P>,
     P: PropertyModel,
 {
     type Kind = Stateless;
     type Response = Option<Object<T>>;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
-        self.build_request(
-            client,
-            T::CATEGORY,
-            self.payload.to_xml_for(&self.reference)?,
-        )
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        self.build_request(T::CATEGORY, self.payload.to_xml_for(&self.reference)?)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
@@ -82,14 +77,14 @@ where
 }
 
 /// Implementation for runtime-typed objects.
-impl Operation<Ready> for CreateObjectRequest<(), serde_json::Value> {
+impl Operation for CreateObjectRequest<(), serde_json::Value> {
     type Kind = Stateless;
     type Response = Option<AnyObject>;
+    type Target = Advertised;
 
-    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
         let descriptor = self.reference.require_descriptor()?;
         self.build_request(
-            client,
             descriptor.category(),
             descriptor.creation_properties_to_xml(&self.reference, self.payload.clone())?,
         )
@@ -167,35 +162,15 @@ impl ObjectRef<()> {
 
 #[cfg(test)]
 mod tests {
-    use async_trait::async_trait;
     use http::{HeaderMap, HeaderValue, StatusCode, header};
 
     use super::*;
     use crate::{
         AbapLanguageVersion, AdtResponse, AdtUri, AdvertisedObjectReference, Class, ClassCategory,
         ClassCreateProperties, ClassPropertiesVersion, ClassTemplate, ObjectType, Package,
-        Transport, api::discovery::parse_capabilities,
     };
 
-    const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
-    const CORE_DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/core-discovery.xml");
     const CLASS_XML: &[u8] = include_bytes!("../../tests/fixtures/class-cl-adt-uri-mapper-v4.xml");
-
-    struct UnusedTransport;
-
-    #[async_trait]
-    impl Transport for UnusedTransport {
-        async fn send(&self, _request: AdtRequest) -> Result<AdtResponse, crate::TransportError> {
-            unreachable!("request construction tests do not send requests")
-        }
-    }
-
-    fn client() -> Client<Ready> {
-        Client::new(UnusedTransport).with_capabilities(
-            parse_capabilities(DISCOVERY_XML).unwrap(),
-            parse_capabilities(CORE_DISCOVERY_XML).unwrap(),
-        )
-    }
 
     fn reference(name: &str) -> ObjectRef<Class> {
         ObjectRef::new(
@@ -230,11 +205,10 @@ mod tests {
         runtime_values.remove("@adtcore:type");
         let runtime = reference.erase().create(runtime_payload).unwrap();
 
-        let typed_request = typed.request(&client()).unwrap();
-        let runtime_request = runtime.request(&client()).unwrap();
+        let typed_request = typed.encode().unwrap();
+        let runtime_request = runtime.encode().unwrap();
 
         assert_eq!(typed_request.method(), Method::POST);
-        assert_eq!(typed_request.target().as_str(), "/sap/bc/adt/oo/classes");
         assert_eq!(
             typed_request.headers()[header::CONTENT_TYPE],
             ClassPropertiesVersion::V4.media_type()
@@ -273,8 +247,8 @@ mod tests {
             }))
             .unwrap();
 
-        let typed_request = typed.request(&client()).unwrap();
-        let runtime_request = runtime.request(&client()).unwrap();
+        let typed_request = typed.encode().unwrap();
+        let runtime_request = runtime.encode().unwrap();
 
         assert_eq!(runtime_request.body(), typed_request.body());
     }
@@ -285,7 +259,7 @@ mod tests {
         properties.name = "ZOTHER".to_owned();
         properties.object_type = Package::WORKBENCH_TYPE;
         let operation = reference("ZZZTEST").create(properties);
-        let request = operation.request(&client()).unwrap();
+        let request = operation.encode().unwrap();
         let body = std::str::from_utf8(request.body()).unwrap();
 
         assert!(body.contains("adtcore:name=\"ZZZTEST\""));
@@ -304,7 +278,7 @@ mod tests {
             .build()
             .unwrap();
         let operation = reference("ZZZTEST").create(properties);
-        let request = operation.request(&client()).unwrap();
+        let request = operation.encode().unwrap();
         let body = std::str::from_utf8(request.body()).unwrap();
 
         assert!(body.contains("adtcore:abapLanguageVersion=\"5\""));
@@ -334,7 +308,7 @@ mod tests {
             .build()
             .unwrap();
         let operation = reference("ZZZTEST").create(properties);
-        let request = operation.request(&client()).unwrap();
+        let request = operation.encode().unwrap();
         let body = std::str::from_utf8(request.body()).unwrap();
 
         assert!(
