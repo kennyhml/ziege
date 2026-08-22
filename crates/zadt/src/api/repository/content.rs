@@ -89,6 +89,13 @@ impl RepositoryContentQuery {
     }
 }
 
+impl Client<Ready> {
+    /// Creates a repository-content query matching all object names.
+    pub fn repository_content(&self) -> RepositoryContentQuery {
+        RepositoryContentQuery::new()
+    }
+}
+
 impl Operation<Ready> for RepositoryContentQuery {
     type Response = RepositoryContent;
     type Kind = Stateless;

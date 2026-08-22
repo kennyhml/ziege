@@ -2,10 +2,7 @@
 
 use httpmock::Mock;
 use httpmock::prelude::*;
-use zadt::{
-    Client, Logon, Operation, Package, PackagePropertiesVersion, PackageSettingsQuery, Ready,
-    ReqwestTransport,
-};
+use zadt::{Client, Operation, Package, PackagePropertiesVersion, Ready, ReqwestTransport};
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
 const CORE_DISCOVERY_XML: &str = include_str!("fixtures/core-discovery.xml");
@@ -56,7 +53,7 @@ async fn ready_client(server: &MockServer) -> Client<Ready> {
         .build()
         .unwrap();
     let client = Client::new(transport);
-    Logon.execute(&client).await.unwrap();
+    client.logon().execute(&client).await.unwrap();
     client.discover().await.unwrap()
 }
 
@@ -183,7 +180,7 @@ async fn package_settings_use_the_discovered_collection() {
         .await;
 
     let client = ready_client(&server).await;
-    let response = PackageSettingsQuery.execute(&client).await.unwrap();
+    let response = client.package_settings().execute(&client).await.unwrap();
 
     assert!(!response.show_package_check_errors);
     logon.assert_async().await;

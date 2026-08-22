@@ -1,9 +1,13 @@
+use std::collections::HashMap;
+
 use http::{Method, StatusCode};
 use serde::Deserialize;
+use stduritemplate::Value;
 
 use crate::{
     AdtRequest, CategoryId, Client, Operation, OperationError, OperationResponse, Ready,
-    ResponseError, Stateless, User, UserError, operation::CollectionTarget,
+    ResponseError, Stateless, User, UserError,
+    operation::{CollectionTarget, TemplateTarget},
 };
 
 const USERS_CATEGORY: CategoryId = CategoryId {
@@ -11,6 +15,7 @@ const USERS_CATEGORY: CategoryId = CategoryId {
     term: "users",
 };
 const USERS_MEDIA_TYPE: &str = "application/atom+xml;type=feed";
+const USER_RELATION: &str = "self";
 
 /// Queries users visible in the SAP system user directory.
 ///
@@ -63,6 +68,69 @@ impl Operation<Ready> for UsersQuery {
         response.require_status(StatusCode::OK)?;
         response.require_content_type(&[USERS_MEDIA_TYPE])?;
         Users::parse(response.body()).map_err(Into::into)
+    }
+}
+
+/// Loads one user from the SAP system user directory.
+#[derive(Clone, Debug)]
+pub struct UserDetailsQuery {
+    user: User,
+}
+
+impl UserDetailsQuery {
+    const TARGET: TemplateTarget = TemplateTarget::new(USERS_CATEGORY, USER_RELATION);
+
+    fn new(user: User) -> Self {
+        Self { user }
+    }
+}
+
+impl Operation<Ready> for UserDetailsQuery {
+    type Response = Option<User>;
+    type Kind = Stateless;
+
+    fn request(&self, client: &Client<Ready>) -> Result<AdtRequest, OperationError> {
+        let variables = HashMap::from([(
+            "username".to_owned(),
+            Value::String(self.user.as_str().to_owned()),
+        )]);
+        let (target, query) = Self::TARGET.template(client)?.expand(&variables)?;
+        let mut request = AdtRequest::new(Method::GET, target);
+        for (name, value) in query {
+            request.push_query(name, value);
+        }
+        request.set_accept(USERS_MEDIA_TYPE);
+        Ok(request)
+    }
+
+    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+        response.require_status(StatusCode::OK)?;
+        response.require_content_type(&[USERS_MEDIA_TYPE])?;
+        let mut users = Users::parse(response.body())?.users;
+        if users.len() > 1 {
+            return Err(UserError::MultipleUsers {
+                user: self.user.as_str().to_owned(),
+            }
+            .into());
+        }
+        let Some(user) = users.pop() else {
+            return Ok(None);
+        };
+        if user != self.user {
+            return Err(UserError::UnexpectedUser {
+                expected: self.user.as_str().to_owned(),
+                actual: user.as_str().to_owned(),
+            }
+            .into());
+        }
+        Ok(Some(user))
+    }
+}
+
+impl User {
+    /// Creates a query that loads this user's directory details.
+    pub fn details(&self) -> UserDetailsQuery {
+        UserDetailsQuery::new(self.clone())
     }
 }
 
@@ -132,6 +200,10 @@ mod tests {
                 <app:collection href="/sap/bc/adt/system/users">
                     <atom:category term="users"
                         scheme="http://www.sap.com/adt/categories/system/users" />
+                    <adtcomp:templateLinks xmlns:adtcomp="http://www.sap.com/adt/compatibility">
+                        <adtcomp:templateLink rel="self"
+                            template="/sap/bc/adt/system/users/{username}" />
+                    </adtcomp:templateLinks>
                 </app:collection>
             </app:workspace>
         </app:service>
@@ -207,5 +279,37 @@ mod tests {
         assert_eq!(users.users[0].display_name(), Some("John Doe"));
         assert_eq!(users.users[1].as_str(), "DDIC");
         assert_eq!(users.users[1].display_name(), Some("DDIC"));
+    }
+
+    #[test]
+    fn user_details_uses_the_advertised_self_template_and_decodes_one_user() {
+        let client = ready_client();
+        let query = User::new("DEVELOPER").details();
+        let request = query.request(&client).unwrap();
+        assert_eq!(
+            request.target().as_str(),
+            "/sap/bc/adt/system/users/DEVELOPER"
+        );
+
+        let mut headers = HeaderMap::new();
+        headers.insert(header::CONTENT_TYPE, USERS_MEDIA_TYPE.parse().unwrap());
+        let response = AdtResponse::new(
+            StatusCode::OK,
+            headers,
+            br#"<atom:feed xmlns:atom="http://www.w3.org/2005/Atom">
+                <atom:entry>
+                    <atom:id>DEVELOPER</atom:id>
+                    <atom:title>John Doe</atom:title>
+                </atom:entry>
+            </atom:feed>"#
+                .to_vec(),
+        );
+        let user = query
+            .decode(OperationResponse::new(response, request.target().clone()))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(user.as_str(), "DEVELOPER");
+        assert_eq!(user.display_name(), Some("John Doe"));
     }
 }

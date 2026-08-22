@@ -204,6 +204,13 @@ struct RawProperty {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Logon;
 
+impl<S: ClientState> Client<S> {
+    /// Creates an operation that establishes an HTTP security session.
+    pub fn logon(&self) -> Logon {
+        Logon
+    }
+}
+
 impl<S: ClientState> Operation<S> for Logon {
     type Response = SessionInformation;
     type Kind = Stateless;

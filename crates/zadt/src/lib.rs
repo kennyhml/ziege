@@ -57,7 +57,7 @@ pub use api::transports::{
     TransportRequests, TransportStatus, TransportTask, TransportsQuery, TransportsQueryBuilder,
     TransportsQueryBuilderError,
 };
-pub use api::users::{Users, UsersQuery};
+pub use api::users::{UserDetailsQuery, Users, UsersQuery};
 pub use client::{Client, ClientState, Initial, Ready};
 pub use compatibility::CompatibilityError;
 #[cfg(feature = "reqwest")]

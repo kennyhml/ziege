@@ -329,7 +329,7 @@ fn assigned_transports_request_and_response_match_the_ris_contract() {
 fn facets_request_uses_the_advertised_collection_target() {
     let client = ready_client(REPOSITORY_DISCOVERY_XML);
 
-    let request = RepositoryFacetsQuery.request(&client).unwrap();
+    let request = client.repository_facets().request(&client).unwrap();
 
     assert_eq!(
         request.target().as_str(),
@@ -346,7 +346,7 @@ fn repository_request_requires_its_discovery_collection() {
                 </app:service>"#,
     );
 
-    let error = RepositoryContentQuery::new().request(&client).unwrap_err();
+    let error = client.repository_content().request(&client).unwrap_err();
 
     assert!(matches!(
         error,

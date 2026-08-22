@@ -88,6 +88,12 @@ pub enum LogonError {
 pub enum UserError {
     #[error("invalid system users response: {0}")]
     InvalidResponse(#[from] serde_xml_rs::Error),
+
+    #[error("user lookup for `{expected}` returned `{actual}`")]
+    UnexpectedUser { expected: String, actual: String },
+
+    #[error("user lookup for `{user}` returned more than one user")]
+    MultipleUsers { user: String },
 }
 
 /// An error in a generic ADT object operation or representation.

@@ -318,6 +318,13 @@ impl Operation<Ready> for PackageTreeQuery {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PackageSettingsQuery;
 
+impl Client<Ready> {
+    /// Creates a query for the global package editor settings.
+    pub fn package_settings(&self) -> PackageSettingsQuery {
+        PackageSettingsQuery
+    }
+}
+
 impl Operation<Ready> for PackageSettingsQuery {
     type Response = PackageSettings;
     type Kind = Stateless;

@@ -44,6 +44,13 @@ impl CheckRunReportersQuery {
     }
 }
 
+impl Client<Ready> {
+    /// Creates a query for the check-run reporters advertised by the backend.
+    pub fn supported_reporters(&self) -> CheckRunReportersQuery {
+        CheckRunReportersQuery::new()
+    }
+}
+
 impl Operation<Ready> for CheckRunReportersQuery {
     type Kind = Stateless;
     type Response = SupportedCheckReporters;
@@ -481,8 +488,9 @@ mod tests {
 
     #[test]
     fn reporters_query_uses_the_discovered_contract_and_decodes_supported_types() {
-        let query = CheckRunReportersQuery::new();
-        let request = query.request(&ready_client()).unwrap();
+        let client = ready_client();
+        let query = client.supported_reporters();
+        let request = query.request(&client).unwrap();
 
         assert_eq!(request.method(), Method::GET);
         assert_eq!(request.target().as_str(), "/sap/bc/adt/checkruns/reporters");

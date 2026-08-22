@@ -2,8 +2,8 @@ use std::{env, error::Error, io};
 
 use tracing_subscriber::EnvFilter;
 use zadt::{
-    AdtUri, CheckRunArtifact, CheckRunObject, CheckRunReportersQuery, Client, ObjectCheckRun,
-    ObjectVersion, Operation, Program, ReqwestTransport, TransportExt,
+    AdtUri, CheckRunArtifact, CheckRunObject, Client, ObjectCheckRun, ObjectVersion, Operation,
+    Program, ReqwestTransport, TransportExt,
 };
 
 #[tokio::main]
@@ -36,7 +36,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let object = client.object::<Program>("ZZTFTFRT")?;
     let source_uri = AdtUri::parse(&format!("{}/source/main", object.uri()))?;
 
-    let reporters = CheckRunReportersQuery::new().execute(&client).await?;
+    let reporters = client.supported_reporters().execute(&client).await?;
     println!("{reporters:#?}");
 
     let mut run = ObjectCheckRun::new();

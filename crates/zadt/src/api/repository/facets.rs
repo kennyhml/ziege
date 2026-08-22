@@ -25,6 +25,13 @@ impl RepositoryFacetsQuery {
     });
 }
 
+impl Client<Ready> {
+    /// Creates a query for the facets supported by the repository information system.
+    pub fn repository_facets(&self) -> RepositoryFacetsQuery {
+        RepositoryFacetsQuery
+    }
+}
+
 impl Operation<Ready> for RepositoryFacetsQuery {
     type Response = RepositoryFacets;
     type Kind = Stateless;

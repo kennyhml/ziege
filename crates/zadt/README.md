@@ -32,18 +32,9 @@ let class = class.query().execute(&client).await?;
 let source = class.source()?.query().execute(&client).await?;
 ```
 
-System users are identity handles that can create user-scoped operations. A user
-loaded from the system directory also carries its display name:
-
-```rust,ignore
-let mut query = client.users();
-query.query("*DEV*").max_count(20);
-let users = query.execute(&client).await?;
-
-let user = &users.users[0];
-let transports = user.transports().execute(&client).await?;
-let favorites = user.favorites().execute(&client).await?;
-```
+ADT identities are represented as resource handles. Handles expose operations
+naturally associated with their context, while operation values remain independently
+composable and executable.
 
 `Class` is a nominal object-family marker. Loaded classes use `Object<Class>`, which
 contains `ClassProperties` and the response metadata. Static capabilities come from
