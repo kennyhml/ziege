@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<intf:abapInterface
+    abapoo:modeled="false"
+    abapsource:sourceUri="source/main"
+    abapsource:fixPointArithmetic="false"
+    abapsource:activeUnicodeCheck="true"
+    adtcore:responsible="SAP"
+    adtcore:masterLanguage="EN"
+    adtcore:masterSystem="SAP"
+    adtcore:abapLanguageVersion="X"
+    adtcore:name="IF_ADT_URI_MAPPER"
+    adtcore:type="INTF/OI"
+    adtcore:changedAt="2017-01-16T18:58:40Z"
+    adtcore:version="active"
+    adtcore:createdAt="2011-09-09T00:00:00Z"
+    adtcore:changedBy="SAP"
+    adtcore:createdBy="SAP"
+    adtcore:description="ADT URI Mapper"
+    adtcore:descriptionTextLimit="60"
+    adtcore:language="EN"
+    xmlns:intf="http://www.sap.com/adt/oo/interfaces"
+    xmlns:abapoo="http://www.sap.com/adt/oo"
+    xmlns:abapsource="http://www.sap.com/adt/abapsource"
+    xmlns:adtcore="http://www.sap.com/adt/core">
+    <atom:link
+        href="source/main/versions"
+        rel="http://www.sap.com/adt/relations/versions"
+        xmlns:atom="http://www.w3.org/2005/Atom" />
+    <atom:link
+        href="source/main"
+        rel="http://www.sap.com/adt/relations/source"
+        type="text/plain"
+        etag="201701161858400011"
+        xmlns:atom="http://www.w3.org/2005/Atom" />
+    <atom:link
+        href="source/main"
+        rel="http://www.sap.com/adt/relations/source"
+        type="text/html"
+        etag="201701161858400011"
+        xmlns:atom="http://www.w3.org/2005/Atom" />
+    <atom:link
+        href="objectstructure"
+        rel="http://www.sap.com/adt/relations/objectstructure"
+        type="application/vnd.sap.adt.objectstructure.v2+xml"
+        xmlns:atom="http://www.w3.org/2005/Atom" />
+    <atom:link
+        href="/sap/bc/adt/oo/interfaces/if_adt_uri_mapper/source/main?withAbapDocFromShortTexts=true"
+        rel="http://www.sap.com/adt/relations/sources/withabapdocfromshorttexts"
+        type="text/plain"
+        title="Source with ABAP Doc"
+        xmlns:atom="http://www.w3.org/2005/Atom" />
+    <atom:link
+        href="/sap/bc/adt/repository/informationsystem/abaplanguageversions?uri=%2Fsap%2Fbc%2Fadt%2Foo%2Finterfaces%2Fif_adt_uri_mapper"
+        rel="http://www.sap.com/adt/relations/informationsystem/abaplanguageversions"
+        type="application/vnd.sap.adt.nameditems.v1+xml"
+        title="Allowed ABAP language versions"
+        xmlns:atom="http://www.w3.org/2005/Atom" />
+    <adtcore:packageRef
+        adtcore:uri="/sap/bc/adt/packages/sadt_tools_core"
+        adtcore:type="DEVC/K"
+        adtcore:name="SADT_TOOLS_CORE" />
+    <abapsource:syntaxConfiguration>
+        <abapsource:language>
+            <abapsource:version>X</abapsource:version>
+            <abapsource:description>Standard ABAP</abapsource:description>
+            <atom:link
+                href="/sap/bc/adt/abapsource/parsers/rnd/grammar"
+                rel="http://www.sap.com/adt/relations/abapsource/parser"
+                type="text/plain"
+                title="Standard ABAP"
+                etag="757"
+                xmlns:atom="http://www.w3.org/2005/Atom" />
+        </abapsource:language>
+    </abapsource:syntaxConfiguration>
+</intf:abapInterface>

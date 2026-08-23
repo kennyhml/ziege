@@ -3,6 +3,7 @@ mod dcls;
 mod ddls;
 mod devc;
 mod dtel;
+mod intf;
 mod prog;
 
 pub use clas::{
@@ -26,6 +27,10 @@ pub use devc::{
 };
 pub use dtel::{
     DataElement, DataElementDefinition, DataElementProperties, DataElementPropertiesVersion,
+};
+pub use intf::{
+    Interface, InterfaceCreateProperties, InterfaceCreatePropertiesBuilder,
+    InterfaceCreatePropertiesBuilderError, InterfaceProperties, InterfacePropertiesVersion,
 };
 pub use prog::{
     Include, IncludeProperties, IncludePropertyVersion, Program, ProgramProperties,

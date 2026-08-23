@@ -79,11 +79,13 @@ pub use objects::{
     DataDefinitionCreatePropertiesBuilder, DataDefinitionCreatePropertiesBuilderError,
     DataDefinitionProperties, DataDefinitionPropertiesVersion, DataElement, DataElementDefinition,
     DataElementProperties, DataElementPropertiesVersion, GlobalWorkbenchType, Include,
-    IncludeProperties, IncludePropertyVersion, InvalidWorkbenchType, Object, ObjectRef,
-    ObjectReferences, ObjectType, ObjectVersion, Package, PackageAssignment, PackageAttributes,
-    PackageProperties, PackagePropertiesVersion, PackageTransport, PackageUseAccess, Program,
-    ProgramProperties, ProgramPropertiesVersion, PropertyModel, Source, SourceComponents,
-    Structure, SyntaxConfiguration, SyntaxLanguage, UpdateProperties,
+    IncludeProperties, IncludePropertyVersion, Interface, InterfaceCreateProperties,
+    InterfaceCreatePropertiesBuilder, InterfaceCreatePropertiesBuilderError, InterfaceProperties,
+    InterfacePropertiesVersion, InvalidWorkbenchType, Object, ObjectRef, ObjectReferences,
+    ObjectType, ObjectVersion, Package, PackageAssignment, PackageAttributes, PackageProperties,
+    PackagePropertiesVersion, PackageTransport, PackageUseAccess, Program, ProgramProperties,
+    ProgramPropertiesVersion, PropertyModel, Source, SourceComponents, Structure,
+    SyntaxConfiguration, SyntaxLanguage, UpdateProperties,
 };
 pub use operation::{
     Advertised, AdvertisedCollection, AdvertisedTarget, AdvertisedTemplate, BatchError, BatchKey,

@@ -4,7 +4,8 @@ use http::Method;
 
 use super::{
     AccessControl, AnyObject, Class, DataDefinition, DataElement, GlobalWorkbenchType, Include,
-    ObjectRef, ObjectType, ObjectVersion, Package, Program, PropertyModel, RunCapability,
+    Interface, ObjectRef, ObjectType, ObjectVersion, Package, Program, PropertyModel,
+    RunCapability,
 };
 use crate::{
     CategoryId,
@@ -249,6 +250,7 @@ static OBJECT_TYPES: &[&dyn RuntimeObjectTypeDescriptor] = &[
     DataElement::DESCRIPTOR,
     DataDefinition::DESCRIPTOR,
     AccessControl::DESCRIPTOR,
+    Interface::DESCRIPTOR,
 ];
 
 pub(crate) fn object_type_descriptor(

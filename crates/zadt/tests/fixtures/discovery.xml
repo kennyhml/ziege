@@ -73,6 +73,14 @@
                 term="classes"
                 scheme="http://www.sap.com/adt/categories/oo" />
         </app:collection>
+        <app:collection href="/sap/bc/adt/oo/interfaces">
+            <atom:title>Interfaces</atom:title>
+            <app:accept>application/vnd.sap.adt.oo.interfaces.v4+xml</app:accept>
+            <app:accept>application/vnd.sap.adt.oo.interfaces.v5+xml</app:accept>
+            <atom:category
+                term="interfaces"
+                scheme="http://www.sap.com/adt/categories/oo" />
+        </app:collection>
         <app:collection href="/sap/bc/adt/oo/classrun">
             <atom:title>Run a class</atom:title>
             <atom:category

@@ -26,9 +26,11 @@ pub use types::{
     DataDefinitionCreatePropertiesBuilder, DataDefinitionCreatePropertiesBuilderError,
     DataDefinitionProperties, DataDefinitionPropertiesVersion, DataElement, DataElementDefinition,
     DataElementProperties, DataElementPropertiesVersion, Include, IncludeProperties,
-    IncludePropertyVersion, Package, PackageAssignment, PackageAttributes, PackageProperties,
-    PackagePropertiesVersion, PackageTransport, PackageUseAccess, Program, ProgramProperties,
-    ProgramPropertiesVersion, SyntaxConfiguration, SyntaxLanguage,
+    IncludePropertyVersion, Interface, InterfaceCreateProperties, InterfaceCreatePropertiesBuilder,
+    InterfaceCreatePropertiesBuilderError, InterfaceProperties, InterfacePropertiesVersion,
+    Package, PackageAssignment, PackageAttributes, PackageProperties, PackagePropertiesVersion,
+    PackageTransport, PackageUseAccess, Program, ProgramProperties, ProgramPropertiesVersion,
+    SyntaxConfiguration, SyntaxLanguage,
 };
 pub use workbench::{
     AbapLanguageVersion, GlobalWorkbenchType, InvalidWorkbenchType, ObjectVersion,
