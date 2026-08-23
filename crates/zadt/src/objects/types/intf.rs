@@ -17,7 +17,6 @@ use crate::{
         Create(InterfaceCreateProperties, InterfacePropertiesVersion::V5),
         Source,
         Structure,
-        UpdateProperties,
     )
 )]
 /// A global ABAP interface.
@@ -146,28 +145,6 @@ pub struct InterfaceProperties {
     pub syntax_configuration: SyntaxConfiguration,
 }
 
-impl PropertyModel for InterfaceCreateProperties {
-    type Version = InterfacePropertiesVersion;
-
-    const SUPPORTED_VERSIONS: &'static [Self::Version] = &[InterfacePropertiesVersion::V5];
-    const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
-        ("intf", "http://www.sap.com/adt/oo/interfaces"),
-        ("adtcore", "http://www.sap.com/adt/core"),
-    ];
-
-    fn media_type(version: Self::Version) -> &'static str {
-        version.media_type()
-    }
-
-    fn object_name(&self) -> &str {
-        &self.name
-    }
-
-    fn object_type(&self) -> &GlobalWorkbenchType {
-        &self.object_type
-    }
-}
-
 impl PropertyModel for InterfaceProperties {
     type Version = InterfacePropertiesVersion;
 
@@ -211,7 +188,7 @@ impl Structure for Interface {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, ObjectRef, ObjectType, Operation, Structure, UpdateProperties};
+    use crate::{AdtUri, ObjectRef, ObjectType, Operation};
 
     const INTERFACE_XML: &str =
         include_str!("../../../tests/fixtures/interface-if-adt-uri-mapper-v5.xml");
@@ -308,9 +285,6 @@ mod tests {
 
     #[test]
     fn serializes_complete_properties_for_updates() {
-        fn assert_capabilities<T: Structure + UpdateProperties>() {}
-        assert_capabilities::<Interface>();
-
         let properties = properties();
         let object = ObjectRef::<Interface>::new(
             properties.name.clone(),

@@ -41,8 +41,7 @@ impl RunCapability {
 
 /// An object with a readable primary source resource.
 ///
-/// Usually, that source lives at `source/main`. Classes have multiple
-/// source components, but that is the exception.
+/// The source URI is resolved from the object's loaded properties.
 pub trait Source: ObjectType {
     #[doc(hidden)]
     fn source_uri(properties: &Self::Properties) -> Option<&str>;
@@ -157,24 +156,5 @@ pub trait Create: ObjectType {
             serde_json::from_value(properties).map_err(ObjectError::InvalidPropertiesJson)?;
         properties.set_identity(reference);
         properties.to_xml_for(reference)
-    }
-}
-
-/// Marks an object's properties as being updateable. The same payload
-/// is used for updating as is returned by the initial object query.
-///
-/// Note that this makes no promises about which fields on the properties
-/// can actually be changed effectively. ADT will simply disregard changes
-/// to fields that do not support modification through this API.
-#[doc(hidden)]
-pub trait UpdateProperties: ObjectType {
-    #[doc(hidden)]
-    fn properties_to_xml(
-        object: &ObjectRef<()>,
-        properties: serde_json::Value,
-    ) -> Result<Vec<u8>, ObjectError> {
-        let properties: Self::Properties =
-            serde_json::from_value(properties).map_err(ObjectError::InvalidPropertiesJson)?;
-        properties.to_xml_for(object)
     }
 }

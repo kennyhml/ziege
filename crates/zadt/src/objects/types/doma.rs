@@ -15,7 +15,6 @@ use crate::{
     ),
     capabilities(
         Create(DomainCreateProperties, DomainPropertiesVersion::V2),
-        UpdateProperties,
     )
 )]
 /// An ABAP Dictionary Domain.
@@ -119,28 +118,6 @@ pub struct DomainProperties {
     /// The Domain's type, output, and value information.
     #[serde(rename = "doma:content")]
     pub content: DomainContent,
-}
-
-impl PropertyModel for DomainCreateProperties {
-    type Version = DomainPropertiesVersion;
-
-    const SUPPORTED_VERSIONS: &'static [Self::Version] = &[DomainPropertiesVersion::V2];
-    const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
-        ("doma", "http://www.sap.com/dictionary/domain"),
-        ("adtcore", "http://www.sap.com/adt/core"),
-    ];
-
-    fn media_type(version: Self::Version) -> &'static str {
-        version.media_type()
-    }
-
-    fn object_name(&self) -> &str {
-        &self.name
-    }
-
-    fn object_type(&self) -> &GlobalWorkbenchType {
-        &self.object_type
-    }
 }
 
 impl PropertyModel for DomainProperties {
@@ -283,7 +260,7 @@ pub struct DomainFixedValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, ObjectRef, ObjectType, Operation, UpdateProperties};
+    use crate::{AdtUri, ObjectRef, ObjectType, Operation};
 
     const DOMAIN_TRKORR_XML: &str = include_str!("../../../tests/fixtures/domain-trkorr.xml");
     const DOMAIN_XFELD_XML: &str = include_str!("../../../tests/fixtures/domain-xfeld.xml");
@@ -377,9 +354,6 @@ mod tests {
 
     #[test]
     fn serializes_complete_properties_without_losing_wire_widths() {
-        fn assert_writable<T: UpdateProperties>() {}
-        assert_writable::<Domain>();
-
         let properties = trkorr();
         let object = ObjectRef::<Domain>::new(
             properties.name.clone(),

@@ -96,7 +96,7 @@ pub use objects::{
     ProgramPropertiesVersion, PropertyModel, ServiceDefinition, ServiceDefinitionCreateProperties,
     ServiceDefinitionCreatePropertiesBuilder, ServiceDefinitionCreatePropertiesBuilderError,
     ServiceDefinitionProperties, ServiceDefinitionPropertiesVersion, Source, SourceComponents,
-    Structure, SyntaxConfiguration, SyntaxLanguage, UpdateProperties,
+    Structure, SyntaxConfiguration, SyntaxLanguage,
 };
 pub use operation::{
     Advertised, AdvertisedCollection, AdvertisedTarget, AdvertisedTemplate, BatchError, BatchKey,

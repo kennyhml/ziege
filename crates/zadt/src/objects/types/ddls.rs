@@ -3,7 +3,7 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    ObjectVersion, PropertyModel, Source,
+    ObjectVersion, PropertyModel,
 };
 
 #[object_type(
@@ -18,8 +18,7 @@ use crate::{
             DataDefinitionCreateProperties,
             DataDefinitionPropertiesVersion::V1
         ),
-        Source,
-        UpdateProperties,
+        Source(properties.source_uri),
     )
 )]
 /// An ABAP Core Data Services Data Definition.
@@ -149,28 +148,6 @@ pub struct DataDefinitionProperties {
     pub package: AdvertisedObjectReference,
 }
 
-impl PropertyModel for DataDefinitionCreateProperties {
-    type Version = DataDefinitionPropertiesVersion;
-
-    const SUPPORTED_VERSIONS: &'static [Self::Version] = &[DataDefinitionPropertiesVersion::V1];
-    const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
-        ("ddl", "http://www.sap.com/adt/ddic/ddlsources"),
-        ("adtcore", "http://www.sap.com/adt/core"),
-    ];
-
-    fn media_type(version: Self::Version) -> &'static str {
-        version.media_type()
-    }
-
-    fn object_name(&self) -> &str {
-        &self.name
-    }
-
-    fn object_type(&self) -> &GlobalWorkbenchType {
-        &self.object_type
-    }
-}
-
 impl PropertyModel for DataDefinitionProperties {
     type Version = DataDefinitionPropertiesVersion;
 
@@ -199,16 +176,10 @@ impl PropertyModel for DataDefinitionProperties {
     }
 }
 
-impl Source for DataDefinition {
-    fn source_uri(properties: &Self::Properties) -> Option<&str> {
-        Some(&properties.source_uri)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, ObjectRef, ObjectType, Operation, UpdateProperties};
+    use crate::{AdtUri, ObjectRef, ObjectType, Operation};
 
     const DATA_DEFINITION_XML: &str =
         include_str!("../../../tests/fixtures/data-definition-i-businesspartner.xml");
@@ -289,9 +260,6 @@ mod tests {
 
     #[test]
     fn serializes_complete_properties_for_updates() {
-        fn assert_writable<T: UpdateProperties>() {}
-        assert_writable::<DataDefinition>();
-
         let properties = properties();
         let object = ObjectRef::<DataDefinition>::new(
             properties.name.clone(),

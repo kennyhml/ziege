@@ -2,8 +2,7 @@ use serde::{Deserialize, Serialize};
 use zadt_macros::object_type;
 
 use super::super::{
-    AbapLanguageVersion, GlobalWorkbenchType, ObjectRef, ObjectVersion, PropertyModel, Source,
-    Structure,
+    AbapLanguageVersion, GlobalWorkbenchType, ObjectRef, ObjectVersion, PropertyModel, Structure,
 };
 use crate::{AdvertisedLink, AdvertisedObjectReference};
 
@@ -14,7 +13,7 @@ use crate::{AdvertisedLink, AdvertisedObjectReference};
         scheme = "http://www.sap.com/adt/categories/programs",
         term = "programs",
     ),
-    capabilities(Source, Structure, Run, UpdateProperties)
+    capabilities(Source(properties.source_uri), Structure, Run)
 )]
 /// The ABAP program object type.
 pub struct Program;
@@ -26,7 +25,7 @@ pub struct Program;
         scheme = "http://www.sap.com/adt/categories/programs",
         term = "includes",
     ),
-    capabilities(Source, UpdateProperties)
+    capabilities(Source(properties.source_uri))
 )]
 /// The standalone ABAP include object type.
 pub struct Include;
@@ -223,12 +222,6 @@ impl PropertyModel for ProgramProperties {
     }
 }
 
-impl Source for Program {
-    fn source_uri(properties: &Self::Properties) -> Option<&str> {
-        Some(&properties.source_uri)
-    }
-}
-
 impl Structure for Program {}
 
 /// The complete standalone ABAP include-properties payload.
@@ -340,12 +333,6 @@ impl PropertyModel for IncludeProperties {
     }
 }
 
-impl Source for Include {
-    fn source_uri(properties: &Self::Properties) -> Option<&str> {
-        Some(&properties.source_uri)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -419,9 +406,6 @@ mod tests {
 
     #[test]
     fn serializes_program_properties_as_a_complete_update_payload() {
-        fn assert_writable<T: crate::UpdateProperties>() {}
-        assert_writable::<Program>();
-
         let program = parse_program(PROGRAM_XML).unwrap();
         let object = crate::ObjectRef::erased(
             program.name.clone(),
@@ -430,11 +414,7 @@ mod tests {
         );
         let xml = String::from_utf8(
             Program::DESCRIPTOR
-                .properties_to_xml(
-                    &object,
-                    ProgramPropertiesVersion::V3.media_type(),
-                    serde_json::to_value(&program).unwrap(),
-                )
+                .properties_to_xml(&object, serde_json::to_value(&program).unwrap())
                 .unwrap(),
         )
         .unwrap();
@@ -452,9 +432,6 @@ mod tests {
 
     #[test]
     fn serializes_include_properties_as_a_complete_update_payload() {
-        fn assert_writable<T: crate::UpdateProperties>() {}
-        assert_writable::<Include>();
-
         let include = parse_include(INCLUDE_XML).unwrap();
         let object = crate::ObjectRef::erased(
             include.name.clone(),
@@ -463,11 +440,7 @@ mod tests {
         );
         let xml = String::from_utf8(
             Include::DESCRIPTOR
-                .properties_to_xml(
-                    &object,
-                    IncludePropertyVersion::V2.media_type(),
-                    serde_json::to_value(&include).unwrap(),
-                )
+                .properties_to_xml(&object, serde_json::to_value(&include).unwrap())
                 .unwrap(),
         )
         .unwrap();

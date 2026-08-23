@@ -74,6 +74,27 @@ fn expand_object_type_item(
         let version = &create.version;
         quote! {
             #(#conditional_attrs)*
+            impl crate::objects::PropertyModel for #properties {
+                type Version = <#model as crate::objects::PropertyModel>::Version;
+
+                const SUPPORTED_VERSIONS: &'static [Self::Version] = &[#version];
+                const XML_NAMESPACES: &'static [(&'static str, &'static str)] =
+                    <#model as crate::objects::PropertyModel>::XML_NAMESPACES;
+
+                fn media_type(version: Self::Version) -> &'static str {
+                    <#model as crate::objects::PropertyModel>::media_type(version)
+                }
+
+                fn object_name(&self) -> &str {
+                    &self.name
+                }
+
+                fn object_type(&self) -> &crate::objects::GlobalWorkbenchType {
+                    &self.object_type
+                }
+            }
+
+            #(#conditional_attrs)*
             impl crate::objects::Create for #object {
                 type CreateProperties = #properties;
 
@@ -82,13 +103,18 @@ fn expand_object_type_item(
             }
         }
     });
-    let update_impl = capabilities.update_properties.map(|_| {
-        quote! {
-            #(#conditional_attrs)*
-            impl crate::objects::UpdateProperties for #object {}
-        }
+    let source_impl = capabilities.source.as_ref().and_then(|source| {
+        source.uri.as_ref().map(|uri| {
+            quote! {
+                #(#conditional_attrs)*
+                impl crate::objects::Source for #object {
+                    fn source_uri(properties: &Self::Properties) -> Option<&str> {
+                        Some((#uri).as_str())
+                    }
+                }
+            }
+        })
     });
-
     let create_media_type = if capabilities.create.is_some() {
         quote! {
             Some(<<#object as crate::objects::Create>::CreateProperties as crate::objects::PropertyModel>::media_type(
@@ -145,27 +171,6 @@ fn expand_object_type_item(
         }
     };
     let has_object_structure = capabilities.structure.is_some();
-    let properties_to_xml = if capabilities.update_properties.is_some() {
-        quote! {
-            {
-                let _ = media_type;
-                <#object as crate::objects::UpdateProperties>::properties_to_xml(
-                    object,
-                    properties,
-                )
-            }
-        }
-    } else {
-        quote! {
-            {
-                let _ = (object, media_type, properties);
-                Err(crate::objects::descriptors::unsupported_update(
-                    <#object as crate::objects::ObjectType>::WORKBENCH_TYPE,
-                ))
-            }
-        }
-    };
-
     Ok(quote! {
         #(#attrs)*
         #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
@@ -187,7 +192,7 @@ fn expand_object_type_item(
         }
 
         #create_impl
-        #update_impl
+        #source_impl
 
         #(#conditional_attrs)*
         impl #object {
@@ -227,13 +232,6 @@ fn expand_object_type_item(
                 #has_object_structure
             }
 
-            fn properties_to_xml(
-                object: &crate::objects::ObjectRef<()>,
-                media_type: &str,
-                properties: serde_json::Value,
-            ) -> Result<Vec<u8>, crate::error::ObjectError> {
-                #properties_to_xml
-            }
         }
     })
 }
@@ -301,8 +299,8 @@ impl Parse for ObjectTypeArguments {
             )
         })?;
 
-        if let (Some(source_components), None) =
-            (capabilities.source_components, capabilities.source)
+        if let Some(source_components) = capabilities.source_components
+            && capabilities.source.is_none()
         {
             return Err(Error::new(
                 source_components,
@@ -389,16 +387,19 @@ fn reject_collection_duplicate<T>(value: &Option<T>, key: &Ident, name: &str) ->
 #[derive(Default)]
 struct Capabilities {
     create: Option<CreateCapability>,
-    source: Option<Span>,
+    source: Option<SourceCapability>,
     source_components: Option<Span>,
     structure: Option<Span>,
     run: Option<Span>,
-    update_properties: Option<Span>,
 }
 
 struct CreateCapability {
     properties: Type,
     version: Expr,
+}
+
+struct SourceCapability {
+    uri: Option<Expr>,
 }
 
 fn parse_capabilities(input: ParseStream<'_>) -> Result<Capabilities> {
@@ -429,8 +430,24 @@ fn parse_capabilities(input: ParseStream<'_>) -> Result<Capabilities> {
                 version,
             });
         } else if capability == "Source" {
-            reject_capability_arguments(&content, &capability)?;
-            set_capability(&mut capabilities.source, capability)?;
+            if capabilities.source.is_some() {
+                return Err(duplicate_capability(&capability));
+            }
+            let uri = if content.peek(syn::token::Paren) {
+                let arguments;
+                parenthesized!(arguments in content);
+                let uri = arguments.parse::<Expr>()?;
+                if !arguments.is_empty() {
+                    arguments.parse::<Token![,]>()?;
+                }
+                if !arguments.is_empty() {
+                    return Err(arguments.error("unexpected `Source` capability argument"));
+                }
+                Some(uri)
+            } else {
+                None
+            };
+            capabilities.source = Some(SourceCapability { uri });
         } else if capability == "SourceComponents" {
             reject_capability_arguments(&content, &capability)?;
             set_capability(&mut capabilities.source_components, capability)?;
@@ -440,9 +457,6 @@ fn parse_capabilities(input: ParseStream<'_>) -> Result<Capabilities> {
         } else if capability == "Run" {
             reject_capability_arguments(&content, &capability)?;
             set_capability(&mut capabilities.run, capability)?;
-        } else if capability == "UpdateProperties" {
-            reject_capability_arguments(&content, &capability)?;
-            set_capability(&mut capabilities.update_properties, capability)?;
         } else {
             return Err(Error::new(
                 span,
@@ -988,7 +1002,6 @@ mod tests {
         assert!(!expanded.contains("ObjectState"));
         assert!(!expanded.contains("AdtObject"));
         assert!(expanded.contains("capability : \"object creation\""));
-        assert!(expanded.contains("crate :: objects :: descriptors :: unsupported_update"));
         assert!(!expanded.contains("impl crate :: objects :: Create for Class"));
     }
 
@@ -997,10 +1010,9 @@ mod tests {
         let expanded = expand_object_type(
             object_arguments(quote! {
                 Create(ClassCreateProperties, ClassPropertiesVersion::V4),
-                Source,
+                Source(properties.source_uri),
                 SourceComponents,
                 Run,
-                UpdateProperties,
             }),
             quote!(
                 pub struct Class;
@@ -1010,7 +1022,14 @@ mod tests {
         .to_string();
 
         assert!(expanded.contains("impl crate :: objects :: Create for Class"));
-        assert!(expanded.contains("impl crate :: objects :: UpdateProperties for Class"));
+        assert!(
+            expanded.contains("impl crate :: objects :: PropertyModel for ClassCreateProperties")
+        );
+        assert!(expanded.contains(
+            "< ClassProperties as crate :: objects :: PropertyModel > :: XML_NAMESPACES"
+        ));
+        assert!(expanded.contains("impl crate :: objects :: Source for Class"));
+        assert!(expanded.contains("properties . source_uri"));
         assert!(
             expanded.contains("crate :: objects :: SourceComponents > :: source_component_uri")
         );

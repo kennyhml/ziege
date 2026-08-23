@@ -10,7 +10,7 @@ use crate::{
     properties = DataElementProperties,
     workbench_type = "DTEL/DE",
     collection(scheme = "http://www.sap.com/wbobj/dictionary", term = "dtelde",),
-    capabilities(UpdateProperties)
+    capabilities()
 )]
 /// The ABAP Dictionary Data Element object type.
 pub struct DataElement;

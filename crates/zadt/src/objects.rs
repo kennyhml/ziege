@@ -9,7 +9,6 @@ mod workbench;
 
 pub use capabilities::{
     Create, CreationPropertyModel, PropertyModel, Source, SourceComponents, Structure,
-    UpdateProperties,
 };
 pub(crate) use capabilities::{ImmediateRun, RunCapability};
 pub(crate) use descriptors::ObjectTypeDescriptor;

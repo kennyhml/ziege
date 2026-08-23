@@ -2,7 +2,9 @@
 
 use httpmock::Mock;
 use httpmock::prelude::*;
-use zadt::{Client, Operation, Package, PackagePropertiesVersion, Ready, ReqwestTransport};
+use zadt::{
+    AccessMode, Client, Operation, Package, PackagePropertiesVersion, Ready, ReqwestTransport,
+};
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
 const CORE_DISCOVERY_XML: &str = include_str!("fixtures/core-discovery.xml");
@@ -14,6 +16,8 @@ const SESSION_XML: &str = include_str!("fixtures/http-session-v3.xml");
 const SESSION_MEDIA_TYPE: &str = "application/vnd.sap.adt.core.http.session.v3+xml";
 const PACKAGE_PROPERTIES_ACCEPT: &str =
     "application/vnd.sap.adt.packages.v2+xml, application/vnd.sap.adt.packages.v1+xml";
+const PACKAGE_V2_MEDIA_TYPE: &str = "application/vnd.sap.adt.packages.v2+xml";
+const LOCK_XML: &str = include_str!("fixtures/object-lock.xml");
 
 async fn mock_logon(server: &MockServer) -> Mock<'_> {
     server
@@ -38,7 +42,9 @@ async fn mock_discovery(server: &MockServer) -> Mock<'_> {
 async fn mock_core_discovery(server: &MockServer) -> Mock<'_> {
     server
         .mock_async(|when, then| {
-            when.method(GET).path("/sap/bc/adt/core/discovery");
+            when.method(GET)
+                .path("/sap/bc/adt/core/discovery")
+                .header("accept", "application/atomsvc+xml");
             then.status(200).body(CORE_DISCOVERY_XML);
         })
         .await
@@ -104,6 +110,123 @@ async fn package_properties_advertise_all_supported_contracts() {
     logon.assert_async().await;
     discovery.assert_async().await;
     properties.assert_async().await;
+}
+
+#[tokio::test]
+async fn package_properties_use_the_universal_locked_update_flow() {
+    let server = MockServer::start_async().await;
+    let logon = mock_logon(&server).await;
+    let discovery = mock_discovery(&server).await;
+    let _core_discovery = mock_core_discovery(&server).await;
+    let csrf = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/sap/bc/adt/core/discovery")
+                .header("x-csrf-token", "Fetch")
+                .header("x-sap-adt-sessiontype", "stateless");
+            then.status(200)
+                .header("x-csrf-token", "CSRF-TOKEN-PACKAGE");
+        })
+        .await;
+    let get_properties = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/sap/bc/adt/packages/sadt_tools_core")
+                .header("accept", PACKAGE_PROPERTIES_ACCEPT);
+            then.status(200)
+                .header("content-type", PACKAGE_V2_MEDIA_TYPE)
+                .body(PACKAGE_XML);
+        })
+        .await;
+    let lock = server
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/sap/bc/adt/packages/sadt_tools_core")
+                .query_param("_action", "LOCK")
+                .query_param("accessMode", "MODIFY")
+                .header("x-sap-adt-sessiontype", "stateful")
+                .header("x-csrf-token", "CSRF-TOKEN-PACKAGE");
+            then.status(200)
+                .header(
+                    "set-cookie",
+                    "sap-contextid=PACKAGE-SESSION; Path=/sap/bc/adt",
+                )
+                .body(LOCK_XML);
+        })
+        .await;
+    let update = server
+        .mock_async(|when, then| {
+            when.method(PUT)
+                .path("/sap/bc/adt/packages/sadt_tools_core")
+                .query_param("lockHandle", "LOCK-HANDLE-1")
+                .header("accept", PACKAGE_V2_MEDIA_TYPE)
+                .header("content-type", PACKAGE_V2_MEDIA_TYPE)
+                .header("x-sap-adt-sessiontype", "stateful")
+                .header("x-csrf-token", "CSRF-TOKEN-PACKAGE")
+                .body_contains("xmlns:pak=\"http://www.sap.com/adt/packages\"")
+                .body_contains("adtcore:name=\"SADT_TOOLS_CORE\"")
+                .body_contains("adtcore:description=\"Updated package description\"")
+                .body_contains("<pak:attributes")
+                .body_contains("<atom:link");
+            then.status(200);
+        })
+        .await;
+    let unlock = server
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/sap/bc/adt/packages/sadt_tools_core")
+                .query_param("_action", "UNLOCK")
+                .query_param("lockHandle", "LOCK-HANDLE-1")
+                .header("x-sap-adt-sessiontype", "stateful");
+            then.status(200);
+        })
+        .await;
+    let close_session = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/sap/bc/adt/core/discovery")
+                .header("x-sap-adt-sessiontype", "stateless")
+                .header(
+                    "cookie",
+                    "sap-usercontext=sap-client=001&sap-language=EN; sap-contextid=PACKAGE-SESSION",
+                );
+            then.status(200);
+        })
+        .await;
+
+    let client = ready_client(&server).await;
+    let reference = client.object::<Package>("SADT_TOOLS_CORE").unwrap();
+    let mut package = reference.query().execute(&client).await.unwrap();
+    package.properties.description = "Updated package description".to_owned();
+    let session = client.create_user_session();
+    let object_lock = reference
+        .lock(AccessMode::Modify)
+        .execute(&session)
+        .await
+        .unwrap();
+    let result = package
+        .update(&object_lock)
+        .unwrap()
+        .execute(&session)
+        .await
+        .unwrap();
+    reference
+        .unlock(object_lock)
+        .unwrap()
+        .execute(&session)
+        .await
+        .unwrap();
+    session.close().await.unwrap();
+
+    assert!(result.is_none());
+    logon.assert_async().await;
+    discovery.assert_async().await;
+    csrf.assert_async().await;
+    get_properties.assert_async().await;
+    lock.assert_async().await;
+    update.assert_async().await;
+    unlock.assert_async().await;
+    close_session.assert_async().await;
 }
 
 #[tokio::test]

@@ -63,7 +63,6 @@ pub(crate) trait RuntimeObjectTypeDescriptor: std::fmt::Debug + Sync {
     fn properties_to_xml(
         &self,
         object: &ObjectRef<()>,
-        media_type: &str,
         properties: serde_json::Value,
     ) -> Result<Vec<u8>, ObjectError>;
 
@@ -91,12 +90,6 @@ pub(crate) trait RuntimeObjectType: ObjectType {
     fn has_object_structure() -> bool {
         false
     }
-
-    fn properties_to_xml(
-        object: &ObjectRef<()>,
-        media_type: &str,
-        properties: serde_json::Value,
-    ) -> Result<Vec<u8>, ObjectError>;
 }
 
 pub(crate) struct ObjectTypeDescriptor<T>(PhantomData<fn() -> T>);
@@ -231,10 +224,11 @@ where
     fn properties_to_xml(
         &self,
         object: &ObjectRef<()>,
-        media_type: &str,
         properties: serde_json::Value,
     ) -> Result<Vec<u8>, ObjectError> {
-        T::properties_to_xml(object, media_type, properties)
+        let properties: T::Properties =
+            serde_json::from_value(properties).map_err(ObjectError::InvalidPropertiesJson)?;
+        properties.to_xml_for(object)
     }
 
     fn properties_media_type(&self, media_type: &str) -> Option<&'static str> {
@@ -264,13 +258,6 @@ pub(crate) fn object_type_descriptor(
         .iter()
         .copied()
         .find(|descriptor| &descriptor.object_type() == object_type)
-}
-
-pub(crate) fn unsupported_update(object_type: GlobalWorkbenchType) -> ObjectError {
-    ObjectError::UnsupportedCapability {
-        object_type,
-        capability: "object properties update",
-    }
 }
 
 #[cfg(test)]

@@ -3,10 +3,7 @@ use http::{Method, StatusCode};
 use crate::{
     AnyObject, Object, ObjectError, ObjectLock, TransportNumber,
     error::{EncodeError, ResponseError},
-    objects::{
-        ObjectRef, ObjectType, ObjectVersion, PropertyModel, RuntimeObjectTypeDescriptor,
-        UpdateProperties,
-    },
+    objects::{ObjectRef, ObjectType, ObjectVersion, PropertyModel, RuntimeObjectTypeDescriptor},
     operation::{
         EncodedOperation, IfNoneMatch, Operation, OperationResponse, Owned, Stateful, Stateless,
     },
@@ -173,7 +170,7 @@ where
 
 impl<T> ObjectRef<T>
 where
-    T: UpdateProperties,
+    T: ObjectType,
 {
     pub fn update(
         &self,
@@ -199,7 +196,7 @@ where
     }
 }
 
-impl<T: UpdateProperties> Object<T> {
+impl<T: ObjectType> Object<T> {
     /// Replaces this loaded object's properties under the supplied lock.
     pub fn update(
         self,
@@ -256,7 +253,7 @@ impl ObjectRef<()> {
                 object_type: self.object_type().clone(),
                 media_type: properties.media_type().to_owned(),
             })?;
-        let body = descriptor.properties_to_xml(self, media_type, properties.properties)?;
+        let body = descriptor.properties_to_xml(self, properties.properties)?;
         Ok(ObjectPropertiesUpdate {
             resource: self.clone(),
             object_lock: object_lock.clone(),

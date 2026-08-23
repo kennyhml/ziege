@@ -27,7 +27,6 @@ use zadt_macros::{CreateProperties, object_type};
         SourceComponents,
         Structure,
         Run,
-        UpdateProperties,
     )
 )]
 pub struct Class;
@@ -303,29 +302,6 @@ impl<'de> Deserialize<'de> for ClassCategory {
         D: serde::Deserializer<'de>,
     {
         String::deserialize(deserializer).map(Self::from)
-    }
-}
-
-impl PropertyModel for ClassCreateProperties {
-    type Version = ClassPropertiesVersion;
-
-    const SUPPORTED_VERSIONS: &'static [Self::Version] = &[ClassPropertiesVersion::V4];
-    const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
-        ("class", "http://www.sap.com/adt/oo/classes"),
-        ("abapsource", "http://www.sap.com/adt/abapsource"),
-        ("adtcore", "http://www.sap.com/adt/core"),
-    ];
-
-    fn media_type(version: Self::Version) -> &'static str {
-        version.media_type()
-    }
-
-    fn object_name(&self) -> &str {
-        &self.name
-    }
-
-    fn object_type(&self) -> &GlobalWorkbenchType {
-        &self.object_type
     }
 }
 
@@ -814,9 +790,6 @@ mod tests {
 
     #[test]
     fn serializes_class_properties_as_a_complete_update_payload() {
-        fn assert_writable<T: crate::UpdateProperties>() {}
-        assert_writable::<Class>();
-
         let class = parse(CLASS_XML).unwrap();
         let object = crate::ObjectRef::erased(
             class.name.clone(),
@@ -825,11 +798,7 @@ mod tests {
         );
         let xml = String::from_utf8(
             Class::DESCRIPTOR
-                .properties_to_xml(
-                    &object,
-                    ClassPropertiesVersion::V4.media_type(),
-                    serde_json::to_value(&class).unwrap(),
-                )
+                .properties_to_xml(&object, serde_json::to_value(&class).unwrap())
                 .unwrap(),
         )
         .unwrap();

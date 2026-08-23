@@ -108,6 +108,11 @@ impl PropertyModel for PackageProperties {
 
     const SUPPORTED_VERSIONS: &'static [Self::Version] =
         &[PackagePropertiesVersion::V2, PackagePropertiesVersion::V1];
+    const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
+        ("pak", "http://www.sap.com/adt/packages"),
+        ("adtcore", "http://www.sap.com/adt/core"),
+        ("atom", "http://www.w3.org/2005/Atom"),
+    ];
 
     fn media_type(version: Self::Version) -> &'static str {
         version.media_type()
@@ -241,7 +246,7 @@ pub struct PackageSubpackages {
 #[cfg(test)]
 mod property_tests {
     use super::*;
-    use crate::ObjectType;
+    use crate::{AdtUri, ObjectRef, ObjectType};
 
     const PACKAGE_XML: &[u8] =
         include_bytes!("../../../tests/fixtures/package-sadt-tools-core.xml");
@@ -318,6 +323,26 @@ mod property_tests {
                 .map(GlobalWorkbenchType::as_str),
             Some("FUTURE/I")
         );
+    }
+
+    #[test]
+    fn serializes_complete_properties_for_updates() {
+        let properties: PackageProperties = serde_xml_rs::from_reader(PACKAGE_XML).unwrap();
+        let package = ObjectRef::<Package>::new(
+            properties.name.clone(),
+            AdtUri::parse("/sap/bc/adt/packages/sadt_tools_core").unwrap(),
+        );
+        let xml = String::from_utf8(properties.to_xml_for(&package).unwrap()).unwrap();
+
+        assert!(xml.contains("<pak:package"));
+        assert!(xml.contains("xmlns:pak=\"http://www.sap.com/adt/packages\""));
+        assert!(xml.contains("xmlns:adtcore=\"http://www.sap.com/adt/core\""));
+        assert!(xml.contains("xmlns:atom=\"http://www.w3.org/2005/Atom\""));
+        assert!(xml.contains("<pak:attributes"));
+        assert!(xml.contains("<atom:link"));
+        let roundtrip: PackageProperties = serde_xml_rs::from_str(&xml).unwrap();
+        assert_eq!(roundtrip.name, properties.name);
+        assert_eq!(roundtrip.description, properties.description);
     }
 
     #[test]
