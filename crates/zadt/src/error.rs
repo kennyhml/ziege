@@ -371,6 +371,9 @@ pub enum ResponseError {
     #[error("ADT returned 304 Not Modified without an If-None-Match validator")]
     UnexpectedNotModified,
 
+    #[error("ADT user session expired while requesting `{target}`")]
+    UserSessionExpired { target: AdtUri },
+
     #[error("ADT response from `{target}` did not include a Content-Type header")]
     MissingContentType { target: AdtUri },
 

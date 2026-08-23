@@ -1,14 +1,12 @@
 use std::future::Future;
 
-use async_lock::Mutex;
-use http::{HeaderMap, HeaderValue, StatusCode, header};
-use secrecy::{ExposeSecret, SecretString};
-use uuid::Uuid;
+use http::{HeaderMap, StatusCode, header};
 
 use crate::{
     AdtRequest, AdtResponse, AdtUri, Client, ClientState, EncodeError, EntityTag, OperationError,
-    Ready, ResolveError, ResponseError, TransportError, compatibility::media_types_match,
-    protocol::CORE_DISCOVERY_PATH,
+    Ready, ResolveError, ResponseError,
+    compatibility::media_types_match,
+    user_session::{UserSession, UserSessionId, is_expired_response},
 };
 
 mod batch;
@@ -25,11 +23,6 @@ pub use encoded::{
 pub use revalidation::{IfNoneMatch, Revalidation};
 use target::resolve_advertised;
 pub(crate) use target::{CollectionTarget, TemplateTarget};
-
-const ADT_SESSION_TYPE: &str = "x-sap-adt-sessiontype";
-const STATEFUL_SESSION_TYPE: &str = "stateful";
-const STATELESS_SESSION_TYPE: &str = "stateless";
-const USER_SESSION_COOKIE: &str = "sap-contextid";
 
 mod private {
     pub trait Sealed {}
@@ -51,12 +44,7 @@ mod private {
 /// the SAP client and language.
 pub trait OperationKind: private::Sealed + Send + Sync {}
 
-/// An operation that does not require a persistent ABAP user session.
-#[derive(Debug)]
 pub struct Stateless;
-
-/// An operation that requires a persistent ABAP user session.
-#[derive(Debug)]
 pub struct Stateful;
 
 impl private::Sealed for Stateless {}
@@ -104,7 +92,22 @@ pub trait Operation: Send + Sync {
     }
 }
 
-/// An execution context capable of running operation `O`.
+/// Resolves an [`EncodedOperation`] into a [`ResolvedOperation`].
+///
+/// This keeps target resolution context (largely HATEOAS based) out of the
+/// operation encoding. The operation simply defines an [`OperationTarget`],
+/// e.g. a collection or a template, which the resolver can resolve due to
+/// knowledge of the discovery documents.
+///
+/// The [`OperationTarget`] is purely a marker to add compile time guarantees
+/// that an [`Operation`] with a target that must be resolved through the
+/// discovery, i.e. that is not [`Owned`], can only be executed by objects
+/// that implement [`Resolve<Advertised>`], which only [`Client<Ready>`] does.
+pub trait Resolve<T: OperationTarget> {
+    fn resolve(&self, operation: EncodedOperation<T>) -> Result<ResolvedOperation, ResolveError>;
+}
+
+/// An execution context capable of executing operation `O`.
 ///
 /// `Operation` describes how to build and decode a request, while `Execute`
 /// controls how that request is carried out. This separates the operations
@@ -128,45 +131,97 @@ where
     ) -> impl Future<Output = Result<O::Response, OperationError>> + Send;
 }
 
-/// An opaque local identity used to preserve stateful-operation affinity.
-///
-/// This is not the SAP `sap-contextid` cookie and contains no server credential.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct UserSessionId(Uuid);
-
-impl UserSessionId {
-    /// Creates an opaque local identity for one stateful execution context.
-    pub fn generate() -> Self {
-        Self(Uuid::new_v4())
-    }
-}
-
 /// Local request metadata retained until an operation decodes its response.
 ///
-/// [`Resolve::resolve`] returns this alongside the transport request. Most
-/// callers use the built-in executors, which preserve it automatically.
+/// The operation resolvers attach this to the [`ResolvedOperation`] and
+/// the executors reattach it to [`OperationResponse`] - both of which
+/// wrap the raw [`AdtRequest`] and [`AdtResponse`] respectively.
+///
+/// This way, the operation decoders gain access to additional execution
+/// context which is needed, for example, for the resolved target URI to
+/// bind owned resources to as the response usually contains relative links.
 #[derive(Clone, Debug)]
 pub struct OperationContext {
-    request_target: AdtUri,
+    target: AdtUri,
 }
 
 impl OperationContext {
     pub(crate) fn new(request_target: AdtUri) -> Self {
-        Self { request_target }
+        Self {
+            target: request_target,
+        }
     }
 
     /// Returns the target of the originating request.
     pub fn request_target(&self) -> &AdtUri {
-        &self.request_target
+        &self.target
     }
 }
 
-/// A raw ADT response paired with the context of the request that produced it.
+/// An operation that has been encoded and resolved against a target.
 ///
-/// The request target provides the base URI needed to resolve relative links in
-/// response representations. Keeping both values together also ensures that a
-/// batch decoder can pass each response part the target of its corresponding
-/// inner request.
+/// This means the [`AdtRequest`] it wraps is ready for transport. The
+/// produced [`OperationResponse`] is enriched with the same context
+/// that the resolved operation carries.
+///
+/// The bound user session is used to verify that the operation cannot
+/// be executed by an executor bound to a different user session.
+pub struct ResolvedOperation {
+    request: AdtRequest,
+    context: OperationContext,
+    bound_user_session: Option<UserSessionId>,
+}
+
+impl ResolvedOperation {
+    /// Returns the transport-ready ADT request.
+    pub fn request(&self) -> &AdtRequest {
+        &self.request
+    }
+
+    /// Returns the local context to retain while the request is in flight.
+    pub fn context(&self) -> &OperationContext {
+        &self.context
+    }
+
+    /// Returns the user-session identity to which this operation is bound, if any.
+    pub fn bound_user_session(&self) -> Option<UserSessionId> {
+        self.bound_user_session
+    }
+
+    /// Separates the transport request, response context, and session binding.
+    pub fn into_parts(self) -> (AdtRequest, OperationContext, Option<UserSessionId>) {
+        (self.request, self.context, self.bound_user_session)
+    }
+}
+
+impl EncodedOperation<Owned> {
+    pub(crate) fn resolve(self) -> ResolvedOperation {
+        let (operation, bound_user_session) = self.into_parts();
+        let EncodedTarget::Owned(target) = operation.target else {
+            unreachable!("an owned encoded operation must contain an owned target");
+        };
+        let context = OperationContext::new(target.clone());
+        let request = AdtRequest::from_parts(
+            operation.method,
+            target,
+            operation.query,
+            operation.headers,
+            operation.body,
+        );
+        ResolvedOperation {
+            request,
+            context,
+            bound_user_session,
+        }
+    }
+}
+
+/// A raw ADT response decorated with local context of the producing request.
+///
+/// Keeping both values together also ensures that a batch decoder can pass
+/// each response part the target of its corresponding inner request. This
+/// prevents a logical error where the operation context of the batch request
+/// itself would be passed to the inner responses.
 #[derive(Debug)]
 pub struct OperationResponse {
     response: AdtResponse,
@@ -262,16 +317,14 @@ impl OperationResponse {
                 .ok_or_else(|| ResponseError::MissingContentType {
                     target: self.request_target().clone(),
                 })?;
-        if supported
-            .iter()
-            .any(|expected| media_types_match(expected, content_type))
-        {
+
+        if supported.iter().any(|v| media_types_match(v, content_type)) {
             Ok(content_type)
         } else {
             Err(ResponseError::UnsupportedContentType {
                 target: self.request_target().clone(),
                 content_type: content_type.to_owned(),
-                supported: supported.iter().map(|value| (*value).to_owned()).collect(),
+                supported: supported.iter().map(|v| (*v).to_owned()).collect(),
             })
         }
     }
@@ -288,42 +341,8 @@ impl OperationResponse {
 
     /// Consumes the response context and returns the raw response and request target.
     pub fn into_parts(self) -> (AdtResponse, AdtUri) {
-        (self.response, self.context.request_target)
+        (self.response, self.context.target)
     }
-}
-
-/// A transport request paired with local metadata retained for response decoding.
-pub struct ResolvedOperation {
-    request: AdtRequest,
-    context: OperationContext,
-    required_user_session: Option<UserSessionId>,
-}
-
-impl ResolvedOperation {
-    /// Returns the transport-ready ADT request.
-    pub fn request(&self) -> &AdtRequest {
-        &self.request
-    }
-
-    /// Returns the local context to retain while the request is in flight.
-    pub fn context(&self) -> &OperationContext {
-        &self.context
-    }
-
-    /// Returns the user-session identity required by this operation, if any.
-    pub fn required_user_session(&self) -> Option<UserSessionId> {
-        self.required_user_session
-    }
-
-    /// Separates the transport request, response context, and session requirement.
-    pub fn into_parts(self) -> (AdtRequest, OperationContext, Option<UserSessionId>) {
-        (self.request, self.context, self.required_user_session)
-    }
-}
-
-/// Resolves an encoded target using an execution context's available state.
-pub trait Resolve<T: OperationTarget> {
-    fn resolve(&self, operation: EncodedOperation<T>) -> Result<ResolvedOperation, ResolveError>;
 }
 
 impl<S: ClientState> Resolve<Owned> for Client<S> {
@@ -331,23 +350,7 @@ impl<S: ClientState> Resolve<Owned> for Client<S> {
         &self,
         operation: EncodedOperation<Owned>,
     ) -> Result<ResolvedOperation, ResolveError> {
-        let operation = operation.request;
-        let EncodedTarget::Owned(target) = operation.target else {
-            unreachable!("an owned encoded operation must contain an owned target");
-        };
-        let context = OperationContext::new(target.clone());
-        let request = AdtRequest::from_parts(
-            operation.method,
-            target,
-            operation.query,
-            operation.headers,
-            operation.body,
-        );
-        Ok(ResolvedOperation {
-            request,
-            context,
-            required_user_session: operation.required_user_session,
-        })
+        Ok(operation.resolve())
     }
 }
 
@@ -356,7 +359,7 @@ impl Resolve<Advertised> for Client<Ready> {
         &self,
         operation: EncodedOperation<Advertised>,
     ) -> Result<ResolvedOperation, ResolveError> {
-        let operation = operation.request;
+        let (operation, bound_user_session) = operation.into_parts();
         let EncodedTarget::Advertised(target) = operation.target else {
             unreachable!("an advertised encoded operation must contain an advertised target");
         };
@@ -374,31 +377,9 @@ impl Resolve<Advertised> for Client<Ready> {
         Ok(ResolvedOperation {
             request,
             context,
-            required_user_session: operation.required_user_session,
+            bound_user_session,
         })
     }
-}
-
-/// A long-lived SAP user session for stateful ADT operations.
-///
-/// SAP calls the stateful ABAP context represented by `sap-contextid` a user
-/// session. Active user sessions can be inspected in transaction `SM04`. Do
-/// not confuse this with the transports HTTP security session, identified by
-/// `SAP_SESSIONID_*`, or the `sap-usercontext` client/language cookie.
-///
-/// The session owns a cheap clone of its [`Client`], so it has no borrowing
-/// lifetime and can be retained for an entire editing workflow. Client
-/// capabilities and the underlying transport remain shared. Requests within
-/// one session are serialized, while separate sessions can hold independent
-/// `sap-contextid` values.
-///
-/// A user session can retain locks and other server resources. Call
-/// [`UserSession::close`] when the workflow finishes; dropping this value only
-/// releases local state and does not notify SAP.
-pub struct UserSession<S: ClientState> {
-    id: UserSessionId,
-    client: Client<S>,
-    state: Mutex<UserSessionState>,
 }
 
 // Execution of a stateless request
@@ -424,7 +405,7 @@ where
     Client<S>: Resolve<O::Target>,
 {
     async fn execute(&self, operation: &O) -> Result<O::Response, OperationError> {
-        let resolved = self.client.resolve(operation.encode()?)?;
+        let resolved = self.client().resolve(operation.encode()?)?;
         let response = self.execute_resolved(resolved).await?;
         Ok(operation.decode(response)?)
     }
@@ -438,7 +419,7 @@ where
         &self,
         resolved: ResolvedOperation,
     ) -> Result<OperationResponse, OperationError> {
-        if resolved.required_user_session.is_some() {
+        if resolved.bound_user_session.is_some() {
             return Err(ResolveError::UserSessionMismatch.into());
         }
         let response = self.transport().send(resolved.request).await?;
@@ -454,124 +435,26 @@ where
         &self,
         mut resolved: ResolvedOperation,
     ) -> Result<OperationResponse, OperationError> {
-        let mut session = self.state.lock().await;
+        let target = resolved.context.request_target().clone();
+        let mut session = self.state().lock().await;
+        session.expire_if_elapsed();
+        if session.is_expired() {
+            return Err(ResponseError::UserSessionExpired { target }.into());
+        }
         if resolved
-            .required_user_session
-            .is_some_and(|required| required != self.id)
+            .bound_user_session
+            .is_some_and(|bound| bound != self.id())
         {
             return Err(ResolveError::UserSessionMismatch.into());
         }
         session.decorate(&mut resolved.request)?;
-        let response = self.client.transport().send(resolved.request).await?;
+        let response = self.client().transport().send(resolved.request).await?;
         session.update(response.headers());
-        Ok(OperationResponse::with_context(response, resolved.context).in_user_session(self.id))
-    }
-}
-
-#[derive(Default)]
-struct UserSessionState {
-    context_id: Option<SecretString>,
-}
-
-impl UserSessionState {
-    // Attaches the internal session id cookie to the request headers to be
-    // merged by the transport layer later on if needed.
-    fn decorate(&self, request: &mut AdtRequest) -> Result<(), TransportError> {
-        request.headers_mut().insert(
-            ADT_SESSION_TYPE,
-            HeaderValue::from_static(STATEFUL_SESSION_TYPE),
-        );
-        if let Some(cookie) = self.cookie_header()? {
-            request.headers_mut().append(header::COOKIE, cookie);
+        if is_expired_response(&response) {
+            session.expire();
+            return Err(ResponseError::UserSessionExpired { target }.into());
         }
-        Ok(())
-    }
-
-    fn cookie_header(&self) -> Result<Option<HeaderValue>, TransportError> {
-        self.context_id
-            .as_ref()
-            .map(|context_id| {
-                HeaderValue::from_str(&format!(
-                    "{USER_SESSION_COOKIE}={}",
-                    context_id.expose_secret()
-                ))
-                .map_err(TransportError::new)
-            })
-            .transpose()
-    }
-
-    // Updates the session id based on the response. This may mean discarding the session
-    // if it has expired, or setting / renewing it.
-    fn update(&mut self, headers: &HeaderMap) {
-        for header in headers.get_all(header::SET_COOKIE) {
-            let Some(cookie) = header
-                .to_str()
-                .ok()
-                .and_then(|value| cookie::Cookie::parse(value.to_owned()).ok())
-                .filter(|cookie| cookie.name().eq_ignore_ascii_case(USER_SESSION_COOKIE))
-            else {
-                continue;
-            };
-
-            let expired = cookie.value_trimmed().is_empty()
-                || cookie
-                    .max_age()
-                    .is_some_and(|duration| duration.whole_seconds() <= 0);
-            self.context_id =
-                (!expired).then(|| SecretString::from(cookie.value_trimmed().to_owned()));
-        }
-    }
-}
-
-impl<S> UserSession<S>
-where
-    S: ClientState,
-{
-    pub(crate) fn new(client: Client<S>) -> Self {
-        Self {
-            id: UserSessionId::generate(),
-            client,
-            state: Mutex::new(UserSessionState::default()),
-        }
-    }
-
-    /// Returns the client whose capabilities and transport this session uses.
-    pub fn client(&self) -> &Client<S> {
-        &self.client
-    }
-
-    /// Closes this SAP user session and releases its server-side resources.
-    ///
-    /// If no stateful response established a `sap-contextid`, this returns
-    /// without sending a request. Otherwise it performs a safe core-discovery
-    /// request carrying the context with `x-sap-adt-sessiontype: stateless`,
-    /// leaving the stateful backend session through an existing resource.
-    pub async fn close(self) -> Result<(), OperationError> {
-        let state = self.state.into_inner();
-        let Some(cookie) = state.cookie_header()? else {
-            return Ok(());
-        };
-        let target = AdtUri::parse(CORE_DISCOVERY_PATH)
-            .expect("the core discovery path must be a valid ADT URI");
-        let mut request = AdtRequest::new(http::Method::GET, target);
-        request.headers_mut().insert(
-            ADT_SESSION_TYPE,
-            HeaderValue::from_static(STATELESS_SESSION_TYPE),
-        );
-        request.headers_mut().append(header::COOKIE, cookie);
-        let response = self.client.transport().send(request).await?;
-        if response.status() == http::StatusCode::OK {
-            Ok(())
-        } else {
-            Err(ResponseError::unexpected_status(&response).into())
-        }
-    }
-}
-
-impl UserSession<Ready> {
-    /// Creates an empty stateful batch bound to this session.
-    pub fn batch(&self) -> BatchOperation<'_, Stateful> {
-        BatchOperation::for_user_session(self)
+        Ok(OperationResponse::with_context(response, resolved.context).in_user_session(self.id()))
     }
 }
 
@@ -583,10 +466,13 @@ mod tests {
     };
 
     use async_trait::async_trait;
-    use http::{HeaderMap, Method, StatusCode};
+    use http::{HeaderMap, HeaderValue, Method, StatusCode};
 
     use super::*;
-    use crate::{AdtUri, Transport};
+    use crate::{
+        AdtUri, Transport, TransportError,
+        protocol::{ADT_SESSION_TYPE_HEADER, AdtSessionType},
+    };
 
     struct StatefulProbe;
 
@@ -738,13 +624,40 @@ mod tests {
         let requests = requests.lock().unwrap();
         assert_eq!(requests.len(), 2);
         assert_eq!(
-            requests[0].get(ADT_SESSION_TYPE).unwrap(),
-            STATEFUL_SESSION_TYPE
+            requests[0].get(ADT_SESSION_TYPE_HEADER).unwrap(),
+            AdtSessionType::Stateful.as_str()
         );
         assert!(!requests[0].contains_key(header::COOKIE));
         assert_eq!(
             requests[1].get(header::COOKIE).unwrap(),
             "sap-contextid=context-1"
         );
+    }
+
+    #[tokio::test]
+    async fn expired_user_session_fails_without_replaying_or_reopening() {
+        let requests = Arc::new(StdMutex::new(Vec::new()));
+        let transport = ContextFixtureTransport {
+            requests: Arc::clone(&requests),
+            responses: StdMutex::new(VecDeque::from([AdtResponse::new(
+                StatusCode::BAD_REQUEST,
+                HeaderMap::new(),
+                b"ICMENOSESSION".to_vec(),
+            )])),
+        };
+        let session = Client::new(transport).create_user_session();
+
+        let first = StatefulProbe.execute(&session).await.unwrap_err();
+        let second = StatefulProbe.execute(&session).await.unwrap_err();
+
+        assert!(matches!(
+            first,
+            OperationError::Response(ResponseError::UserSessionExpired { .. })
+        ));
+        assert!(matches!(
+            second,
+            OperationError::Response(ResponseError::UserSessionExpired { .. })
+        ));
+        assert_eq!(requests.lock().unwrap().len(), 1);
     }
 }

@@ -12,17 +12,16 @@ use crate::{
     OperationResponse, Owned, ResponseError, Stateless, compatibility::media_types_match,
 };
 
-const SESSION_MEDIA_TYPE: &str = "application/vnd.sap.adt.core.http.session.v3+xml";
-const HTTP_SESSIONS_PATH: &str = "/sap/bc/adt/core/http/sessions";
-const SECURITY_SESSION_HEADER: HeaderName = HeaderName::from_static("x-sap-security-session");
-const PURPOSE_HEADER: HeaderName = HeaderName::from_static("sap-adt-purpose");
-const LOAD_BALANCER_HEADER: HeaderName = HeaderName::from_static("sap-adt-saplb");
-const CANCEL_ON_CLOSE_HEADER: HeaderName = HeaderName::from_static("sap-cancel-on-close");
-
-pub(crate) fn parse_session_information(body: &[u8]) -> Result<SessionInformation, LogonError> {
-    let raw: RawSession = serde_xml_rs::from_reader(body)?;
-    SessionInformation::from_raw(raw)
-}
+pub(crate) const SESSION_MEDIA_TYPE: &str = "application/vnd.sap.adt.core.http.session.v3+xml";
+pub(crate) const HTTP_SESSIONS_PATH: &str = "/sap/bc/adt/core/http/sessions";
+pub(crate) const SECURITY_SESSION_HEADER: HeaderName =
+    HeaderName::from_static("x-sap-security-session");
+pub(crate) const PURPOSE_HEADER: HeaderName = HeaderName::from_static("sap-adt-purpose");
+pub(crate) const LOAD_BALANCER_HEADER: HeaderName = HeaderName::from_static("sap-adt-saplb");
+pub(crate) const CANCEL_ON_CLOSE_HEADER: HeaderName =
+    HeaderName::from_static("sap-cancel-on-close");
+pub(crate) const PREFLIGHT_LOGON_PURPOSE: &str = "preflight_logon";
+const LOGON_PURPOSE: &str = "logon";
 
 /// Information advertised for an authenticated ADT HTTP security session.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -48,12 +47,17 @@ impl SessionInformation {
         "http://www.sap.com/adt/categories/core/http/system/systeminformation";
     const INACTIVITY_TIMEOUT_PROPERTY: &str = "inactivityTimeout";
 
-    fn from_raw(raw: RawSession) -> Result<Self, LogonError> {
-        let logoff =
-            find_link(&raw.links, Self::LOGOFF_RELATION).ok_or(LogonError::MissingLogoffLink)?;
-        let cleanup =
-            find_link(&raw.links, Self::CLEANUP_RELATION).ok_or(LogonError::MissingCleanupLink)?;
-        let system_information = find_link(&raw.links, Self::SYSTEM_INFORMATION_RELATION)
+    pub(crate) fn from_xml(body: &[u8]) -> Result<Self, LogonError> {
+        let session: WireSession = serde_xml_rs::from_reader(body)?;
+        Self::from_wire(session)
+    }
+
+    fn from_wire(session: WireSession) -> Result<Self, LogonError> {
+        let logoff = find_link(&session.links, Self::LOGOFF_RELATION)
+            .ok_or(LogonError::MissingLogoffLink)?;
+        let cleanup = find_link(&session.links, Self::CLEANUP_RELATION)
+            .ok_or(LogonError::MissingCleanupLink)?;
+        let system_information = find_link(&session.links, Self::SYSTEM_INFORMATION_RELATION)
             .map(|link| -> Result<SystemInformationLink, LogonError> {
                 let media_type = link
                     .media_type
@@ -69,7 +73,7 @@ impl SessionInformation {
 
         let mut inactivity_timeout = None;
         let mut inactivity_timeout_seen = false;
-        if let Some(properties) = raw.properties {
+        if let Some(properties) = session.properties {
             for property in properties.values {
                 if property.name != Self::INACTIVITY_TIMEOUT_PROPERTY {
                     continue;
@@ -156,22 +160,22 @@ pub struct SystemInformationLink {
     pub media_type: String,
 }
 
-fn find_link<'a>(links: &'a [RawLink], relation: &str) -> Option<&'a RawLink> {
+fn find_link<'a>(links: &'a [WireLink], relation: &str) -> Option<&'a WireLink> {
     links.iter().rev().find(|link| link.relation == relation)
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename = "http:session")]
-struct RawSession {
+struct WireSession {
     #[serde(rename = "atom:link", default)]
-    links: Vec<RawLink>,
+    links: Vec<WireLink>,
 
     #[serde(rename = "http:properties")]
-    properties: Option<RawProperties>,
+    properties: Option<WireProperties>,
 }
 
 #[derive(Debug, Deserialize)]
-struct RawLink {
+struct WireLink {
     #[serde(rename = "@href")]
     href: String,
 
@@ -183,13 +187,13 @@ struct RawLink {
 }
 
 #[derive(Debug, Deserialize)]
-struct RawProperties {
+struct WireProperties {
     #[serde(rename = "http:property", default)]
-    values: Vec<RawProperty>,
+    values: Vec<WireProperty>,
 }
 
 #[derive(Debug, Deserialize)]
-struct RawProperty {
+struct WireProperty {
     #[serde(rename = "@name")]
     name: String,
 
@@ -201,13 +205,30 @@ struct RawProperty {
 ///
 /// This HTTP-specific operation returns the advertised [`SessionInformation`]
 /// without changing client typestate.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Logon;
+#[derive(Clone, Copy, Debug)]
+pub struct Logon {
+    purpose: &'static str,
+}
+
+impl Default for Logon {
+    fn default() -> Self {
+        Self {
+            purpose: LOGON_PURPOSE,
+        }
+    }
+}
+
+impl Logon {
+    pub(crate) fn as_preflight(mut self) -> Self {
+        self.purpose = PREFLIGHT_LOGON_PURPOSE;
+        self
+    }
+}
 
 impl<S: ClientState> Client<S> {
     /// Creates an operation that establishes an HTTP security session.
     pub fn logon(&self) -> Logon {
-        Logon
+        Logon::default()
     }
 }
 
@@ -229,7 +250,7 @@ impl Operation for Logon {
             .insert(SECURITY_SESSION_HEADER, HeaderValue::from_static("create"));
         request
             .headers_mut()
-            .insert(PURPOSE_HEADER, HeaderValue::from_static("logon"));
+            .insert(PURPOSE_HEADER, HeaderValue::from_static(self.purpose));
         request
             .headers_mut()
             .insert(LOAD_BALANCER_HEADER, HeaderValue::from_static("fetch"));
@@ -255,11 +276,11 @@ impl Operation for Logon {
             }
             .into());
         }
-        parse_session_information(response.body()).map_err(Into::into)
+        SessionInformation::from_xml(response.body()).map_err(Into::into)
     }
 }
 
-fn cache_buster() -> String {
+pub(crate) fn cache_buster() -> String {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -275,7 +296,7 @@ mod tests {
 
     #[test]
     fn parses_v3_session_information() {
-        let session = parse_session_information(SESSION_XML).unwrap();
+        let session = SessionInformation::from_xml(SESSION_XML).unwrap();
 
         assert_eq!(session.logoff_uri.as_str(), "/sap/public/bc/icf/logoff");
         assert_eq!(

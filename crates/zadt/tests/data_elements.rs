@@ -55,7 +55,7 @@ async fn ready_client(server: &MockServer) -> Client<Ready> {
         .build()
         .unwrap();
     let client = Client::new(transport);
-    Logon.execute(&client).await.unwrap();
+    Logon::default().execute(&client).await.unwrap();
     client.discover().await.unwrap()
 }
 

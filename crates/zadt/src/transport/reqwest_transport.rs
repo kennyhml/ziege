@@ -1,22 +1,14 @@
-use std::sync::Arc;
-
-use async_lock::Mutex;
 use async_trait::async_trait;
 use derive_builder::Builder;
-use http::{HeaderMap, HeaderValue, Method, StatusCode, header};
-use reqwest::cookie::{CookieStore, Jar};
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::SecretString;
 use url::Url;
 
-use crate::{
-    AdtRequest, AdtResponse, ReqwestTransportBuildError, Transport, TransportError,
-    protocol::CORE_DISCOVERY_PATH,
-};
+use crate::{AdtRequest, AdtResponse, ReqwestTransportBuildError, Transport, TransportError, User};
 
-const CSRF_TOKEN_HEADER: &str = "x-csrf-token";
-const CSRF_FETCH: &str = "Fetch";
-const ADT_SESSION_TYPE_HEADER: &str = "x-sap-adt-sessiontype";
-const STATELESS_SESSION_TYPE: &str = "stateless";
+use self::{connection::HttpConnection, security::HttpSecuritySession};
+
+mod connection;
+mod security;
 
 /// An ADT transport backed by `reqwest`.
 ///
@@ -30,14 +22,15 @@ const STATELESS_SESSION_TYPE: &str = "stateless";
 ///
 /// Before the first mutating request, the transport fetches a CSRF token from
 /// core discovery and reuses it for subsequent requests in the same security
-/// session.
+/// session. A definitive `403` CSRF rejection refreshes the token and replays
+/// the request once. A `401` resets the HTTP security session, performs one
+/// preflight logon, and replays the rejected request once.
+///
+/// Transport failures and server errors are never replayed because SAP may
+/// already have applied a mutating request when those failures are observed.
 pub struct ReqwestTransport {
-    client: reqwest::Client,
-    cookies: Arc<SapCookieStore>,
-    csrf_token: Mutex<Option<HeaderValue>>,
-    destination: Url,
-    username: String,
-    password: SecretString,
+    connection: HttpConnection,
+    security: HttpSecuritySession,
 }
 
 impl ReqwestTransport {
@@ -60,14 +53,14 @@ pub struct ReqwestTransportConfig {
     language: String,
 
     #[builder(setter(custom))]
-    username: String,
+    username: User,
 
     #[builder(setter(custom))]
     password: SecretString,
 }
 
 impl ReqwestTransportBuilder {
-    pub fn basic_auth(mut self, username: impl Into<String>, password: impl Into<String>) -> Self {
+    pub fn basic_auth(mut self, username: impl Into<User>, password: impl Into<String>) -> Self {
         self.username = Some(username.into());
         self.password = Some(SecretString::from(password.into()));
         self
@@ -92,19 +85,14 @@ impl ReqwestTransportBuilder {
             .append_pair("sap-client", &config.sap_client)
             .append_pair("sap-language", &config.language)
             .finish();
-        let cookie_store = Arc::new(SapCookieStore::new(&destination, &user_context));
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .cookie_provider(Arc::clone(&cookie_store))
-            .build()?;
-
         Ok(ReqwestTransport {
-            client,
-            cookies: cookie_store,
-            csrf_token: Mutex::new(None),
-            destination,
-            username: config.username,
-            password: config.password,
+            connection: HttpConnection::new(
+                destination,
+                &user_context,
+                config.username,
+                config.password,
+            )?,
+            security: HttpSecuritySession::default(),
         })
     }
 }
@@ -112,191 +100,66 @@ impl ReqwestTransportBuilder {
 #[async_trait]
 impl Transport for ReqwestTransport {
     async fn send(&self, request: AdtRequest) -> Result<AdtResponse, TransportError> {
-        let (method, target, query, mut headers, body) = request.into_parts();
-        let url = request_url(&self.destination, &target, &query).map_err(TransportError::new)?;
+        let mut retried_csrf = false;
+        let mut retried_auth = false;
 
-        if requires_csrf_token(&method) && !headers.contains_key(CSRF_TOKEN_HEADER) {
-            headers.insert(CSRF_TOKEN_HEADER, self.csrf_token().await?);
-        }
+        loop {
+            // Sometimes the security component can infer that action must be taken
+            // prior to sending the request, for instance when a server defined timeout
+            // has been reached since the last request, or when a CSRF token is needed
+            let prepared = self.security.prepare(&self.connection, &request).await?;
 
-        // Merge request-specific user-session cookies into the security session.
-        merge_cookie_headers(&mut headers, self.cookies.cookies(&url))
-            .map_err(TransportError::new)?;
+            let res = self.connection.send(&request, prepared.headers()).await?;
+            self.security.observe(&prepared, &res).await;
 
-        let response = self
-            .client
-            .request(method, url)
-            .headers(headers)
-            .basic_auth(&self.username, Some(self.password.expose_secret()))
-            .body(body)
-            .send()
-            .await
-            .map_err(TransportError::new)?;
+            // Handling of security failures we could not anticipate. No I/O takes
+            // place here, they are just marked for retry on the next prepare.
+            if !retried_auth && self.security.invalidate_unauthorized(&prepared, &res).await {
+                retried_auth = true;
+                continue;
+            }
+            if !retried_csrf && self.security.invalidate_csrf(&prepared, &res).await {
+                retried_csrf = true;
+                continue;
+            }
 
-        let status = response.status();
-        let headers = response.headers().clone();
-        self.remember_csrf_token(&headers).await;
-        let body = response
-            .bytes()
-            .await
-            .map_err(TransportError::new)?
-            .to_vec();
-        Ok(AdtResponse::new(status, headers, body))
-    }
-}
-
-impl ReqwestTransport {
-    async fn csrf_token(&self) -> Result<HeaderValue, TransportError> {
-        let mut token = self.csrf_token.lock().await;
-        if let Some(token) = token.as_ref() {
-            return Ok(token.clone());
-        }
-
-        let fetched = self.fetch_csrf_token().await?;
-        *token = Some(fetched.clone());
-        Ok(fetched)
-    }
-
-    async fn fetch_csrf_token(&self) -> Result<HeaderValue, TransportError> {
-        let url = self
-            .destination
-            .join(CORE_DISCOVERY_PATH)
-            .map_err(TransportError::new)?;
-        let mut headers = HeaderMap::new();
-        headers.insert(CSRF_TOKEN_HEADER, HeaderValue::from_static(CSRF_FETCH));
-        headers.insert(
-            ADT_SESSION_TYPE_HEADER,
-            HeaderValue::from_static(STATELESS_SESSION_TYPE),
-        );
-        merge_cookie_headers(&mut headers, self.cookies.cookies(&url))
-            .map_err(TransportError::new)?;
-
-        let response = self
-            .client
-            .get(url)
-            .headers(headers)
-            .basic_auth(&self.username, Some(self.password.expose_secret()))
-            .send()
-            .await
-            .map_err(TransportError::new)?;
-        let status = response.status();
-        let token = response.headers().get(CSRF_TOKEN_HEADER).cloned();
-        response.bytes().await.map_err(TransportError::new)?;
-
-        if status != StatusCode::OK {
-            return Err(TransportError::new(CsrfTokenError::UnexpectedStatus(
-                status,
-            )));
-        }
-        token.ok_or_else(|| TransportError::new(CsrfTokenError::MissingToken))
-    }
-
-    async fn remember_csrf_token(&self, headers: &HeaderMap) {
-        let Some(token) = headers.get(CSRF_TOKEN_HEADER) else {
-            return;
-        };
-        if !matches!(token.to_str(), Ok(value) if value.eq_ignore_ascii_case("required") || value.eq_ignore_ascii_case(CSRF_FETCH))
-        {
-            *self.csrf_token.lock().await = Some(token.clone());
+            return Ok(res);
         }
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-enum CsrfTokenError {
-    #[error("CSRF token request returned unexpected HTTP status {0}")]
-    UnexpectedStatus(StatusCode),
-
-    #[error("CSRF token response did not include x-csrf-token")]
-    MissingToken,
-}
-
-fn requires_csrf_token(method: &Method) -> bool {
-    !matches!(
-        *method,
-        Method::GET | Method::HEAD | Method::OPTIONS | Method::TRACE
-    )
-}
-
-#[derive(Debug, Default)]
-struct SapCookieStore {
-    jar: Jar,
-}
-
-impl SapCookieStore {
-    fn new(destination: &Url, user_context: &str) -> Self {
-        let jar = Jar::default();
-        jar.add_cookie_str(
-            &format!("sap-usercontext={user_context}; Path=/"),
-            destination,
-        );
-        Self { jar }
-    }
-}
-
-impl CookieStore for SapCookieStore {
-    fn set_cookies(&self, cookie_headers: &mut dyn Iterator<Item = &HeaderValue>, url: &Url) {
-        let cookies = cookie_headers
-            .filter(|header| !is_adt_context_cookie(header))
-            .collect::<Vec<_>>();
-        self.jar.set_cookies(&mut cookies.into_iter(), url);
-    }
-
-    fn cookies(&self, url: &Url) -> Option<HeaderValue> {
-        self.jar.cookies(url)
-    }
-}
-
-fn is_adt_context_cookie(header: &HeaderValue) -> bool {
-    header
-        .to_str()
-        .ok()
-        .and_then(|value| value.split_once('='))
-        .is_some_and(|(name, _)| name.trim().eq_ignore_ascii_case("sap-contextid"))
-}
-
-fn merge_cookie_headers(
-    headers: &mut HeaderMap,
-    session_cookies: Option<HeaderValue>,
-) -> Result<(), http::header::InvalidHeaderValue> {
-    let mut cookies = Vec::new();
-    if let Some(session_cookies) = session_cookies {
-        cookies.extend_from_slice(session_cookies.as_bytes());
-    }
-    for request_cookies in headers.get_all(header::COOKIE) {
-        if !cookies.is_empty() {
-            cookies.extend_from_slice(b"; ");
-        }
-        cookies.extend_from_slice(request_cookies.as_bytes());
-    }
-    if !cookies.is_empty() {
-        headers.insert(header::COOKIE, HeaderValue::from_bytes(&cookies)?);
-    }
-    Ok(())
-}
-
-fn request_url(
-    destination: &Url,
-    target: &crate::AdtUri,
-    query_parameters: &[(String, String)],
-) -> Result<Url, url::ParseError> {
-    let mut url = destination.join(target.as_str())?;
-    if !query_parameters.is_empty() {
-        let mut query = url.query_pairs_mut();
-        query.extend_pairs(
-            query_parameters
-                .iter()
-                .map(|(name, value)| (name.as_str(), value.as_str())),
-        );
-    }
-    Ok(url)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
-    use crate::AdtUri;
-    use http::Method;
+    use super::{
+        connection::{SapCookieStore, merge_cookie_headers, request_url},
+        security::{CSRF_FETCH, CSRF_TOKEN_HEADER},
+    };
+    use crate::{
+        AdtUri,
+        api::session::{
+            HTTP_SESSIONS_PATH, PREFLIGHT_LOGON_PURPOSE, SECURITY_SESSION_HEADER,
+            SESSION_MEDIA_TYPE,
+        },
+        protocol::CORE_DISCOVERY_PATH,
+    };
+    use http::{HeaderMap, HeaderValue, Method, StatusCode, header};
+    use httpmock::prelude::*;
+    use reqwest::cookie::CookieStore;
+
+    const SESSION_XML: &str = include_str!("../../tests/fixtures/http-session-v3.xml");
+
+    fn test_transport(server: &MockServer) -> ReqwestTransport {
+        ReqwestTransport::builder()
+            .destination(server.base_url())
+            .sap_client("001")
+            .language("EN")
+            .basic_auth("USER", "PASSWORD")
+            .build()
+            .unwrap()
+    }
 
     #[test]
     fn builder_reports_missing_required_fields() {
@@ -318,7 +181,7 @@ mod tests {
             AdtUri::parse("/sap/bc/adt/core/discovery").unwrap(),
         );
 
-        let url = request_url(&destination, request.target(), request.query()).unwrap();
+        let url = request_url(&destination, request.target().as_str(), request.query()).unwrap();
 
         assert_eq!(url.query(), None);
         assert_eq!(
@@ -344,6 +207,20 @@ mod tests {
     }
 
     #[test]
+    fn cookie_store_reset_drops_security_session_but_keeps_user_context() {
+        let destination = Url::parse("https://sap.example.test/").unwrap();
+        let store = SapCookieStore::new(&destination, "sap-client=001&sap-language=EN");
+        let session = HeaderValue::from_static("SAP_SESSIONID_A4H_001=stale; Path=/");
+        store.set_cookies(&mut [&session].into_iter(), &destination);
+
+        store.reset();
+
+        let cookies = store.cookies(&destination).unwrap();
+        let cookies = cookies.to_str().unwrap();
+        assert_eq!(cookies, "sap-usercontext=sap-client=001&sap-language=EN");
+    }
+
+    #[test]
     fn merges_session_and_request_specific_cookies() {
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -363,5 +240,241 @@ mod tests {
             headers.get(header::COOKIE).unwrap(),
             "sap-usercontext=sap-client=001; SAP_SESSIONID_A4H_001=session; sap-contextid=context"
         );
+    }
+
+    #[tokio::test]
+    async fn refreshes_a_rejected_csrf_token_once() {
+        let server = MockServer::start_async().await;
+        let initial_fetch = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path(CORE_DISCOVERY_PATH)
+                    .header(CSRF_TOKEN_HEADER, CSRF_FETCH)
+                    .header("cookie", "sap-usercontext=sap-client=001&sap-language=EN");
+                then.status(200).header(CSRF_TOKEN_HEADER, "CSRF-OLD");
+            })
+            .await;
+        let rejected = server
+            .mock_async(|when, then| {
+                when.method(POST)
+                    .path("/sap/bc/adt/test/write")
+                    .header(CSRF_TOKEN_HEADER, "CSRF-OLD");
+                then.status(403)
+                    .header(CSRF_TOKEN_HEADER, "Required")
+                    .header("set-cookie", "csrf-stage=refresh; Path=/");
+            })
+            .await;
+        let refreshed_fetch = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path(CORE_DISCOVERY_PATH)
+                    .header(CSRF_TOKEN_HEADER, CSRF_FETCH)
+                    .cookie("csrf-stage", "refresh");
+                then.status(200).header(CSRF_TOKEN_HEADER, "CSRF-NEW");
+            })
+            .await;
+        let accepted = server
+            .mock_async(|when, then| {
+                when.method(POST)
+                    .path("/sap/bc/adt/test/write")
+                    .header(CSRF_TOKEN_HEADER, "CSRF-NEW");
+                then.status(204);
+            })
+            .await;
+        let transport = test_transport(&server);
+        let mut request = AdtRequest::new(
+            Method::POST,
+            AdtUri::parse("/sap/bc/adt/test/write").unwrap(),
+        );
+        request.set_body(b"payload".to_vec());
+
+        let response = transport.send(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        initial_fetch.assert_hits_async(1).await;
+        rejected.assert_hits_async(1).await;
+        refreshed_fetch.assert_hits_async(1).await;
+        accepted.assert_hits_async(1).await;
+    }
+
+    #[tokio::test]
+    async fn transport_owned_csrf_overrides_a_request_header() {
+        let server = MockServer::start_async().await;
+        let fetch = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path(CORE_DISCOVERY_PATH)
+                    .header(CSRF_TOKEN_HEADER, CSRF_FETCH);
+                then.status(200).header(CSRF_TOKEN_HEADER, "CSRF-MANAGED");
+            })
+            .await;
+        let write = server
+            .mock_async(|when, then| {
+                when.method(POST)
+                    .path("/sap/bc/adt/test/write")
+                    .header(CSRF_TOKEN_HEADER, "CSRF-MANAGED");
+                then.status(204);
+            })
+            .await;
+        let transport = test_transport(&server);
+        let mut request = AdtRequest::new(
+            Method::POST,
+            AdtUri::parse("/sap/bc/adt/test/write").unwrap(),
+        );
+        request.headers_mut().insert(
+            CSRF_TOKEN_HEADER,
+            HeaderValue::from_static("CALLER-SUPPLIED"),
+        );
+
+        let response = transport.send(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        fetch.assert_hits_async(1).await;
+        write.assert_hits_async(1).await;
+    }
+
+    #[tokio::test]
+    async fn security_session_request_is_not_reconnected_recursively() {
+        let server = MockServer::start_async().await;
+        let logon = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path(HTTP_SESSIONS_PATH)
+                    .header("x-sap-security-session", "create");
+                then.status(401);
+            })
+            .await;
+        let transport = test_transport(&server);
+        let mut request = AdtRequest::new(Method::GET, AdtUri::parse(HTTP_SESSIONS_PATH).unwrap());
+        request
+            .headers_mut()
+            .insert(SECURITY_SESSION_HEADER, HeaderValue::from_static("create"));
+
+        let response = transport.send(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        logon.assert_hits_async(1).await;
+    }
+
+    #[tokio::test]
+    async fn reconnects_and_retries_once_after_unauthorized() {
+        let server = MockServer::start_async().await;
+        let unauthorized = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path("/sap/bc/adt/test/read")
+                    .header("cookie", "sap-usercontext=sap-client=001&sap-language=EN");
+                then.status(401)
+                    .header("set-cookie", "SAP_SESSIONID_A4H_001=stale; Path=/");
+            })
+            .await;
+        let relogon = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path(HTTP_SESSIONS_PATH)
+                    .header("sap-adt-purpose", PREFLIGHT_LOGON_PURPOSE)
+                    .header("x-sap-security-session", "create")
+                    .header("cookie", "sap-usercontext=sap-client=001&sap-language=EN");
+                then.status(200)
+                    .header("content-type", SESSION_MEDIA_TYPE)
+                    .header("set-cookie", "SAP_SESSIONID_A4H_001=fresh; Path=/")
+                    .body(SESSION_XML);
+            })
+            .await;
+        let accepted = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path("/sap/bc/adt/test/read")
+                    .cookie("SAP_SESSIONID_A4H_001", "fresh");
+                then.status(200).body("ok");
+            })
+            .await;
+        let transport = test_transport(&server);
+        let request = AdtRequest::new(Method::GET, AdtUri::parse("/sap/bc/adt/test/read").unwrap());
+
+        let response = transport.send(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.body(), b"ok");
+        unauthorized.assert_hits_async(1).await;
+        relogon.assert_hits_async(1).await;
+        accepted.assert_hits_async(1).await;
+    }
+
+    #[tokio::test]
+    async fn does_not_reconnect_recursively() {
+        let server = MockServer::start_async().await;
+        let initial = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path("/sap/bc/adt/test/read")
+                    .header("cookie", "sap-usercontext=sap-client=001&sap-language=EN");
+                then.status(401);
+            })
+            .await;
+        let relogon = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path(HTTP_SESSIONS_PATH)
+                    .header("sap-adt-purpose", PREFLIGHT_LOGON_PURPOSE);
+                then.status(200)
+                    .header("content-type", SESSION_MEDIA_TYPE)
+                    .header("set-cookie", "SAP_SESSIONID_A4H_001=fresh; Path=/")
+                    .body(SESSION_XML);
+            })
+            .await;
+        let retried = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path("/sap/bc/adt/test/read")
+                    .cookie("SAP_SESSIONID_A4H_001", "fresh");
+                then.status(401);
+            })
+            .await;
+        let transport = test_transport(&server);
+        let request = AdtRequest::new(Method::GET, AdtUri::parse("/sap/bc/adt/test/read").unwrap());
+
+        let response = transport.send(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        initial.assert_hits_async(1).await;
+        relogon.assert_hits_async(1).await;
+        retried.assert_hits_async(1).await;
+    }
+
+    #[tokio::test]
+    async fn reconnects_before_using_an_inactive_security_session() {
+        let server = MockServer::start_async().await;
+        let relogon = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path(HTTP_SESSIONS_PATH)
+                    .header("sap-adt-purpose", PREFLIGHT_LOGON_PURPOSE);
+                then.status(200)
+                    .header("content-type", SESSION_MEDIA_TYPE)
+                    .header("set-cookie", "SAP_SESSIONID_A4H_001=fresh; Path=/")
+                    .body(SESSION_XML);
+            })
+            .await;
+        let read = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path("/sap/bc/adt/test/read")
+                    .cookie("SAP_SESSIONID_A4H_001", "fresh");
+                then.status(200);
+            })
+            .await;
+        let transport = test_transport(&server);
+        transport
+            .security
+            .set_inactive(Duration::from_secs(2), Duration::from_secs(1))
+            .await;
+        let request = AdtRequest::new(Method::GET, AdtUri::parse("/sap/bc/adt/test/read").unwrap());
+
+        let response = transport.send(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        relogon.assert_hits_async(1).await;
+        read.assert_hits_async(1).await;
     }
 }

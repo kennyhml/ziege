@@ -39,7 +39,7 @@ async fn core_discovery_is_available_before_central_discovery() {
     let transport = FixtureTransport::new(CORE_DISCOVERY_XML);
     let requests = Arc::clone(&transport.requests);
     let client = Client::new(transport);
-    Logon.execute(&client).await.unwrap();
+    Logon::default().execute(&client).await.unwrap();
 
     let capabilities = CoreDiscoveryQuery.execute(&client).await.unwrap();
     let collection = capabilities
@@ -69,7 +69,7 @@ async fn client_discovery_transitions_and_retains_capabilities() {
     let transport = FixtureTransport::new(DISCOVERY_XML);
     let requests = Arc::clone(&transport.requests);
     let client = Client::new(transport);
-    Logon.execute(&client).await.unwrap();
+    Logon::default().execute(&client).await.unwrap();
     let client = client.discover().await.unwrap();
     let cloned_client = client.clone();
 
@@ -114,7 +114,7 @@ async fn client_discovery_transitions_and_retains_capabilities() {
 #[tokio::test]
 async fn class_references_use_the_discovered_oo_collection() {
     let client = Client::new(FixtureTransport::new(DISCOVERY_XML));
-    Logon.execute(&client).await.unwrap();
+    Logon::default().execute(&client).await.unwrap();
     let client = client.discover().await.unwrap();
 
     let class = client.object::<Class>("ZCL_EXAMPLE").unwrap();
@@ -126,7 +126,7 @@ async fn class_references_use_the_discovered_oo_collection() {
 #[tokio::test]
 async fn runtime_object_types_use_the_registered_descriptor() {
     let client = Client::new(FixtureTransport::new(DISCOVERY_XML));
-    Logon.execute(&client).await.unwrap();
+    Logon::default().execute(&client).await.unwrap();
     let client = client.discover().await.unwrap();
 
     for (object_type, name, expected_uri) in [
@@ -205,7 +205,7 @@ async fn reqwest_transport_sends_the_discovery_contract() {
         .unwrap();
 
     let client = Client::new(transport);
-    Logon.execute(&client).await.unwrap();
+    Logon::default().execute(&client).await.unwrap();
     let client = client.discover().await.unwrap();
 
     logon.assert_async().await;
@@ -265,7 +265,7 @@ async fn reqwest_transport_reuses_security_session_cookies() {
         .build()
         .unwrap();
     let client = Client::new(transport);
-    Logon.execute(&client).await.unwrap();
+    Logon::default().execute(&client).await.unwrap();
 
     client.discover().await.unwrap();
 
@@ -297,7 +297,7 @@ async fn unexpected_status_is_an_operation_response_error() {
         .unwrap();
 
     let client = Client::new(transport);
-    Logon.execute(&client).await.unwrap();
+    Logon::default().execute(&client).await.unwrap();
     let error = match client.discover().await {
         Ok(_) => panic!("discovery unexpectedly succeeded"),
         Err(error) => error,
@@ -310,13 +310,13 @@ async fn unexpected_status_is_an_operation_response_error() {
             ..
         })
     ));
-    logon.assert_async().await;
+    logon.assert_hits_async(2).await;
 }
 
 #[tokio::test]
 async fn discovery_defers_collection_url_validation_until_use() {
     let client = Client::new(FixtureTransport::new(INVALID_DISCOVERY_XML));
-    Logon.execute(&client).await.unwrap();
+    Logon::default().execute(&client).await.unwrap();
     let capabilities = DiscoveryQuery.execute(&client).await.unwrap();
     let collection = capabilities
         .collection("http://www.sap.com/adt/categories/programs", "programs")

@@ -2,8 +2,7 @@ use std::marker::PhantomData;
 
 use http::{HeaderMap, HeaderValue, Method, header};
 
-use super::UserSessionId;
-use crate::{AdtUri, CategoryId, EntityTag};
+use crate::{AdtUri, CategoryId, EntityTag, user_session::UserSessionId};
 
 mod private {
     pub trait Sealed {}
@@ -142,12 +141,15 @@ pub(crate) struct EncodedRequest {
     pub(crate) query: Vec<(String, String)>,
     pub(crate) headers: HeaderMap,
     pub(crate) body: Vec<u8>,
-    pub(crate) required_user_session: Option<UserSessionId>,
 }
 
-/// A transport-neutral operation whose target has not necessarily been resolved.
+/// A transport-neutral operation plan whose target has not necessarily been resolved.
+///
+/// The encoded request contains only protocol data. Local execution metadata,
+/// such as user-session affinity, is retained separately by this plan.
 pub struct EncodedOperation<T: OperationTarget> {
     pub(crate) request: EncodedRequest,
+    bound_user_session: Option<UserSessionId>,
     target: PhantomData<fn() -> T>,
 }
 
@@ -182,10 +184,14 @@ impl<T: OperationTarget> EncodedOperation<T> {
                 query: Vec::new(),
                 headers: HeaderMap::new(),
                 body: Vec::new(),
-                required_user_session: None,
             },
+            bound_user_session: None,
             target: PhantomData,
         }
+    }
+
+    pub(crate) fn into_parts(self) -> (EncodedRequest, Option<UserSessionId>) {
+        (self.request, self.bound_user_session)
     }
 
     pub fn push_query(&mut self, name: impl Into<String>, value: impl Into<String>) {
@@ -248,7 +254,7 @@ impl<T: OperationTarget> EncodedOperation<T> {
         self.request.body = body.into();
     }
 
-    pub(crate) fn require_user_session(&mut self, user_session: UserSessionId) {
-        self.request.required_user_session = Some(user_session);
+    pub(crate) fn bind_user_session(&mut self, user_session: UserSessionId) {
+        self.bound_user_session = Some(user_session);
     }
 }

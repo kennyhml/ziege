@@ -183,7 +183,7 @@ impl Operation for ObjectSourceUpdate {
             request.push_query(TRANSPORT_REQUEST_QUERY, transport_request.as_str());
         }
         if let Some(user_session) = self.object_lock.user_session() {
-            request.require_user_session(user_session);
+            request.bind_user_session(user_session);
         }
         request.set_content_type(SOURCE_UPDATE_MEDIA_TYPE);
         request.set_body(self.content.clone());

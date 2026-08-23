@@ -9,6 +9,22 @@ use crate::AdtUri;
 
 pub(crate) const TEXT_PLAIN_MEDIA_TYPE: &str = "text/plain";
 pub(crate) const CORE_DISCOVERY_PATH: &str = "/sap/bc/adt/core/discovery";
+pub(crate) const ADT_SESSION_TYPE_HEADER: &str = "x-sap-adt-sessiontype";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum AdtSessionType {
+    Stateful,
+    Stateless,
+}
+
+impl AdtSessionType {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Stateful => "stateful",
+            Self::Stateless => "stateless",
+        }
+    }
+}
 
 /// Actions accepted through ADT's `_action` query parameter.
 ///
@@ -99,6 +115,13 @@ impl AdtRequest {
 
     pub fn headers_mut(&mut self) -> &mut HeaderMap {
         &mut self.headers
+    }
+
+    pub(crate) fn set_session_type(&mut self, session_type: AdtSessionType) {
+        self.headers.insert(
+            ADT_SESSION_TYPE_HEADER,
+            HeaderValue::from_static(session_type.as_str()),
+        );
     }
 
     /// Sets the media type accepted for the response.

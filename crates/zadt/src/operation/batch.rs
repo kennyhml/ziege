@@ -6,11 +6,11 @@ use uuid::Uuid;
 
 use super::{
     Advertised, CollectionTarget, EncodedOperation, Operation, OperationContext, OperationKind,
-    Resolve, Stateful, Stateless, UserSession, UserSessionId,
+    Resolve, Stateful, Stateless,
 };
 use crate::{
     AdtRequest, AdtResponse, CategoryId, Client, EncodeError, OperationError, OperationResponse,
-    Ready, ResolveError, ResponseError,
+    Ready, ResolveError, ResponseError, UserSession, UserSessionId,
 };
 
 const BATCH_CATEGORY: CategoryId = CategoryId {
@@ -67,11 +67,11 @@ impl BoundExecutor<'_> {
 
     fn validate_user_session(
         &self,
-        required_user_session: Option<UserSessionId>,
+        bound_user_session: Option<UserSessionId>,
     ) -> Result<(), ResolveError> {
-        match (self, required_user_session) {
+        match (self, bound_user_session) {
             (_, None) => Ok(()),
-            (Self::UserSession(session), Some(required)) if required == session.id => Ok(()),
+            (Self::UserSession(session), Some(bound)) if bound == session.id() => Ok(()),
             _ => Err(ResolveError::UserSessionMismatch),
         }
     }
@@ -98,7 +98,7 @@ pub struct BatchOperation<'a, K: OperationKind> {
     executor: BoundExecutor<'a>,
     identity: Arc<()>,
     entries: Vec<BatchEntry>,
-    required_user_session: Option<UserSessionId>,
+    bound_user_session: Option<UserSessionId>,
     kind: PhantomData<fn() -> K>,
 }
 
@@ -123,7 +123,7 @@ where
             executor,
             identity: Arc::new(()),
             entries: Vec::new(),
-            required_user_session: None,
+            bound_user_session: None,
             kind: PhantomData,
         }
     }
@@ -152,14 +152,14 @@ where
     {
         let resolved = self.executor.client().resolve(operation.encode()?)?;
         self.executor
-            .validate_user_session(resolved.required_user_session)?;
+            .validate_user_session(resolved.bound_user_session)?;
         let key = BatchKey {
             identity: Arc::clone(&self.identity),
             index: self.entries.len(),
             response: PhantomData::<fn() -> O::Response>,
         };
-        if let Some(required) = resolved.required_user_session {
-            self.required_user_session = Some(required);
+        if let Some(bound) = resolved.bound_user_session {
+            self.bound_user_session = Some(bound);
         }
         self.entries.push(BatchEntry {
             operation: Box::new(operation),
@@ -182,8 +182,8 @@ where
             .headers_mut()
             .insert(header::CONTENT_TYPE, content_type);
         request.set_body(body);
-        if let Some(required) = self.required_user_session {
-            request.require_user_session(required);
+        if let Some(bound) = self.bound_user_session {
+            request.bind_user_session(bound);
         }
         Ok(request)
     }
@@ -332,6 +332,13 @@ where
 impl CreateBatch<Stateless> for Client<Ready> {
     fn create_batch(&self) -> BatchOperation<'_, Stateless> {
         Client::batch(self)
+    }
+}
+
+impl UserSession<Ready> {
+    /// Creates an empty stateful batch bound to this session.
+    pub fn batch(&self) -> BatchOperation<'_, Stateful> {
+        BatchOperation::for_user_session(self)
     }
 }
 
@@ -633,6 +640,7 @@ mod tests {
     use crate::{
         AdtUri, Owned, Ready, ResolveError, Stateful, Stateless, Transport, TransportError,
         api::discovery::parse_capabilities,
+        protocol::{ADT_SESSION_TYPE_HEADER, AdtSessionType},
     };
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
@@ -724,7 +732,7 @@ mod tests {
         }
     }
 
-    struct SessionBoundOperation(super::super::UserSessionId);
+    struct SessionBoundOperation(UserSessionId);
 
     impl Operation for SessionBoundOperation {
         type Response = ();
@@ -736,7 +744,7 @@ mod tests {
                 Method::PUT,
                 AdtUri::parse("/sap/bc/adt/test/session-bound").unwrap(),
             );
-            request.require_user_session(self.0);
+            request.bind_user_session(self.0);
             Ok(request)
         }
 
@@ -1027,11 +1035,8 @@ content-type:application/xml\r\n\r\n\
 
         let requests = requests.lock().unwrap();
         assert_eq!(
-            requests[0]
-                .headers()
-                .get(super::super::ADT_SESSION_TYPE)
-                .unwrap(),
-            "stateful"
+            requests[0].headers().get(ADT_SESSION_TYPE_HEADER).unwrap(),
+            AdtSessionType::Stateful.as_str()
         );
         assert!(!requests[0].headers().contains_key(header::COOKIE));
         assert_eq!(
@@ -1058,9 +1063,9 @@ content-type:application/xml\r\n\r\n\
         assert_eq!(
             requests.lock().unwrap()[0]
                 .headers()
-                .get(super::super::ADT_SESSION_TYPE)
+                .get(ADT_SESSION_TYPE_HEADER)
                 .unwrap(),
-            "stateful"
+            AdtSessionType::Stateful.as_str()
         );
     }
 

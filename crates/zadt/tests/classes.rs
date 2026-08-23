@@ -145,7 +145,7 @@ async fn mock_discovery(server: &MockServer) -> Mock<'_> {
 
 async fn ready_client(transport: ReqwestTransport) -> Client<Ready> {
     let client = Client::new(transport);
-    Logon.execute(&client).await.unwrap();
+    Logon::default().execute(&client).await.unwrap();
     client.discover().await.unwrap()
 }
 

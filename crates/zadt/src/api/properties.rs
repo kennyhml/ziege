@@ -141,7 +141,7 @@ impl<T> ObjectPropertiesUpdate<T> {
             request.push_query(TRANSPORT_REQUEST_QUERY, transport_request.as_str());
         }
         if let Some(user_session) = self.object_lock.user_session() {
-            request.require_user_session(user_session);
+            request.bind_user_session(user_session);
         }
         request.set_accept(self.media_type);
         request.set_content_type(self.media_type);

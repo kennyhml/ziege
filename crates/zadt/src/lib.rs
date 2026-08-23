@@ -10,6 +10,7 @@ mod protocol;
 mod resource;
 mod uri;
 mod user;
+mod user_session;
 
 pub mod transport;
 
@@ -83,8 +84,7 @@ pub use operation::{
     Advertised, AdvertisedCollection, AdvertisedTarget, AdvertisedTemplate, BatchError, BatchKey,
     BatchOperation, BatchResponses, Batched, DiscoveryDocument, EncodedOperation, Execute,
     IfNoneMatch, Operation, OperationContext, OperationKind, OperationResponse, OperationTarget,
-    Owned, Resolve, ResolvedOperation, Revalidation, Stateful, Stateless, UserSession,
-    UserSessionId,
+    Owned, Resolve, ResolvedOperation, Revalidation, Stateful, Stateless,
 };
 pub use protocol::{AdtRequest, AdtResponse, EntityTag, PostAction};
 pub use resource::{
@@ -99,3 +99,4 @@ pub use transport::{ReqwestTransport, ReqwestTransportBuilder};
 pub use transport::{Traced, TransportExt};
 pub use uri::{ADT_RESOURCE_ROOT, ADT_ROOT, AdtUri, AdtUriError};
 pub use user::User;
+pub use user_session::{UserSession, UserSessionId};

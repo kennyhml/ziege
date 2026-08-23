@@ -4,10 +4,10 @@ use http::{Method, StatusCode};
 use serde::Deserialize;
 
 use crate::{
-    PostAction, User,
+    PostAction, User, UserSessionId,
     error::{EncodeError, ObjectError, ResponseError},
     objects::{AnyObject, Object, ObjectRef, ObjectType},
-    operation::{EncodedOperation, Operation, OperationResponse, Owned, Stateful, UserSessionId},
+    operation::{EncodedOperation, Operation, OperationResponse, Owned, Stateful},
 };
 
 use super::transports::TransportNumber;
@@ -335,7 +335,7 @@ impl Operation for UnlockRequest {
         request.push_query(PostAction::QUERY_PARAMETER, PostAction::Unlock.as_str());
         request.push_query(LOCK_HANDLE_QUERY, self.object_lock.handle());
         if let Some(user_session) = self.object_lock.user_session() {
-            request.require_user_session(user_session);
+            request.bind_user_session(user_session);
         }
         Ok(request)
     }
