@@ -6,9 +6,9 @@ use httpmock::Mock;
 use httpmock::prelude::*;
 use std::sync::{Arc, Mutex};
 use zadt::{
-    AdtRequest, AdtResponse, CategoryId, Class, Client, CoreDiscoveryQuery, DataElement,
-    DiscoveryQuery, GlobalWorkbenchType, Logon, ObjectError, Operation, OperationError,
-    ReqwestTransport, ResponseError, Transport, TransportError,
+    AdtRequest, AdtResponse, CategoryId, Class, Client, CoreDiscoveryQuery, DataDefinition,
+    DataElement, DiscoveryQuery, GlobalWorkbenchType, Logon, ObjectError, Operation,
+    OperationError, ReqwestTransport, ResponseError, Transport, TransportError,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -143,6 +143,11 @@ async fn runtime_object_types_use_the_registered_descriptor() {
             "ZTFRWTFRT",
             "/sap/bc/adt/ddic/dataelements/ztfrwtfrt",
         ),
+        (
+            "DDLS/DF",
+            "I_BUSINESSPARTNER",
+            "/sap/bc/adt/ddic/ddl/sources/i_businesspartner",
+        ),
     ] {
         let parsed_type: GlobalWorkbenchType = object_type.parse().unwrap();
         let object = client.repository_object(&parsed_type, name).unwrap();
@@ -155,15 +160,16 @@ async fn runtime_object_types_use_the_registered_descriptor() {
             "CLAS/OC" => object.typed::<Class>().is_some(),
             "DEVC/K" => object.typed::<zadt::Package>().is_some(),
             "DTEL/DE" => object.typed::<DataElement>().is_some(),
+            "DDLS/DF" => object.typed::<DataDefinition>().is_some(),
             _ => unreachable!(),
         });
     }
 
-    let unsupported_type: GlobalWorkbenchType = "DDLS/DF".parse().unwrap();
+    let unsupported_type: GlobalWorkbenchType = "FUGR/F".parse().unwrap();
     assert!(matches!(
-        client.repository_object(&unsupported_type, "ZDDL_EXAMPLE"),
+        client.repository_object(&unsupported_type, "ZFUNCTIONS"),
         Err(ObjectError::UnsupportedObjectType { object_type })
-            if object_type.as_str() == "DDLS/DF"
+            if object_type.as_str() == "FUGR/F"
     ));
 }
 

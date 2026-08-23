@@ -19,11 +19,14 @@ pub use reference::{AdvertisedObjectReference, ObjectRef, ObjectReferences};
 pub use types::{
     Class, ClassCategory, ClassCreateProperties, ClassCreatePropertiesBuilder,
     ClassCreatePropertiesBuilderError, ClassProperties, ClassPropertiesVersion,
-    ClassSourceComponent, ClassSourceProperties, ClassTemplate, ClassTemplateProperty, DataElement,
-    DataElementDefinition, DataElementProperties, DataElementPropertiesVersion, Include,
-    IncludeProperties, IncludePropertyVersion, Package, PackageAssignment, PackageAttributes,
-    PackageProperties, PackagePropertiesVersion, PackageTransport, PackageUseAccess, Program,
-    ProgramProperties, ProgramPropertiesVersion, SyntaxConfiguration, SyntaxLanguage,
+    ClassSourceComponent, ClassSourceProperties, ClassTemplate, ClassTemplateProperty,
+    DataDefinition, DataDefinitionCreateProperties, DataDefinitionCreatePropertiesBuilder,
+    DataDefinitionCreatePropertiesBuilderError, DataDefinitionProperties,
+    DataDefinitionPropertiesVersion, DataElement, DataElementDefinition, DataElementProperties,
+    DataElementPropertiesVersion, Include, IncludeProperties, IncludePropertyVersion, Package,
+    PackageAssignment, PackageAttributes, PackageProperties, PackagePropertiesVersion,
+    PackageTransport, PackageUseAccess, Program, ProgramProperties, ProgramPropertiesVersion,
+    SyntaxConfiguration, SyntaxLanguage,
 };
 pub use workbench::{
     AbapLanguageVersion, GlobalWorkbenchType, InvalidWorkbenchType, ObjectVersion,

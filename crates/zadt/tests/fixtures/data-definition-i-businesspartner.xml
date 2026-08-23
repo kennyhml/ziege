@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ddl:ddlSource
+    ddl:source_origin="0"
+    ddl:source_type="view"
+    ddl:source_type_description="View Entity"
+    ddl:source_origin_description="ABAP Development Tools"
+    abapsource:sourceUri="source/main"
+    abapsource:fixPointArithmetic="false"
+    abapsource:activeUnicodeCheck="false"
+    adtcore:responsible="SAP"
+    adtcore:masterLanguage="EN"
+    adtcore:masterSystem="SAP"
+    adtcore:abapLanguageVersion="0"
+    adtcore:name="I_BUSINESSPARTNER"
+    adtcore:type="DDLS/DF"
+    adtcore:changedAt="2024-07-31T19:18:43Z"
+    adtcore:version="active"
+    adtcore:createdAt="2014-11-18T00:00:00Z"
+    adtcore:changedBy="SAP"
+    adtcore:createdBy="SAP"
+    adtcore:description="Business Partner"
+    adtcore:language="EN"
+    xmlns:ddl="http://www.sap.com/adt/ddic/ddlsources"
+    xmlns:abapsource="http://www.sap.com/adt/abapsource"
+    xmlns:adtcore="http://www.sap.com/adt/core">
+    <atom:link
+        href="source/main"
+        rel="http://www.sap.com/adt/relations/source"
+        etag="202407311918430011"
+        xmlns:atom="http://www.w3.org/2005/Atom" />
+    <atom:link
+        href="source/main"
+        rel="http://www.sap.com/adt/relations/source"
+        type="text/html"
+        etag="202407311918430011"
+        xmlns:atom="http://www.w3.org/2005/Atom" />
+    <atom:link
+        href="/sap/bc/adt/vit/ddic/logs/db/ACTDDLSI_BUSINESSPARTNER"
+        rel="http://www.sap.com/adt/relations/ddic/activationlog"
+        type="application/vnd.sap.sapgui"
+        xmlns:atom="http://www.w3.org/2005/Atom" />
+    <atom:link
+        href="/sap/bc/adt/ddic/logs/db/ACTDDLSI_BUSINESSPARTNER"
+        rel="http://www.sap.com/adt/relations/ddic/activationlog"
+        type="application/vnd.sap.adt.logs+xml"
+        xmlns:atom="http://www.w3.org/2005/Atom" />
+    <atom:link
+        href="versions"
+        rel="http://www.sap.com/adt/relations/versions"
+        xmlns:atom="http://www.w3.org/2005/Atom" />
+    <atom:link
+        href="/sap/bc/adt/repository/informationsystem/abaplanguageversions?uri=%2Fsap%2Fbc%2Fadt%2Fddic%2Fddl%2Fsources%2Fi_businesspartner"
+        rel="http://www.sap.com/adt/relations/informationsystem/abaplanguageversions"
+        type="application/vnd.sap.adt.nameditems.v1+xml"
+        title="Allowed ABAP language versions"
+        xmlns:atom="http://www.w3.org/2005/Atom" />
+    <adtcore:packageRef
+        adtcore:uri="/sap/bc/adt/packages/vdm_md_bp_base"
+        adtcore:type="DEVC/K"
+        adtcore:name="VDM_MD_BP_BASE"
+        adtcore:packageName="VDM_MD_BP_BASE"
+        adtcore:description="VDM Master Data BP: basic Views" />
+</ddl:ddlSource>

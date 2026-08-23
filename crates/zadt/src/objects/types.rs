@@ -1,4 +1,5 @@
 mod clas;
+mod ddls;
 mod devc;
 mod dtel;
 mod prog;
@@ -7,6 +8,11 @@ pub use clas::{
     Class, ClassCategory, ClassCreateProperties, ClassCreatePropertiesBuilder,
     ClassCreatePropertiesBuilderError, ClassProperties, ClassPropertiesVersion,
     ClassSourceComponent, ClassSourceProperties, ClassTemplate, ClassTemplateProperty,
+};
+pub use ddls::{
+    DataDefinition, DataDefinitionCreateProperties, DataDefinitionCreatePropertiesBuilder,
+    DataDefinitionCreatePropertiesBuilderError, DataDefinitionProperties,
+    DataDefinitionPropertiesVersion,
 };
 pub use devc::{
     Package, PackageAssignment, PackageAttributes, PackageProperties, PackagePropertiesVersion,

@@ -2,8 +2,8 @@ use std::{env, error::Error, io};
 
 use tracing_subscriber::EnvFilter;
 use zadt::{
-    AdtUri, CheckRunArtifact, CheckRunObject, Client, ObjectCheckRun, ObjectVersion, Operation,
-    Program, ReqwestTransport, TransportExt,
+    AdtUri, CheckRunArtifact, CheckRunObject, Client, DataDefinition, ObjectCheckRun,
+    ObjectVersion, Operation, Program, ReqwestTransport, TransportExt,
 };
 
 #[tokio::main]
@@ -27,33 +27,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .sap_client(sap_client)
         .language(language)
         .basic_auth(username, password)
+        .danger_accept_invalid_certs(true)
+        .danger_accept_invalid_hostnames(true)
         .build()?
         .traced()
         .with_body_logging(64 * 1024);
 
     let client = Client::new(transport).discover().await?;
 
-    let object = client.object::<Program>("ZZTFTFRT")?;
-    let source_uri = AdtUri::parse(&format!("{}/source/main", object.uri()))?;
+    let object = client
+        .object::<DataDefinition>("I_BUSINESSPARTNER")?
+        .query()
+        .execute(&client)
+        .await?;
 
-    let reporters = client.supported_reporters().execute(&client).await?;
-    println!("{reporters:#?}");
+    let source = object.source()?.query().execute(&client).await?;
 
-    let mut run = ObjectCheckRun::new();
-
-    run.push_object(
-        CheckRunObject::new(&object, ObjectVersion::WorkingArea).artifact(CheckRunArtifact::new(
-            source_uri,
-            "text/plain; charset=utf-8",
-            b"REPORT zztftfrt.\n\nthis is not valid abap.\n",
-        )),
-    );
-
-    run.extend_reporters(reporters);
-
-    let res = run.execute(&client).await?;
-
-    println!("{res:#?}");
+    println!("{}", source.content);
 
     Ok(())
 }
