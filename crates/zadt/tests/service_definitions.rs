@@ -157,6 +157,7 @@ async fn service_definition_creation_posts_only_the_sparse_properties_payload() 
                 .body_contains("adtcore:name=\"Z_SERVICE_DEFINITION\"")
                 .body_contains("adtcore:type=\"SRVD/SRV\"")
                 .body_contains("adtcore:description=\"Created Service Definition\"")
+                .body_contains("srvd:srvdSourceType=\"S\"")
                 .body_contains("<adtcore:packageRef adtcore:name=\"$TMP\"");
             then.status(201);
         })

@@ -57,6 +57,10 @@ pub struct ServiceDefinitionProperties {
     pub source_origin_description: String,
 
     /// The semantic Service Definition source type.
+    #[for_create(
+        default = String::from("S"),
+        doc = "The Service Definition source-type discriminator."
+    )]
     #[serde(rename = "@srvd:srvdSourceType")]
     pub source_type: String,
 
@@ -230,6 +234,7 @@ mod tests {
             .unwrap();
         assert_eq!(properties.name, "");
         assert_eq!(properties.object_type, ServiceDefinition::WORKBENCH_TYPE);
+        assert_eq!(properties.source_type, "S");
         assert!(properties.abap_language_version.is_none());
 
         let reference = ObjectRef::<ServiceDefinition>::new(
@@ -245,7 +250,7 @@ mod tests {
         assert!(body.contains("adtcore:description=\"Created Service Definition\""));
         assert!(body.contains("<adtcore:packageRef adtcore:name=\"$TMP\""));
         assert!(!body.contains("srvd:sourceOrigin="));
-        assert!(!body.contains("srvd:srvdSourceType="));
+        assert!(body.contains("srvd:srvdSourceType=\"S\""));
         assert!(!body.contains("abapsource:sourceUri="));
         assert!(!body.contains("atom:link"));
     }
