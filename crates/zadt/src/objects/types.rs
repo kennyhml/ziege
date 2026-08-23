@@ -1,4 +1,5 @@
 mod clas;
+mod dcls;
 mod ddls;
 mod devc;
 mod dtel;
@@ -8,6 +9,11 @@ pub use clas::{
     Class, ClassCategory, ClassCreateProperties, ClassCreatePropertiesBuilder,
     ClassCreatePropertiesBuilderError, ClassProperties, ClassPropertiesVersion,
     ClassSourceComponent, ClassSourceProperties, ClassTemplate, ClassTemplateProperty,
+};
+pub use dcls::{
+    AccessControl, AccessControlCreateProperties, AccessControlCreatePropertiesBuilder,
+    AccessControlCreatePropertiesBuilderError, AccessControlProperties,
+    AccessControlPropertiesVersion,
 };
 pub use ddls::{
     DataDefinition, DataDefinitionCreateProperties, DataDefinitionCreatePropertiesBuilder,

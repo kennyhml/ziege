@@ -166,4 +166,22 @@
             </adtcomp:templateLinks>
         </app:collection>
     </app:workspace>
+    <app:workspace>
+        <atom:title>ABAP DCL Sources</atom:title>
+        <app:collection href="/sap/bc/adt/acm/dcl/sources">
+            <atom:title>DCL Sources</atom:title>
+            <app:accept>application/vnd.sap.adt.dclSource+xml</app:accept>
+            <atom:category
+                term="dclsources"
+                scheme="http://www.sap.com/adt/categories/acm/dclsources" />
+            <adtcomp:templateLinks xmlns:adtcomp="http://www.sap.com/adt/compatibility">
+                <adtcomp:templateLink
+                    rel="http://www.sap.com/adt/categories/acm/dclsources/properties"
+                    template="/sap/bc/adt/acm/dcl/sources/{object_name}{?corrNr,lockHandle,version,accessMode,_action}" />
+                <adtcomp:templateLink
+                    rel="http://www.sap.com/adt/categories/acm/dclsources/source"
+                    template="/sap/bc/adt/acm/dcl/sources/{object_name}/source/main{?corrNr,lockHandle,version}" />
+            </adtcomp:templateLinks>
+        </app:collection>
+    </app:workspace>
 </app:service>

@@ -3,8 +3,8 @@ use std::marker::PhantomData;
 use http::Method;
 
 use super::{
-    AnyObject, Class, DataDefinition, DataElement, GlobalWorkbenchType, Include, ObjectRef,
-    ObjectType, ObjectVersion, Package, Program, PropertyModel, RunCapability,
+    AccessControl, AnyObject, Class, DataDefinition, DataElement, GlobalWorkbenchType, Include,
+    ObjectRef, ObjectType, ObjectVersion, Package, Program, PropertyModel, RunCapability,
 };
 use crate::{
     CategoryId,
@@ -248,6 +248,7 @@ static OBJECT_TYPES: &[&dyn RuntimeObjectTypeDescriptor] = &[
     Package::DESCRIPTOR,
     DataElement::DESCRIPTOR,
     DataDefinition::DESCRIPTOR,
+    AccessControl::DESCRIPTOR,
 ];
 
 pub(crate) fn object_type_descriptor(

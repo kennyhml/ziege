@@ -17,16 +17,18 @@ pub(crate) use descriptors::RuntimeObjectTypeDescriptor;
 pub use object::{AnyObject, Object};
 pub use reference::{AdvertisedObjectReference, ObjectRef, ObjectReferences};
 pub use types::{
-    Class, ClassCategory, ClassCreateProperties, ClassCreatePropertiesBuilder,
-    ClassCreatePropertiesBuilderError, ClassProperties, ClassPropertiesVersion,
-    ClassSourceComponent, ClassSourceProperties, ClassTemplate, ClassTemplateProperty,
-    DataDefinition, DataDefinitionCreateProperties, DataDefinitionCreatePropertiesBuilder,
-    DataDefinitionCreatePropertiesBuilderError, DataDefinitionProperties,
-    DataDefinitionPropertiesVersion, DataElement, DataElementDefinition, DataElementProperties,
-    DataElementPropertiesVersion, Include, IncludeProperties, IncludePropertyVersion, Package,
-    PackageAssignment, PackageAttributes, PackageProperties, PackagePropertiesVersion,
-    PackageTransport, PackageUseAccess, Program, ProgramProperties, ProgramPropertiesVersion,
-    SyntaxConfiguration, SyntaxLanguage,
+    AccessControl, AccessControlCreateProperties, AccessControlCreatePropertiesBuilder,
+    AccessControlCreatePropertiesBuilderError, AccessControlProperties,
+    AccessControlPropertiesVersion, Class, ClassCategory, ClassCreateProperties,
+    ClassCreatePropertiesBuilder, ClassCreatePropertiesBuilderError, ClassProperties,
+    ClassPropertiesVersion, ClassSourceComponent, ClassSourceProperties, ClassTemplate,
+    ClassTemplateProperty, DataDefinition, DataDefinitionCreateProperties,
+    DataDefinitionCreatePropertiesBuilder, DataDefinitionCreatePropertiesBuilderError,
+    DataDefinitionProperties, DataDefinitionPropertiesVersion, DataElement, DataElementDefinition,
+    DataElementProperties, DataElementPropertiesVersion, Include, IncludeProperties,
+    IncludePropertyVersion, Package, PackageAssignment, PackageAttributes, PackageProperties,
+    PackagePropertiesVersion, PackageTransport, PackageUseAccess, Program, ProgramProperties,
+    ProgramPropertiesVersion, SyntaxConfiguration, SyntaxLanguage,
 };
 pub use workbench::{
     AbapLanguageVersion, GlobalWorkbenchType, InvalidWorkbenchType, ObjectVersion,
