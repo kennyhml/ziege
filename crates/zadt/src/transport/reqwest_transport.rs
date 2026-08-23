@@ -57,12 +57,47 @@ pub struct ReqwestTransportConfig {
 
     #[builder(setter(custom))]
     password: SecretString,
+
+    #[builder(default, setter(custom))]
+    root_certificate_pems: Vec<Vec<u8>>,
+
+    #[builder(default, setter(custom))]
+    danger_accept_invalid_hostnames: bool,
+
+    #[builder(default, setter(custom))]
+    danger_accept_invalid_certs: bool,
 }
 
 impl ReqwestTransportBuilder {
     pub fn basic_auth(mut self, username: impl Into<User>, password: impl Into<String>) -> Self {
         self.username = Some(username.into());
         self.password = Some(SecretString::from(password.into()));
+        self
+    }
+
+    /// Adds a PEM-encoded root certificate to the transport's trust store.
+    pub fn add_root_certificate_pem(mut self, certificate: impl Into<Vec<u8>>) -> Self {
+        self.root_certificate_pems
+            .get_or_insert_with(Vec::new)
+            .push(certificate.into());
+        self
+    }
+
+    /// Controls whether TLS certificates with invalid hostnames are accepted.
+    ///
+    /// This disables an important part of server identity verification and
+    /// should only be enabled for isolated development systems.
+    pub fn danger_accept_invalid_hostnames(mut self, accept: bool) -> Self {
+        self.danger_accept_invalid_hostnames = Some(accept);
+        self
+    }
+
+    /// Controls whether invalid TLS certificates are accepted.
+    ///
+    /// This disables certificate verification and should only be enabled for
+    /// isolated development systems.
+    pub fn danger_accept_invalid_certs(mut self, accept: bool) -> Self {
+        self.danger_accept_invalid_certs = Some(accept);
         self
     }
 
@@ -85,12 +120,23 @@ impl ReqwestTransportBuilder {
             .append_pair("sap-client", &config.sap_client)
             .append_pair("sap-language", &config.language)
             .finish();
+        let root_certificates = config
+            .root_certificate_pems
+            .iter()
+            .map(|pem| {
+                reqwest::Certificate::from_pem(pem)
+                    .map_err(ReqwestTransportBuildError::InvalidRootCertificate)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(ReqwestTransport {
             connection: HttpConnection::new(
                 destination,
                 &user_context,
                 config.username,
                 config.password,
+                root_certificates,
+                config.danger_accept_invalid_hostnames,
+                config.danger_accept_invalid_certs,
             )?,
             security: HttpSecuritySession::default(),
         })
@@ -170,6 +216,24 @@ mod tests {
         assert!(matches!(
             error,
             ReqwestTransportBuildError::MissingField("destination")
+        ));
+    }
+
+    #[test]
+    fn builder_rejects_an_invalid_root_certificate() {
+        let error = ReqwestTransport::builder()
+            .destination("https://sap.example.test")
+            .sap_client("001")
+            .language("EN")
+            .basic_auth("USER", "PASSWORD")
+            .add_root_certificate_pem(b"not a PEM certificate".to_vec())
+            .build()
+            .err()
+            .expect("an invalid root certificate must fail the build");
+
+        assert!(matches!(
+            error,
+            ReqwestTransportBuildError::InvalidRootCertificate(_)
         ));
     }
 

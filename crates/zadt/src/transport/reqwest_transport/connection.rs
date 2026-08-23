@@ -1,7 +1,10 @@
 use std::sync::{Arc, RwLock};
 
 use http::{HeaderMap, HeaderValue, header};
-use reqwest::cookie::{CookieStore, Jar};
+use reqwest::{
+    Certificate,
+    cookie::{CookieStore, Jar},
+};
 use secrecy::{ExposeSecret, SecretString};
 use url::Url;
 
@@ -21,12 +24,25 @@ impl HttpConnection {
         user_context: &str,
         username: User,
         password: SecretString,
+        root_certificates: Vec<Certificate>,
+        danger_accept_invalid_hostnames: bool,
+        danger_accept_invalid_certs: bool,
     ) -> Result<Self, reqwest::Error> {
         let cookies = Arc::new(SapCookieStore::new(&destination, user_context));
-        let client = reqwest::Client::builder()
+
+        let mut client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
-            .cookie_provider(Arc::clone(&cookies))
+            .cookie_provider(Arc::clone(&cookies));
+        for certificate in root_certificates {
+            client = client.add_root_certificate(certificate);
+        }
+
+        // ssl handling
+        let client = client
+            .danger_accept_invalid_hostnames(danger_accept_invalid_hostnames)
+            .danger_accept_invalid_certs(danger_accept_invalid_certs)
             .build()?;
+
         Ok(Self {
             client,
             cookies,
@@ -43,14 +59,17 @@ impl HttpConnection {
     ) -> Result<AdtResponse, TransportError> {
         let mut headers = request.headers().clone();
         headers.extend(header_overrides.clone());
+
         let url = request_url(
             &self.destination,
             request.target().as_str(),
             request.query(),
         )
         .map_err(TransportError::new)?;
+
         merge_cookie_headers(&mut headers, self.cookies.cookies(&url))
             .map_err(TransportError::new)?;
+
         let response = self
             .client
             .request(request.method().clone(), url)
@@ -60,6 +79,7 @@ impl HttpConnection {
             .send()
             .await
             .map_err(TransportError::new)?;
+
         let status = response.status();
         let headers = response.headers().clone();
         let body = response
@@ -67,6 +87,7 @@ impl HttpConnection {
             .await
             .map_err(TransportError::new)?
             .to_vec();
+
         Ok(AdtResponse::new(status, headers, body))
     }
 

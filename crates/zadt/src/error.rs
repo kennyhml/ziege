@@ -25,6 +25,9 @@ pub enum ReqwestTransportBuildError {
     #[error("SAP destination must not contain credentials, a query, or a fragment")]
     InvalidDestinationComponents,
 
+    #[error("invalid PEM TLS root certificate: {0}")]
+    InvalidRootCertificate(#[source] reqwest::Error),
+
     #[cfg(feature = "reqwest")]
     #[error("could not construct the HTTP client: {0}")]
     HttpClient(#[from] reqwest::Error),
