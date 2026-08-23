@@ -1,5 +1,6 @@
 mod clas;
 mod dcls;
+mod ddla;
 mod ddls;
 mod ddlx;
 mod devc;
@@ -17,6 +18,11 @@ pub use dcls::{
     AccessControl, AccessControlCreateProperties, AccessControlCreatePropertiesBuilder,
     AccessControlCreatePropertiesBuilderError, AccessControlProperties,
     AccessControlPropertiesVersion,
+};
+pub use ddla::{
+    AnnotationDefinition, AnnotationDefinitionCreateProperties,
+    AnnotationDefinitionCreatePropertiesBuilder, AnnotationDefinitionCreatePropertiesBuilderError,
+    AnnotationDefinitionProperties, AnnotationDefinitionPropertiesVersion,
 };
 pub use ddls::{
     DataDefinition, DataDefinitionCreateProperties, DataDefinitionCreatePropertiesBuilder,

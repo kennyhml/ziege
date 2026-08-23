@@ -6,10 +6,10 @@ use httpmock::Mock;
 use httpmock::prelude::*;
 use std::sync::{Arc, Mutex};
 use zadt::{
-    AccessControl, AdtRequest, AdtResponse, CategoryId, Class, Client, CoreDiscoveryQuery,
-    DataDefinition, DataElement, DiscoveryQuery, GlobalWorkbenchType, Interface, Logon,
-    MetadataExtension, ObjectError, Operation, OperationError, ReqwestTransport, ResponseError,
-    ServiceDefinition, Transport, TransportError,
+    AccessControl, AdtRequest, AdtResponse, AnnotationDefinition, CategoryId, Class, Client,
+    CoreDiscoveryQuery, DataDefinition, DataElement, DiscoveryQuery, GlobalWorkbenchType,
+    Interface, Logon, MetadataExtension, ObjectError, Operation, OperationError, ReqwestTransport,
+    ResponseError, ServiceDefinition, Transport, TransportError,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -169,6 +169,11 @@ async fn runtime_object_types_use_the_registered_descriptor() {
             "Z_SERVICE_DEFINITION",
             "/sap/bc/adt/ddic/srvd/sources/z_service_definition",
         ),
+        (
+            "DDLA/ADF",
+            "Z_ANNOTATION_DEFINITION",
+            "/sap/bc/adt/ddic/ddla/sources/z_annotation_definition",
+        ),
     ] {
         let parsed_type: GlobalWorkbenchType = object_type.parse().unwrap();
         let object = client.repository_object(&parsed_type, name).unwrap();
@@ -186,6 +191,7 @@ async fn runtime_object_types_use_the_registered_descriptor() {
             "INTF/OI" => object.typed::<Interface>().is_some(),
             "DDLX/EX" => object.typed::<MetadataExtension>().is_some(),
             "SRVD/SRV" => object.typed::<ServiceDefinition>().is_some(),
+            "DDLA/ADF" => object.typed::<AnnotationDefinition>().is_some(),
             _ => unreachable!(),
         });
     }

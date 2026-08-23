@@ -71,8 +71,11 @@ pub use error::{
 pub use objects::{
     AbapLanguageVersion, AccessControl, AccessControlCreateProperties,
     AccessControlCreatePropertiesBuilder, AccessControlCreatePropertiesBuilderError,
-    AccessControlProperties, AccessControlPropertiesVersion, AdvertisedObjectReference, AnyObject,
-    Class, ClassCategory, ClassCreateProperties, ClassCreatePropertiesBuilder,
+    AccessControlProperties, AccessControlPropertiesVersion, AdvertisedObjectReference,
+    AnnotationDefinition, AnnotationDefinitionCreateProperties,
+    AnnotationDefinitionCreatePropertiesBuilder, AnnotationDefinitionCreatePropertiesBuilderError,
+    AnnotationDefinitionProperties, AnnotationDefinitionPropertiesVersion, AnyObject, Class,
+    ClassCategory, ClassCreateProperties, ClassCreatePropertiesBuilder,
     ClassCreatePropertiesBuilderError, ClassProperties, ClassPropertiesVersion,
     ClassSourceComponent, ClassSourceProperties, ClassTemplate, ClassTemplateProperty, Create,
     CreationPropertyModel, DataDefinition, DataDefinitionCreateProperties,
