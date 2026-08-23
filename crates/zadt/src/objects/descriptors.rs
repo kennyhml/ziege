@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use http::Method;
 
 use super::{
-    AccessControl, AnnotationDefinition, AnyObject, Class, DataDefinition, DataElement,
+    AccessControl, AnnotationDefinition, AnyObject, Class, DataDefinition, DataElement, Domain,
     GlobalWorkbenchType, Include, Interface, MetadataExtension, ObjectRef, ObjectType,
     ObjectVersion, Package, Program, PropertyModel, RunCapability, ServiceDefinition,
 };
@@ -254,6 +254,7 @@ static OBJECT_TYPES: &[&dyn RuntimeObjectTypeDescriptor] = &[
     MetadataExtension::DESCRIPTOR,
     ServiceDefinition::DESCRIPTOR,
     AnnotationDefinition::DESCRIPTOR,
+    Domain::DESCRIPTOR,
 ];
 
 pub(crate) fn object_type_descriptor(

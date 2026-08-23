@@ -4,6 +4,7 @@ mod ddla;
 mod ddls;
 mod ddlx;
 mod devc;
+mod doma;
 mod dtel;
 mod intf;
 mod prog;
@@ -37,6 +38,12 @@ pub use ddlx::{
 pub use devc::{
     Package, PackageAssignment, PackageAttributes, PackageProperties, PackagePropertiesVersion,
     PackageTransport, PackageUseAccess,
+};
+pub use doma::{
+    Domain, DomainContent, DomainCreateProperties, DomainCreatePropertiesBuilder,
+    DomainCreatePropertiesBuilderError, DomainFixedValue, DomainFixedValues,
+    DomainOutputInformation, DomainProperties, DomainPropertiesVersion, DomainTypeInformation,
+    DomainValueInformation,
 };
 pub use dtel::{
     DataElement, DataElementDefinition, DataElementProperties, DataElementPropertiesVersion,

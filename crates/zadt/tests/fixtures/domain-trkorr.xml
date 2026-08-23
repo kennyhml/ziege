@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doma:domain
+    adtcore:responsible="SAP"
+    adtcore:masterLanguage="DE"
+    adtcore:masterSystem="SAP"
+    adtcore:abapLanguageVersion="0"
+    adtcore:name="TRKORR"
+    adtcore:type="DOMA/DD"
+    adtcore:changedAt="2001-01-31T16:50:58Z"
+    adtcore:version="active"
+    adtcore:changedBy="SAP"
+    adtcore:createdBy="SAP"
+    adtcore:description="Auftrag / Aufgabe"
+    adtcore:language="EN"
+    xmlns:doma="http://www.sap.com/dictionary/domain"
+    xmlns:adtcore="http://www.sap.com/adt/core">
+    <atom:link
+        href="versions"
+        rel="http://www.sap.com/adt/relations/versions"
+        title="Historic versions"
+        xmlns:atom="http://www.w3.org/2005/Atom" />
+    <atom:link
+        href="/sap/bc/adt/repository/informationsystem/abaplanguageversions?uri=%2Fsap%2Fbc%2Fadt%2Fddic%2Fdomains%2Ftrkorr"
+        rel="http://www.sap.com/adt/relations/informationsystem/abaplanguageversions"
+        type="application/vnd.sap.adt.nameditems.v1+xml"
+        title="Allowed ABAP language versions"
+        xmlns:atom="http://www.w3.org/2005/Atom" />
+    <atom:link
+        href="/sap/bc/adt/vit/wb/object_type/domadd/object_name/TRKORR"
+        rel="self"
+        type="application/vnd.sap.sapgui"
+        title="Representation in SAP Gui"
+        xmlns:atom="http://www.w3.org/2005/Atom" />
+    <atom:link
+        href="/sap/bc/adt/vit/docu/object_type/do/object_name/trkorr?masterLanguage=D&amp;mode=edit"
+        rel="http://www.sap.com/adt/relations/documentation"
+        type="application/vnd.sap.sapgui"
+        title="Documentation"
+        xmlns:atom="http://www.w3.org/2005/Atom" />
+    <adtcore:packageRef
+        adtcore:uri="/sap/bc/adt/packages/scts_bas"
+        adtcore:type="DEVC/K"
+        adtcore:name="SCTS_BAS"
+        adtcore:description="CTS: Central Functions (Including Authorizations)" />
+    <doma:content>
+        <doma:typeInformation>
+            <doma:datatype>CHAR</doma:datatype>
+            <doma:length>000020</doma:length>
+            <doma:decimals>000000</doma:decimals>
+        </doma:typeInformation>
+        <doma:outputInformation>
+            <doma:length>000020</doma:length>
+            <doma:style>00</doma:style>
+            <doma:conversionExit />
+            <doma:signExists>false</doma:signExists>
+            <doma:lowercase>false</doma:lowercase>
+            <doma:ampmFormat>false</doma:ampmFormat>
+        </doma:outputInformation>
+        <doma:valueInformation>
+            <doma:valueTableRef
+                adtcore:uri="/sap/bc/adt/ddic/tables/e070"
+                adtcore:type="TABL/DT"
+                adtcore:name="E070" />
+            <doma:appendExists>false</doma:appendExists>
+            <doma:fixValues />
+        </doma:valueInformation>
+    </doma:content>
+</doma:domain>

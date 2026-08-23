@@ -155,6 +155,18 @@
                     template="/sap/bc/adt/ddic/dataelements/{object_name}{?corrNr,lockHandle,version,accessMode,_action}" />
             </adtcomp:templateLinks>
         </app:collection>
+        <app:collection href="/sap/bc/adt/ddic/domains">
+            <atom:title>Domain</atom:title>
+            <app:accept>application/vnd.sap.adt.domains.v2+xml</app:accept>
+            <atom:category
+                term="domadd"
+                scheme="http://www.sap.com/wbobj/dictionary" />
+            <adtcomp:templateLinks xmlns:adtcomp="http://www.sap.com/adt/compatibility">
+                <adtcomp:templateLink
+                    rel="http://www.sap.com/wbobj/dictionary/domadd/properties"
+                    template="/sap/bc/adt/ddic/domains/{object_name}{?corrNr,lockHandle,version,accessMode,_action}" />
+            </adtcomp:templateLinks>
+        </app:collection>
     </app:workspace>
     <app:workspace>
         <atom:title>ABAP DDL Sources</atom:title>

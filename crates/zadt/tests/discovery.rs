@@ -7,7 +7,7 @@ use httpmock::prelude::*;
 use std::sync::{Arc, Mutex};
 use zadt::{
     AccessControl, AdtRequest, AdtResponse, AnnotationDefinition, CategoryId, Class, Client,
-    CoreDiscoveryQuery, DataDefinition, DataElement, DiscoveryQuery, GlobalWorkbenchType,
+    CoreDiscoveryQuery, DataDefinition, DataElement, DiscoveryQuery, Domain, GlobalWorkbenchType,
     Interface, Logon, MetadataExtension, ObjectError, Operation, OperationError, ReqwestTransport,
     ResponseError, ServiceDefinition, Transport, TransportError,
 };
@@ -174,6 +174,7 @@ async fn runtime_object_types_use_the_registered_descriptor() {
             "Z_ANNOTATION_DEFINITION",
             "/sap/bc/adt/ddic/ddla/sources/z_annotation_definition",
         ),
+        ("DOMA/DD", "Z_DOMAIN", "/sap/bc/adt/ddic/domains/z_domain"),
     ] {
         let parsed_type: GlobalWorkbenchType = object_type.parse().unwrap();
         let object = client.repository_object(&parsed_type, name).unwrap();
@@ -192,6 +193,7 @@ async fn runtime_object_types_use_the_registered_descriptor() {
             "DDLX/EX" => object.typed::<MetadataExtension>().is_some(),
             "SRVD/SRV" => object.typed::<ServiceDefinition>().is_some(),
             "DDLA/ADF" => object.typed::<AnnotationDefinition>().is_some(),
+            "DOMA/DD" => object.typed::<Domain>().is_some(),
             _ => unreachable!(),
         });
     }
