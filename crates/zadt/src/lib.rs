@@ -87,8 +87,10 @@ pub use objects::{
     MetadataExtensionPropertiesVersion, Object, ObjectRef, ObjectReferences, ObjectType,
     ObjectVersion, Package, PackageAssignment, PackageAttributes, PackageProperties,
     PackagePropertiesVersion, PackageTransport, PackageUseAccess, Program, ProgramProperties,
-    ProgramPropertiesVersion, PropertyModel, Source, SourceComponents, Structure,
-    SyntaxConfiguration, SyntaxLanguage, UpdateProperties,
+    ProgramPropertiesVersion, PropertyModel, ServiceDefinition, ServiceDefinitionCreateProperties,
+    ServiceDefinitionCreatePropertiesBuilder, ServiceDefinitionCreatePropertiesBuilderError,
+    ServiceDefinitionProperties, ServiceDefinitionPropertiesVersion, Source, SourceComponents,
+    Structure, SyntaxConfiguration, SyntaxLanguage, UpdateProperties,
 };
 pub use operation::{
     Advertised, AdvertisedCollection, AdvertisedTarget, AdvertisedTemplate, BatchError, BatchKey,

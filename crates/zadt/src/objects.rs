@@ -32,7 +32,10 @@ pub use types::{
     MetadataExtensionCreatePropertiesBuilderError, MetadataExtensionProperties,
     MetadataExtensionPropertiesVersion, Package, PackageAssignment, PackageAttributes,
     PackageProperties, PackagePropertiesVersion, PackageTransport, PackageUseAccess, Program,
-    ProgramProperties, ProgramPropertiesVersion, SyntaxConfiguration, SyntaxLanguage,
+    ProgramProperties, ProgramPropertiesVersion, ServiceDefinition,
+    ServiceDefinitionCreateProperties, ServiceDefinitionCreatePropertiesBuilder,
+    ServiceDefinitionCreatePropertiesBuilderError, ServiceDefinitionProperties,
+    ServiceDefinitionPropertiesVersion, SyntaxConfiguration, SyntaxLanguage,
 };
 pub use workbench::{
     AbapLanguageVersion, GlobalWorkbenchType, InvalidWorkbenchType, ObjectVersion,

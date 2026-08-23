@@ -6,6 +6,7 @@ mod devc;
 mod dtel;
 mod intf;
 mod prog;
+mod srvd;
 
 pub use clas::{
     Class, ClassCategory, ClassCreateProperties, ClassCreatePropertiesBuilder,
@@ -41,4 +42,9 @@ pub use intf::{
 pub use prog::{
     Include, IncludeProperties, IncludePropertyVersion, Program, ProgramProperties,
     ProgramPropertiesVersion, SyntaxConfiguration, SyntaxLanguage,
+};
+pub use srvd::{
+    ServiceDefinition, ServiceDefinitionCreateProperties, ServiceDefinitionCreatePropertiesBuilder,
+    ServiceDefinitionCreatePropertiesBuilderError, ServiceDefinitionProperties,
+    ServiceDefinitionPropertiesVersion,
 };

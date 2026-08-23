@@ -9,7 +9,7 @@ use zadt::{
     AccessControl, AdtRequest, AdtResponse, CategoryId, Class, Client, CoreDiscoveryQuery,
     DataDefinition, DataElement, DiscoveryQuery, GlobalWorkbenchType, Interface, Logon,
     MetadataExtension, ObjectError, Operation, OperationError, ReqwestTransport, ResponseError,
-    Transport, TransportError,
+    ServiceDefinition, Transport, TransportError,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -164,6 +164,11 @@ async fn runtime_object_types_use_the_registered_descriptor() {
             "Z_METADATA_EXTENSION",
             "/sap/bc/adt/ddic/ddlx/sources/z_metadata_extension",
         ),
+        (
+            "SRVD/SRV",
+            "Z_SERVICE_DEFINITION",
+            "/sap/bc/adt/ddic/srvd/sources/z_service_definition",
+        ),
     ] {
         let parsed_type: GlobalWorkbenchType = object_type.parse().unwrap();
         let object = client.repository_object(&parsed_type, name).unwrap();
@@ -180,6 +185,7 @@ async fn runtime_object_types_use_the_registered_descriptor() {
             "DCLS/DL" => object.typed::<AccessControl>().is_some(),
             "INTF/OI" => object.typed::<Interface>().is_some(),
             "DDLX/EX" => object.typed::<MetadataExtension>().is_some(),
+            "SRVD/SRV" => object.typed::<ServiceDefinition>().is_some(),
             _ => unreachable!(),
         });
     }

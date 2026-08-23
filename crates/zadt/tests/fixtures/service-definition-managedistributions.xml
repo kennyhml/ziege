@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<srvd:srvdSource
+    srvd:sourceOrigin="0"
+    srvd:sourceOriginDescription="ABAP Development Tools"
+    srvd:srvdSourceType="S"
+    srvd:srvdSourceTypeDescription="Definition"
+    abapsource:sourceUri="./managedistributions/source/main"
+    abapsource:fixPointArithmetic="false"
+    abapsource:activeUnicodeCheck="false"
+    adtcore:responsible="SAP"
+    adtcore:masterLanguage="EN"
+    adtcore:masterSystem="SAP"
+    adtcore:abapLanguageVersion="0"
+    adtcore:name="MANAGEDISTRIBUTIONS"
+    adtcore:type="SRVD/SRV"
+    adtcore:changedAt="2021-02-03T17:36:56Z"
+    adtcore:version="active"
+    adtcore:createdAt="2020-01-10T00:00:00Z"
+    adtcore:changedBy="SAP"
+    adtcore:createdBy="SAP"
+    adtcore:description="Manage Distribution Service"
+    adtcore:language="EN"
+    xmlns:srvd="http://www.sap.com/adt/ddic/srvdsources"
+    xmlns:abapsource="http://www.sap.com/adt/abapsource"
+    xmlns:adtcore="http://www.sap.com/adt/core">
+    <atom:link
+        href="./managedistributions/source/main/versions"
+        rel="http://www.sap.com/adt/relations/versions"
+        title="Historic versions"
+        xmlns:atom="http://www.w3.org/2005/Atom" />
+    <atom:link
+        href="/sap/bc/adt/repository/informationsystem/abaplanguageversions?uri=%2Fsap%2Fbc%2Fadt%2Fddic%2Fsrvd%2Fsources%2Fmanagedistributions"
+        rel="http://www.sap.com/adt/relations/informationsystem/abaplanguageversions"
+        type="application/vnd.sap.adt.nameditems.v1+xml"
+        title="Allowed ABAP language versions"
+        xmlns:atom="http://www.w3.org/2005/Atom" />
+    <atom:link
+        href="./managedistributions/source/main"
+        rel="http://www.sap.com/adt/relations/source"
+        type="text/plain"
+        title="Source Content"
+        etag="19710401000000001text/plain_ePZm8zDioCG3DivtaQS+CKSbFHQ="
+        xmlns:atom="http://www.w3.org/2005/Atom" />
+    <atom:link
+        href="./managedistributions/source/main"
+        rel="http://www.sap.com/adt/relations/source"
+        type="text/html"
+        title="Source Content (HTML)"
+        etag=""
+        xmlns:atom="http://www.w3.org/2005/Atom" />
+    <adtcore:packageRef
+        adtcore:uri="/sap/bc/adt/packages/mdo_distribution_model"
+        adtcore:type="DEVC/K"
+        adtcore:name="MDO_DISTRIBUTION_MODEL"
+        adtcore:description="MDO: Distribution Model" />
+</srvd:srvdSource>
