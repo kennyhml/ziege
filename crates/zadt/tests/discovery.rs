@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 use zadt::{
     AccessControl, AdtRequest, AdtResponse, CategoryId, Class, Client, CoreDiscoveryQuery,
     DataDefinition, DataElement, DiscoveryQuery, GlobalWorkbenchType, Interface, Logon,
-    ObjectError, Operation, OperationError, ReqwestTransport, ResponseError, Transport,
-    TransportError,
+    MetadataExtension, ObjectError, Operation, OperationError, ReqwestTransport, ResponseError,
+    Transport, TransportError,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -159,6 +159,11 @@ async fn runtime_object_types_use_the_registered_descriptor() {
             "ZIF_EXAMPLE",
             "/sap/bc/adt/oo/interfaces/zif_example",
         ),
+        (
+            "DDLX/EX",
+            "Z_METADATA_EXTENSION",
+            "/sap/bc/adt/ddic/ddlx/sources/z_metadata_extension",
+        ),
     ] {
         let parsed_type: GlobalWorkbenchType = object_type.parse().unwrap();
         let object = client.repository_object(&parsed_type, name).unwrap();
@@ -174,6 +179,7 @@ async fn runtime_object_types_use_the_registered_descriptor() {
             "DDLS/DF" => object.typed::<DataDefinition>().is_some(),
             "DCLS/DL" => object.typed::<AccessControl>().is_some(),
             "INTF/OI" => object.typed::<Interface>().is_some(),
+            "DDLX/EX" => object.typed::<MetadataExtension>().is_some(),
             _ => unreachable!(),
         });
     }

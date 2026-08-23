@@ -1,6 +1,7 @@
 mod clas;
 mod dcls;
 mod ddls;
+mod ddlx;
 mod devc;
 mod dtel;
 mod intf;
@@ -20,6 +21,11 @@ pub use ddls::{
     DataDefinition, DataDefinitionCreateProperties, DataDefinitionCreatePropertiesBuilder,
     DataDefinitionCreatePropertiesBuilderError, DataDefinitionProperties,
     DataDefinitionPropertiesVersion,
+};
+pub use ddlx::{
+    MetadataExtension, MetadataExtensionCreateProperties, MetadataExtensionCreatePropertiesBuilder,
+    MetadataExtensionCreatePropertiesBuilderError, MetadataExtensionProperties,
+    MetadataExtensionPropertiesVersion,
 };
 pub use devc::{
     Package, PackageAssignment, PackageAttributes, PackageProperties, PackagePropertiesVersion,
