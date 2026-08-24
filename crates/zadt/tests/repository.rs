@@ -52,10 +52,10 @@ async fn repository_queries_use_discovered_collections() {
                     "application/vnd.sap.adt.repository.virtualfolders.result.v1+xml",
                 )
                 .header("x-csrf-token", "CSRF-TOKEN-RIS")
-                .body_contains("objectSearchPattern=\"Z*\"")
-                .body_contains("<vfs:preselection facet=\"PACKAGE\">")
-                .body_contains("<vfs:value>$TMP</vfs:value>")
-                .body_contains("<vfs:facet>GROUP</vfs:facet>");
+                .body_includes("objectSearchPattern=\"Z*\"")
+                .body_includes("<vfs:preselection facet=\"PACKAGE\">")
+                .body_includes("<vfs:value>$TMP</vfs:value>")
+                .body_includes("<vfs:facet>GROUP</vfs:facet>");
             then.status(200).body(CONTENT_XML);
         })
         .await;

@@ -163,11 +163,11 @@ async fn package_properties_use_the_universal_locked_update_flow() {
                 .header("content-type", PACKAGE_V2_MEDIA_TYPE)
                 .header("x-sap-adt-sessiontype", "stateful")
                 .header("x-csrf-token", "CSRF-TOKEN-PACKAGE")
-                .body_contains("xmlns:pak=\"http://www.sap.com/adt/packages\"")
-                .body_contains("adtcore:name=\"SADT_TOOLS_CORE\"")
-                .body_contains("adtcore:description=\"Updated package description\"")
-                .body_contains("<pak:attributes")
-                .body_contains("<atom:link");
+                .body_includes("xmlns:pak=\"http://www.sap.com/adt/packages\"")
+                .body_includes("adtcore:name=\"SADT_TOOLS_CORE\"")
+                .body_includes("adtcore:description=\"Updated package description\"")
+                .body_includes("<pak:attributes")
+                .body_includes("<atom:link");
             then.status(200);
         })
         .await;

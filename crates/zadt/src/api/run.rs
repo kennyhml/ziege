@@ -1,4 +1,4 @@
-use http::Method;
+use http::{Method, StatusCode};
 
 use crate::{
     Advertised, EncodeError, EncodedOperation,
@@ -88,7 +88,8 @@ impl Operation for ObjectRun {
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        response.require_success()?;
+        response.require_status(StatusCode::OK)?;
+        response.require_content_type(&[TEXT_PLAIN_MEDIA_TYPE])?;
         let content = String::from_utf8(response.into_body())
             .map_err(ObjectError::InvalidResponseEncoding)?;
         Ok(ObjectRunResult::new(
@@ -126,7 +127,7 @@ mod tests {
 
     use super::*;
     use async_trait::async_trait;
-    use http::{HeaderMap, StatusCode};
+    use http::{HeaderMap, HeaderValue, StatusCode, header};
 
     use crate::{AdtRequest, AdtResponse, Class, Client, ObjectRef, Program, Ready, Transport};
 
@@ -140,9 +141,14 @@ mod tests {
     impl Transport for RecordingTransport {
         async fn send(&self, request: AdtRequest) -> Result<AdtResponse, crate::TransportError> {
             self.requests.lock().unwrap().push(request);
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static(TEXT_PLAIN_MEDIA_TYPE),
+            );
             Ok(AdtResponse::new(
                 StatusCode::OK,
-                HeaderMap::new(),
+                headers,
                 b"program output".to_vec(),
             ))
         }

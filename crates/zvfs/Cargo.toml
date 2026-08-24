@@ -13,7 +13,7 @@ parking_lot = "0.12"
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0"
 uuid = { version = "1.18", features = ["serde", "v4"] }
-zadt = { path = "../zadt", default-features = false }
+zadt = { version = "0.1.0", path = "../zadt", default-features = false }
 
 [dev-dependencies]
 async-trait = "0.1.88"
@@ -21,4 +21,4 @@ dotenvy = "0.15"
 http = "1.3"
 serde_json = "1.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
-zadt = { path = "../zadt", features = ["reqwest"] }
+zadt = { version = "0.1.0", path = "../zadt", features = ["reqwest"] }

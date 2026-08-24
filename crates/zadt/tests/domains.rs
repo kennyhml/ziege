@@ -133,11 +133,11 @@ async fn domain_creation_posts_only_the_sparse_properties_payload() {
                 .path("/sap/bc/adt/ddic/domains")
                 .header("content-type", DOMAIN_MEDIA_TYPE)
                 .header("x-csrf-token", "CSRF-TOKEN-DOMAIN-CREATE")
-                .body_contains("<doma:domain")
-                .body_contains("adtcore:name=\"Z_DOMAIN\"")
-                .body_contains("adtcore:type=\"DOMA/DD\"")
-                .body_contains("adtcore:description=\"Created Domain\"")
-                .body_contains("<adtcore:packageRef adtcore:name=\"$TMP\"");
+                .body_includes("<doma:domain")
+                .body_includes("adtcore:name=\"Z_DOMAIN\"")
+                .body_includes("adtcore:type=\"DOMA/DD\"")
+                .body_includes("adtcore:description=\"Created Domain\"")
+                .body_includes("<adtcore:packageRef adtcore:name=\"$TMP\"");
             then.status(201);
         })
         .await;

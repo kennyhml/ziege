@@ -1,6 +1,6 @@
 use serde::{Serialize, de::DeserializeOwned};
 
-use super::{GlobalWorkbenchType, ObjectRef, ObjectType};
+use super::{GlobalWorkbenchType, ObjectRef, ObjectType, PrimaryObjectType};
 use crate::{
     CategoryId, ObjectError, compatibility::media_types_match, operation::TemplateTarget,
     resource::AdvertisedLink,
@@ -85,6 +85,11 @@ pub trait PropertyModel: std::fmt::Debug + DeserializeOwned + Serialize + Send +
         self.object_name() == reference.name() && self.object_type() == reference.object_type()
     }
 
+    /// Formats the payload identity for mismatch diagnostics.
+    fn object_description(&self) -> String {
+        format!("{} ({})", self.object_name(), self.object_type())
+    }
+
     /// Deserializes properties and verifies that they belong to the given object.
     fn from_xml_for<T>(body: &[u8], reference: &ObjectRef<T>) -> Result<Self, ObjectError> {
         let properties: Self =
@@ -92,11 +97,7 @@ pub trait PropertyModel: std::fmt::Debug + DeserializeOwned + Serialize + Send +
         if !properties.belongs_to(reference) {
             return Err(ObjectError::UnexpectedObjectReference {
                 expected: reference.to_string(),
-                actual: format!(
-                    "{} ({})",
-                    properties.object_name(),
-                    properties.object_type()
-                ),
+                actual: properties.object_description(),
             });
         }
         Ok(properties)
@@ -111,7 +112,7 @@ pub trait PropertyModel: std::fmt::Debug + DeserializeOwned + Serialize + Send +
         if !self.belongs_to(reference) {
             return Err(ObjectError::UnexpectedObjectReference {
                 expected: reference.to_string(),
-                actual: format!("{} ({})", self.object_name(), self.object_type()),
+                actual: self.object_description(),
             });
         }
         Self::XML_NAMESPACES
@@ -140,7 +141,7 @@ pub trait CreationPropertyModel: PropertyModel {
 }
 
 /// An object family that can be created through its collection resource.
-pub trait Create: ObjectType {
+pub trait Create: PrimaryObjectType {
     /// The sparse properties representation accepted during creation.
     type CreateProperties: CreationPropertyModel;
 

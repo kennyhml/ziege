@@ -148,11 +148,11 @@ async fn access_control_creation_posts_only_the_sparse_properties_payload() {
                 .path("/sap/bc/adt/acm/dcl/sources")
                 .header("content-type", ACCESS_CONTROL_MEDIA_TYPE)
                 .header("x-csrf-token", "CSRF-TOKEN-DCLS-CREATE")
-                .body_contains("<dcl:dclSource")
-                .body_contains("adtcore:name=\"Z_ACCESS_CONTROL\"")
-                .body_contains("adtcore:type=\"DCLS/DL\"")
-                .body_contains("adtcore:description=\"Created Access Control\"")
-                .body_contains("<adtcore:packageRef adtcore:name=\"$TMP\"");
+                .body_includes("<dcl:dclSource")
+                .body_includes("adtcore:name=\"Z_ACCESS_CONTROL\"")
+                .body_includes("adtcore:type=\"DCLS/DL\"")
+                .body_includes("adtcore:description=\"Created Access Control\"")
+                .body_includes("<adtcore:packageRef adtcore:name=\"$TMP\"");
             then.status(201);
         })
         .await;

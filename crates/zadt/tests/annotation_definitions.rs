@@ -148,11 +148,11 @@ async fn annotation_definition_creation_posts_only_the_sparse_properties_payload
                 .path("/sap/bc/adt/ddic/ddla/sources")
                 .header("content-type", ANNOTATION_DEFINITION_MEDIA_TYPE)
                 .header("x-csrf-token", "CSRF-TOKEN-DDLA-CREATE")
-                .body_contains("<ddla:ddlaSource")
-                .body_contains("adtcore:name=\"Z_ANNOTATION_DEFINITION\"")
-                .body_contains("adtcore:type=\"DDLA/ADF\"")
-                .body_contains("adtcore:description=\"Created Annotation Definition\"")
-                .body_contains("<adtcore:packageRef adtcore:name=\"$TMP\"");
+                .body_includes("<ddla:ddlaSource")
+                .body_includes("adtcore:name=\"Z_ANNOTATION_DEFINITION\"")
+                .body_includes("adtcore:type=\"DDLA/ADF\"")
+                .body_includes("adtcore:description=\"Created Annotation Definition\"")
+                .body_includes("<adtcore:packageRef adtcore:name=\"$TMP\"");
             then.status(201);
         })
         .await;

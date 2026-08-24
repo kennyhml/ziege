@@ -138,11 +138,12 @@ mod tests {
     impl Transport for RecordingTransport {
         async fn send(&self, request: AdtRequest) -> Result<AdtResponse, crate::TransportError> {
             self.requests.lock().unwrap().push(request);
-            Ok(AdtResponse::new(
-                StatusCode::OK,
-                HeaderMap::new(),
-                Vec::new(),
-            ))
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static(crate::protocol::TEXT_PLAIN_MEDIA_TYPE),
+            );
+            Ok(AdtResponse::new(StatusCode::OK, headers, Vec::new()))
         }
     }
 
@@ -301,9 +302,46 @@ mod tests {
         ));
     }
 
+    #[tokio::test]
+    async fn selects_the_relation_template_with_the_required_variables() {
+        let (client, requests) = recording_client(
+            br#"<app:service xmlns:app="http://www.w3.org/2007/app"
+                    xmlns:atom="http://www.w3.org/2005/Atom"
+                    xmlns:adtcomp="http://www.sap.com/adt/compatibility">
+                    <app:workspace>
+                        <atom:title>Programs</atom:title>
+                        <app:collection href="/sap/bc/adt/programs/programrun">
+                            <atom:category term="programrun"
+                                scheme="http://www.sap.com/adt/categories/programs" />
+                            <adtcomp:templateLinks>
+                                <adtcomp:templateLink
+                                    rel="http://www.sap.com/adt/relations/programs/programrun"
+                                    template="/sap/bc/adt/programs/programrun/wrong/{other}" />
+                                <adtcomp:templateLink
+                                    rel="http://www.sap.com/adt/relations/programs/programrun"
+                                    template="/sap/bc/adt/programs/programrun/{programname}" />
+                            </adtcomp:templateLinks>
+                        </app:collection>
+                    </app:workspace>
+                </app:service>"#,
+        );
+
+        program_run().execute(&client).await.unwrap();
+
+        assert_eq!(
+            requests.lock().unwrap()[0].target().as_str(),
+            "/sap/bc/adt/programs/programrun/z_test"
+        );
+    }
+
     #[test]
     fn rejects_non_utf8_program_run_output() {
-        let response = AdtResponse::new(StatusCode::OK, HeaderMap::new(), vec![0xff]);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static(crate::protocol::TEXT_PLAIN_MEDIA_TYPE),
+        );
+        let response = AdtResponse::new(StatusCode::OK, headers, vec![0xff]);
         let error = program_run()
             .decode(operation_response(response))
             .unwrap_err();

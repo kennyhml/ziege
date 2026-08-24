@@ -97,14 +97,14 @@ async fn transport_check_uses_the_discovered_endpoint_and_link_up_mode() {
                 .header("accept", TRANSPORT_CHECK_MEDIA_TYPE)
                 .header("content-type", TRANSPORT_CHECK_MEDIA_TYPE)
                 .header("x-csrf-token", "CSRF-CTS")
-                .body_contains("<PGMID")
-                .body_contains("<OBJECT")
-                .body_contains("<OBJECTNAME")
-                .body_contains("<DEVCLASS>ZPACKAGE</DEVCLASS>")
-                .body_contains("<SUPER_PACKAGE>ZROOT</SUPER_PACKAGE>")
-                .body_contains("<RECORD_CHANGES>X</RECORD_CHANGES>")
-                .body_contains("<OPERATION>I</OPERATION>")
-                .body_contains(
+                .body_includes("<PGMID")
+                .body_includes("<OBJECT")
+                .body_includes("<OBJECTNAME")
+                .body_includes("<DEVCLASS>ZPACKAGE</DEVCLASS>")
+                .body_includes("<SUPER_PACKAGE>ZROOT</SUPER_PACKAGE>")
+                .body_includes("<RECORD_CHANGES>X</RECORD_CHANGES>")
+                .body_includes("<OPERATION>I</OPERATION>")
+                .body_includes(
                     "<URI>/sap/bc/adt/oo/classes/zcl_example/includes/testclasses</URI>",
                 );
             then.status(200)
@@ -353,10 +353,10 @@ async fn transport_creation_defaults_to_the_v1_asx_contract() {
                 .header("accept", TRANSPORT_CREATE_RESULT_MEDIA_TYPE)
                 .header("content-type", TRANSPORT_CREATE_V1_MEDIA_TYPE)
                 .header("x-csrf-token", "CSRF-CTS")
-                .body_contains("<OPERATION>I</OPERATION>")
-                .body_contains("<DEVCLASS>ZPACKAGE</DEVCLASS>")
-                .body_contains("<REQUEST_TEXT>Create &amp; test</REQUEST_TEXT>")
-                .body_contains("<REF>/sap/bc/adt/packages/zpackage</REF>");
+                .body_includes("<OPERATION>I</OPERATION>")
+                .body_includes("<DEVCLASS>ZPACKAGE</DEVCLASS>")
+                .body_includes("<REQUEST_TEXT>Create &amp; test</REQUEST_TEXT>")
+                .body_includes("<REF>/sap/bc/adt/packages/zpackage</REF>");
             then.status(201)
                 .header("content-type", TRANSPORT_CREATE_RESULT_MEDIA_TYPE)
                 .body(TRANSPORT_CREATION_XML);
@@ -394,9 +394,9 @@ async fn transport_creation_uses_the_selected_legacy_contract() {
                 .header("accept", "text/plain")
                 .header("content-type", TRANSPORT_CREATE_LEGACY_MEDIA_TYPE)
                 .header("x-csrf-token", "CSRF-CTS")
-                .body_contains("<OPERATION>I</OPERATION>")
-                .body_contains("<DEVCLASS>ZPACKAGE</DEVCLASS>")
-                .body_contains("<REQUEST_TEXT>Legacy request</REQUEST_TEXT>");
+                .body_includes("<OPERATION>I</OPERATION>")
+                .body_includes("<DEVCLASS>ZPACKAGE</DEVCLASS>")
+                .body_includes("<REQUEST_TEXT>Legacy request</REQUEST_TEXT>");
             then.status(200)
                 .header("content-type", "text/plain; charset=utf-8")
                 .body("/com.sap.cts/object_record/DEVK900004");

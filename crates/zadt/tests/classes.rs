@@ -186,7 +186,9 @@ async fn class_properties_query_converts_the_live_v4_manifest() {
             when.method(GET)
                 .path("/sap/bc/adt/oo/classes/cl_adt_uri_mapper/source/main")
                 .header("accept", "text/plain");
-            then.status(200).body(SOURCE);
+            then.status(200)
+                .header("content-type", "text/plain; charset=utf-8")
+                .body(SOURCE);
         })
         .await;
 

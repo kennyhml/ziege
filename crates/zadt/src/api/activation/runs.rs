@@ -96,6 +96,19 @@ impl Operation for ActivationRun {
     type Target = Advertised;
 
     fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        for object in &self.objects.objects {
+            let Some(object_type) = object.object_type.as_ref() else {
+                continue;
+            };
+            if crate::objects::descriptors::requires_parent(object_type)
+                && object.parent_uri.is_none()
+            {
+                return Err(ObjectError::ParentObjectRequired {
+                    object_type: object_type.clone(),
+                }
+                .into());
+            }
+        }
         let body = serde_xml_rs::SerdeXml::new()
             .namespace("adtcore", "http://www.sap.com/adt/core")
             .to_string(&self.objects)
@@ -222,7 +235,7 @@ pub struct ActivationRunMessageText {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, Class};
+    use crate::{AdtUri, Class, FunctionGroup, FunctionModule};
     use http::header;
 
     const ACTIVATION_MESSAGES_XML: &[u8] =
@@ -256,6 +269,38 @@ mod tests {
         assert!(body.contains("xmlns:adtcore=\"http://www.sap.com/adt/core\""));
         assert!(body.contains("adtcore:type=\"CLAS/OC\""));
         assert!(body.contains("adtcore:name=\"Z_SYNTAX_TEST\""));
+    }
+
+    #[test]
+    fn child_activation_includes_its_parent_uri() {
+        let group = ObjectRef::<FunctionGroup>::new(
+            "Z_TEST_GROUP".to_owned(),
+            AdtUri::parse("/sap/bc/adt/functions/groups/z_test_group").unwrap(),
+        );
+        let module = ObjectRef::<FunctionModule>::new(
+            "ZZZZFUNC".to_owned(),
+            AdtUri::parse("/sap/bc/adt/functions/groups/z_test_group/fmodules/zzzzfunc").unwrap(),
+        )
+        .with_parent(&group);
+
+        let request = module.activation().encode().unwrap();
+        let body = std::str::from_utf8(request.body()).unwrap();
+
+        assert!(body.contains("adtcore:parentUri=\"/sap/bc/adt/functions/groups/z_test_group\""));
+    }
+
+    #[test]
+    fn child_activation_requires_parent_identity() {
+        let module = ObjectRef::<FunctionModule>::new(
+            "ZZZZFUNC".to_owned(),
+            AdtUri::parse("/sap/bc/adt/functions/groups/z_test_group/fmodules/zzzzfunc").unwrap(),
+        );
+
+        assert!(matches!(
+            module.activation().encode(),
+            Err(EncodeError::Object(ObjectError::ParentObjectRequired { object_type }))
+                if object_type == FunctionModule::WORKBENCH_TYPE
+        ));
     }
 
     #[test]

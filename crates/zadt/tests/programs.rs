@@ -138,7 +138,9 @@ async fn include_properties_query_converts_the_live_ztest_properties() {
             when.method(GET)
                 .path("/sap/bc/adt/programs/includes/ztest/source/main")
                 .header("accept", "text/plain");
-            then.status(200).body(SOURCE);
+            then.status(200)
+                .header("content-type", "text/plain; charset=utf-8")
+                .body(SOURCE);
         })
         .await;
     let transport = ReqwestTransport::builder()
@@ -218,7 +220,9 @@ async fn program_properties_query_converts_the_live_z_test_v3_properties() {
             when.method(GET)
                 .path("/sap/bc/adt/programs/programs/z_test/source/main")
                 .header("accept", "text/plain");
-            then.status(200).body(SOURCE);
+            then.status(200)
+                .header("content-type", "text/plain; charset=utf-8")
+                .body(SOURCE);
         })
         .await;
     let transport = ReqwestTransport::builder()
@@ -455,6 +459,7 @@ async fn program_lock_and_update_share_one_user_session() {
                 .path("/sap/bc/adt/programs/programs/z_ziege_test/source/main")
                 .header("accept", "text/plain");
             then.status(200)
+                .header("content-type", "text/plain; charset=utf-8")
                 .header("etag", "SOURCE-ETAG-1")
                 .body(SOURCE);
         })

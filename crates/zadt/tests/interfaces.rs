@@ -153,11 +153,11 @@ async fn interface_creation_posts_only_the_sparse_properties_payload() {
                 .path("/sap/bc/adt/oo/interfaces")
                 .header("content-type", INTERFACE_V5_MEDIA_TYPE)
                 .header("x-csrf-token", "CSRF-TOKEN-INTERFACE-CREATE")
-                .body_contains("<intf:abapInterface")
-                .body_contains("adtcore:name=\"ZIF_EXAMPLE\"")
-                .body_contains("adtcore:type=\"INTF/OI\"")
-                .body_contains("adtcore:description=\"Created Interface\"")
-                .body_contains("<adtcore:packageRef adtcore:name=\"$TMP\"");
+                .body_includes("<intf:abapInterface")
+                .body_includes("adtcore:name=\"ZIF_EXAMPLE\"")
+                .body_includes("adtcore:type=\"INTF/OI\"")
+                .body_includes("adtcore:description=\"Created Interface\"")
+                .body_includes("<adtcore:packageRef adtcore:name=\"$TMP\"");
             then.status(201);
         })
         .await;

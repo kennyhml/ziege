@@ -4,8 +4,9 @@ use http::Method;
 
 use super::{
     AccessControl, AnnotationDefinition, AnyObject, Class, DataDefinition, DataElement, Domain,
-    GlobalWorkbenchType, Include, Interface, MetadataExtension, ObjectRef, ObjectType,
-    ObjectVersion, Package, Program, PropertyModel, RunCapability, ServiceDefinition,
+    FunctionGroup, FunctionGroupInclude, FunctionModule, GlobalWorkbenchType, Include, Interface,
+    MetadataExtension, ObjectRef, ObjectType, ObjectVersion, Package, Program, PropertyModel,
+    RunCapability, ServiceDefinition, SubObjectDescriptor,
 };
 use crate::{
     CategoryId,
@@ -17,7 +18,9 @@ use crate::{
 pub(crate) trait RuntimeObjectTypeDescriptor: std::fmt::Debug + Sync {
     fn object_type(&self) -> GlobalWorkbenchType;
 
-    fn category(&self) -> CategoryId;
+    fn category(&self) -> Option<CategoryId>;
+
+    fn subobjects(&self) -> &'static [SubObjectDescriptor];
 
     fn create_media_type(&self) -> Option<&'static str>;
 
@@ -70,6 +73,10 @@ pub(crate) trait RuntimeObjectTypeDescriptor: std::fmt::Debug + Sync {
 }
 
 pub(crate) trait RuntimeObjectType: ObjectType {
+    fn category() -> Option<CategoryId>;
+
+    fn subobjects() -> &'static [SubObjectDescriptor];
+
     fn create_media_type() -> Option<&'static str>;
 
     fn creation_properties_to_xml(
@@ -117,8 +124,12 @@ where
         T::WORKBENCH_TYPE
     }
 
-    fn category(&self) -> CategoryId {
-        T::CATEGORY
+    fn category(&self) -> Option<CategoryId> {
+        T::category()
+    }
+
+    fn subobjects(&self) -> &'static [SubObjectDescriptor] {
+        T::subobjects()
     }
 
     fn create_media_type(&self) -> Option<&'static str> {
@@ -142,8 +153,7 @@ where
         object: &ObjectRef<()>,
         properties: &serde_json::Value,
     ) -> Result<Option<crate::SourceRef>, ObjectError> {
-        let properties: T::Properties = serde_json::from_value(properties.clone())
-            .map_err(ObjectError::InvalidPropertiesJson)?;
+        let properties = validated_properties::<T>(object, properties)?;
         T::source_uri(&properties)
             .map(|href| crate::resource::refs::source_from_href(object.clone(), href))
             .transpose()
@@ -155,8 +165,7 @@ where
         properties: &serde_json::Value,
         name: &str,
     ) -> Result<Option<crate::SourceRef>, ObjectError> {
-        let properties: T::Properties = serde_json::from_value(properties.clone())
-            .map_err(ObjectError::InvalidPropertiesJson)?;
+        let properties = validated_properties::<T>(object, properties)?;
         T::source_component_uri(&properties, name)
             .map(|href| crate::resource::refs::source_from_href(object.clone(), href))
             .transpose()
@@ -167,8 +176,7 @@ where
         object: &ObjectRef<()>,
         properties: &serde_json::Value,
     ) -> Result<Option<crate::ObjectStructureRef>, ObjectError> {
-        let properties: T::Properties = serde_json::from_value(properties.clone())
-            .map_err(ObjectError::InvalidPropertiesJson)?;
+        let properties = validated_properties::<T>(object, properties)?;
         if !T::has_object_structure() {
             return Ok(None);
         }
@@ -236,6 +244,21 @@ where
     }
 }
 
+fn validated_properties<T: ObjectType>(
+    object: &ObjectRef<()>,
+    properties: &serde_json::Value,
+) -> Result<T::Properties, ObjectError> {
+    let properties: T::Properties =
+        serde_json::from_value(properties.clone()).map_err(ObjectError::InvalidPropertiesJson)?;
+    if !properties.belongs_to(object) {
+        return Err(ObjectError::UnexpectedObjectReference {
+            expected: object.to_string(),
+            actual: properties.object_description(),
+        });
+    }
+    Ok(properties)
+}
+
 static OBJECT_TYPES: &[&dyn RuntimeObjectTypeDescriptor] = &[
     Program::DESCRIPTOR,
     Include::DESCRIPTOR,
@@ -249,6 +272,9 @@ static OBJECT_TYPES: &[&dyn RuntimeObjectTypeDescriptor] = &[
     ServiceDefinition::DESCRIPTOR,
     AnnotationDefinition::DESCRIPTOR,
     Domain::DESCRIPTOR,
+    FunctionGroup::DESCRIPTOR,
+    FunctionModule::DESCRIPTOR,
+    FunctionGroupInclude::DESCRIPTOR,
 ];
 
 pub(crate) fn object_type_descriptor(
@@ -258,6 +284,22 @@ pub(crate) fn object_type_descriptor(
         .iter()
         .copied()
         .find(|descriptor| &descriptor.object_type() == object_type)
+}
+
+pub(crate) fn requires_parent(object_type: &GlobalWorkbenchType) -> bool {
+    object_type_descriptor(object_type).is_some_and(|descriptor| descriptor.category().is_none())
+}
+
+pub(crate) fn supports_subobject(
+    parent_type: &GlobalWorkbenchType,
+    child_type: &GlobalWorkbenchType,
+) -> bool {
+    object_type_descriptor(parent_type).is_some_and(|descriptor| {
+        descriptor
+            .subobjects()
+            .iter()
+            .any(|subobject| subobject.object_type() == child_type)
+    })
 }
 
 #[cfg(test)]
@@ -275,6 +317,38 @@ mod tests {
                     .all(|other| other.object_type() != object_type),
                 "registered `{object_type}` more than once"
             );
+        }
+    }
+
+    #[test]
+    fn every_registered_subobject_has_one_declared_parent() {
+        for child in OBJECT_TYPES
+            .iter()
+            .filter(|descriptor| descriptor.category().is_none())
+        {
+            let parent_count = OBJECT_TYPES
+                .iter()
+                .flat_map(|parent| parent.subobjects())
+                .filter(|subobject| subobject.object_type() == &child.object_type())
+                .count();
+            assert_eq!(
+                parent_count,
+                1,
+                "subobject `{}` must have exactly one declared parent",
+                child.object_type()
+            );
+        }
+    }
+
+    #[test]
+    fn declared_subobjects_are_registered_and_not_primary() {
+        for subobject in OBJECT_TYPES
+            .iter()
+            .flat_map(|descriptor| descriptor.subobjects())
+        {
+            let descriptor = object_type_descriptor(subobject.object_type())
+                .expect("declared subobject type must be registered");
+            assert!(descriptor.category().is_none());
         }
     }
 

@@ -153,11 +153,11 @@ async fn metadata_extension_creation_posts_only_the_sparse_properties_payload() 
                 .path("/sap/bc/adt/ddic/ddlx/sources")
                 .header("content-type", METADATA_EXTENSION_MEDIA_TYPE)
                 .header("x-csrf-token", "CSRF-TOKEN-DDLX-CREATE")
-                .body_contains("<ddlx:ddlxSource")
-                .body_contains("adtcore:name=\"Z_METADATA_EXTENSION\"")
-                .body_contains("adtcore:type=\"DDLX/EX\"")
-                .body_contains("adtcore:description=\"Created Metadata Extension\"")
-                .body_contains("<adtcore:packageRef adtcore:name=\"$TMP\"");
+                .body_includes("<ddlx:ddlxSource")
+                .body_includes("adtcore:name=\"Z_METADATA_EXTENSION\"")
+                .body_includes("adtcore:type=\"DDLX/EX\"")
+                .body_includes("adtcore:description=\"Created Metadata Extension\"")
+                .body_includes("<adtcore:packageRef adtcore:name=\"$TMP\"");
             then.status(201);
         })
         .await;

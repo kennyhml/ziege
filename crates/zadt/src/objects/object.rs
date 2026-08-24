@@ -197,20 +197,16 @@ where
             media_type: media_type.to_owned(),
         });
     }
-    if properties.object_name() != reference.name() {
-        return Err(ObjectError::UnexpectedObjectReference {
-            expected: reference.to_string(),
-            actual: format!(
-                "{} ({})",
-                properties.object_name(),
-                properties.object_type()
-            ),
-        });
-    }
     if properties.object_type() != reference.object_type() {
         return Err(ObjectError::UnexpectedObjectType {
             expected: reference.object_type().clone(),
             actual: properties.object_type().clone(),
+        });
+    }
+    if !properties.belongs_to(reference) {
+        return Err(ObjectError::UnexpectedObjectReference {
+            expected: reference.to_string(),
+            actual: properties.object_description(),
         });
     }
     Ok(())

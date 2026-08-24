@@ -21,11 +21,16 @@ impl<'a> AdtUriTemplate<'a> {
     }
 
     pub(crate) fn has_variable(self, expected: &str) -> bool {
+        self.variable_names().contains(&expected)
+    }
+
+    pub(crate) fn variable_names(self) -> Vec<&'a str> {
+        let mut variables = Vec::new();
         let mut remaining = self.template;
         while let Some(start) = remaining.find('{') {
             remaining = &remaining[start + 1..];
             let Some(end) = remaining.find('}') else {
-                return false;
+                break;
             };
             let expression = &remaining[..end];
             let expression = expression
@@ -33,15 +38,13 @@ impl<'a> AdtUriTemplate<'a> {
                 .next()
                 .filter(|operator| "+#./;?&".contains(*operator))
                 .map_or(expression, |operator| &expression[operator.len_utf8()..]);
-            if expression.split(',').any(|variable| {
+            variables.extend(expression.split(',').map(|variable| {
                 let variable = variable.strip_suffix('*').unwrap_or(variable);
-                variable.split_once(':').map_or(variable, |(name, _)| name) == expected
-            }) {
-                return true;
-            }
+                variable.split_once(':').map_or(variable, |(name, _)| name)
+            }));
             remaining = &remaining[end + 1..];
         }
-        false
+        variables
     }
 
     pub(crate) fn expand(
@@ -122,6 +125,7 @@ mod tests {
         assert!(template.has_variable("classname"));
         assert!(template.has_variable("profilerId"));
         assert!(!template.has_variable("programname"));
+        assert_eq!(template.variable_names(), ["classname", "profilerId"]);
     }
 
     #[test]

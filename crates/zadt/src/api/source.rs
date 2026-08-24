@@ -88,6 +88,7 @@ impl Operation for ObjectSourceQuery {
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         response.require_status(StatusCode::OK)?;
+        response.require_content_type(&[TEXT_PLAIN_MEDIA_TYPE])?;
         let etag = response.entity_tag();
         let content = String::from_utf8(response.into_body())
             .map_err(ObjectError::InvalidResponseEncoding)?;
@@ -233,7 +234,7 @@ impl SourceRef {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use http::{HeaderMap, HeaderValue, header};
+    use http::{HeaderMap, HeaderValue, StatusCode, header};
 
     use crate::{
         AccessMode, AdtRequest, AdtResponse, AdtUri, Class, Client, ObjectRef, OperationError,
@@ -273,6 +274,39 @@ mod tests {
 
         accepts_operation::<ObjectSourceQuery>();
         accepts_operation::<ObjectSourceUpdate>();
+    }
+
+    #[test]
+    fn source_query_requires_plain_text_content() {
+        let query = program_source().query();
+        let target = query.source.uri.clone();
+        let missing = OperationResponse::new(
+            AdtResponse::new(
+                StatusCode::OK,
+                HeaderMap::new(),
+                b"REPORT zprogram.".to_vec(),
+            ),
+            target.clone(),
+        );
+        assert!(matches!(
+            query.decode(missing),
+            Err(ResponseError::MissingContentType { target: actual }) if actual == target
+        ));
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/xml"),
+        );
+        let unsupported = OperationResponse::new(
+            AdtResponse::new(StatusCode::OK, headers, b"REPORT zprogram.".to_vec()),
+            target,
+        );
+        assert!(matches!(
+            query.decode(unsupported),
+            Err(ResponseError::UnsupportedContentType { content_type, .. })
+                if content_type == "application/xml"
+        ));
     }
 
     #[test]

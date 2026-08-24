@@ -20,6 +20,7 @@ pub(crate) const PURPOSE_HEADER: HeaderName = HeaderName::from_static("sap-adt-p
 pub(crate) const LOAD_BALANCER_HEADER: HeaderName = HeaderName::from_static("sap-adt-saplb");
 pub(crate) const CANCEL_ON_CLOSE_HEADER: HeaderName =
     HeaderName::from_static("sap-cancel-on-close");
+#[cfg(feature = "reqwest")]
 pub(crate) const PREFLIGHT_LOGON_PURPOSE: &str = "preflight_logon";
 const LOGON_PURPOSE: &str = "logon";
 
@@ -219,6 +220,7 @@ impl Default for Logon {
 }
 
 impl Logon {
+    #[cfg(feature = "reqwest")]
     pub(crate) fn as_preflight(mut self) -> Self {
         self.purpose = PREFLIGHT_LOGON_PURPOSE;
         self

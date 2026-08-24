@@ -142,6 +142,21 @@ pub enum ObjectError {
     #[error("object type `{object_type}` is not modeled by ZADT")]
     UnsupportedObjectType { object_type: GlobalWorkbenchType },
 
+    #[error("object type `{object_type}` requires a parent object")]
+    ParentObjectRequired { object_type: GlobalWorkbenchType },
+
+    #[error("invalid parent object for type `{object_type}`: {reason}")]
+    InvalidParentObject {
+        object_type: GlobalWorkbenchType,
+        reason: String,
+    },
+
+    #[error("object type `{parent_type}` does not support subobject type `{child_type}`")]
+    UnsupportedSubObjectType {
+        parent_type: GlobalWorkbenchType,
+        child_type: GlobalWorkbenchType,
+    },
+
     #[error("unsupported object version `{version}`")]
     UnsupportedObjectVersion { version: String },
 

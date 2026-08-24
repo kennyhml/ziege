@@ -7,9 +7,10 @@ use httpmock::prelude::*;
 use std::sync::{Arc, Mutex};
 use zadt::{
     AccessControl, AdtRequest, AdtResponse, AnnotationDefinition, CategoryId, Class, Client,
-    CoreDiscoveryQuery, DataDefinition, DataElement, DiscoveryQuery, Domain, GlobalWorkbenchType,
-    Interface, Logon, MetadataExtension, ObjectError, Operation, OperationError, ReqwestTransport,
-    ResponseError, ServiceDefinition, Transport, TransportError,
+    CoreDiscoveryQuery, DataDefinition, DataElement, DiscoveryQuery, Domain, FunctionGroup,
+    FunctionGroupInclude, FunctionModule, GlobalWorkbenchType, Interface, Logon, MetadataExtension,
+    ObjectError, ObjectRef, ObjectType, Operation, OperationError, ReqwestTransport, ResponseError,
+    ServiceDefinition, Transport, TransportError,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -23,6 +24,19 @@ const PROGRAMS_CATEGORY: CategoryId = CategoryId {
     term: "programs",
 };
 const COMPATIBILITY_SCHEME: &str = "http://www.sap.com/adt/categories/compatibility";
+const FUNCTIONS_WITHOUT_SUBOBJECT_TEMPLATES: &str = r#"
+    <app:service xmlns:app="http://www.w3.org/2007/app"
+        xmlns:atom="http://www.w3.org/2005/Atom">
+        <app:workspace>
+            <atom:title>Function Builder</atom:title>
+            <app:collection href="/sap/bc/adt/functions/groups">
+                <atom:title>Function Groups</atom:title>
+                <atom:category term="groups"
+                    scheme="http://www.sap.com/adt/categories/functions" />
+            </app:collection>
+        </app:workspace>
+    </app:service>
+"#;
 
 async fn mock_logon(server: &MockServer) -> Mock<'_> {
     server
@@ -175,6 +189,11 @@ async fn runtime_object_types_use_the_registered_descriptor() {
             "/sap/bc/adt/ddic/ddla/sources/z_annotation_definition",
         ),
         ("DOMA/DD", "Z_DOMAIN", "/sap/bc/adt/ddic/domains/z_domain"),
+        (
+            "FUGR/F",
+            "Z_TEST_GROUP",
+            "/sap/bc/adt/functions/groups/z_test_group",
+        ),
     ] {
         let parsed_type: GlobalWorkbenchType = object_type.parse().unwrap();
         let object = client.repository_object(&parsed_type, name).unwrap();
@@ -194,15 +213,155 @@ async fn runtime_object_types_use_the_registered_descriptor() {
             "SRVD/SRV" => object.typed::<ServiceDefinition>().is_some(),
             "DDLA/ADF" => object.typed::<AnnotationDefinition>().is_some(),
             "DOMA/DD" => object.typed::<Domain>().is_some(),
+            "FUGR/F" => object.typed::<FunctionGroup>().is_some(),
             _ => unreachable!(),
         });
     }
 
-    let unsupported_type: GlobalWorkbenchType = "FUGR/F".parse().unwrap();
+    let child_type: GlobalWorkbenchType = "FUGR/FF".parse().unwrap();
     assert!(matches!(
-        client.repository_object(&unsupported_type, "ZFUNCTIONS"),
+        client.repository_object(&child_type, "ZZZZFUNC"),
+        Err(ObjectError::ParentObjectRequired { object_type })
+            if object_type.as_str() == "FUGR/FF"
+    ));
+
+    let unsupported_type: GlobalWorkbenchType = "ENQU/DL".parse().unwrap();
+    assert!(matches!(
+        client.repository_object(&unsupported_type, "EZABAPGIT"),
         Err(ObjectError::UnsupportedObjectType { object_type })
-            if object_type.as_str() == "FUGR/F"
+            if object_type.as_str() == "ENQU/DL"
+    ));
+}
+
+#[tokio::test]
+async fn function_groups_resolve_typed_and_runtime_subobjects() {
+    let client = Client::new(FixtureTransport::new(DISCOVERY_XML));
+    Logon::default().execute(&client).await.unwrap();
+    let client = client.discover().await.unwrap();
+
+    let group = client.object::<FunctionGroup>("Z_TEST_GROUP").unwrap();
+    let module = group.subobject::<FunctionModule>("ZZZZFUNC").unwrap();
+    let include = group
+        .subobject::<FunctionGroupInclude>("LZ_TEST_GROUPTOP")
+        .unwrap();
+    let namespaced = group.subobject::<FunctionModule>("/DMO/FUNCTION").unwrap();
+    let runtime = group.erase();
+    let runtime_module = runtime
+        .subobject(&FunctionModule::WORKBENCH_TYPE, "ZZZZFUNC")
+        .unwrap();
+    let restored_module: ObjectRef<FunctionModule> =
+        serde_json::from_value(serde_json::to_value(&module).unwrap()).unwrap();
+    let detached: ObjectRef<FunctionGroup> =
+        serde_json::from_value(serde_json::to_value(&group).unwrap()).unwrap();
+
+    assert_eq!(
+        module.uri().as_str(),
+        "/sap/bc/adt/functions/groups/z_test_group/fmodules/zzzzfunc"
+    );
+    assert_eq!(
+        include.uri().as_str(),
+        "/sap/bc/adt/functions/groups/z_test_group/includes/lz_test_grouptop"
+    );
+    assert_eq!(
+        namespaced.uri().as_str(),
+        "/sap/bc/adt/functions/groups/z_test_group/fmodules/%2Fdmo%2Ffunction"
+    );
+    assert_eq!(runtime_module, module.erase());
+    assert!(runtime_module.typed::<FunctionModule>().is_some());
+    let advertised: zadt::AdvertisedObjectReference = (&restored_module).into();
+    assert_eq!(
+        advertised.parent_uri.as_deref(),
+        Some("/sap/bc/adt/functions/groups/z_test_group")
+    );
+    assert!(matches!(
+        detached.subobject::<FunctionModule>("ZZZZFUNC"),
+        Err(ObjectError::MissingTemplate { .. })
+    ));
+}
+
+#[tokio::test]
+async fn function_group_subobjects_require_the_advertised_template() {
+    let client = Client::new(FixtureTransport::new(FUNCTIONS_WITHOUT_SUBOBJECT_TEMPLATES));
+    Logon::default().execute(&client).await.unwrap();
+    let client = client.discover().await.unwrap();
+    let group = client.object::<FunctionGroup>("Z_TEST_GROUP").unwrap();
+
+    let error = group.subobject::<FunctionModule>("ZZZZFUNC").unwrap_err();
+
+    assert!(matches!(
+        error,
+        ObjectError::MissingTemplate { relation }
+            if relation
+                == "http://www.sap.com/adt/categories/functiongroups/functionmodules"
+    ));
+}
+
+#[tokio::test]
+async fn function_group_subobjects_select_the_supported_template_shape() {
+    let discovery = r#"<app:service xmlns:app="http://www.w3.org/2007/app"
+            xmlns:atom="http://www.w3.org/2005/Atom"
+            xmlns:adtcomp="http://www.sap.com/adt/compatibility">
+            <app:workspace>
+                <atom:title>Function Builder</atom:title>
+                <app:collection href="/sap/bc/adt/functions/groups">
+                    <atom:category term="groups"
+                        scheme="http://www.sap.com/adt/categories/functions" />
+                    <adtcomp:templateLinks>
+                        <adtcomp:templateLink
+                            rel="http://www.sap.com/adt/categories/functiongroups/functionmodules"
+                            template="/sap/bc/adt/functions/groups/{groupname}/fmodules/{module}" />
+                        <adtcomp:templateLink
+                            rel="http://www.sap.com/adt/categories/functiongroups/functionmodules"
+                            template="/sap/bc/adt/functions/groups/{groupname}/fmodules" />
+                    </adtcomp:templateLinks>
+                </app:collection>
+            </app:workspace>
+        </app:service>"#;
+    let client = Client::new(FixtureTransport::new(discovery));
+    Logon::default().execute(&client).await.unwrap();
+    let client = client.discover().await.unwrap();
+
+    let module = client
+        .object::<FunctionGroup>("Z_TEST_GROUP")
+        .unwrap()
+        .subobject::<FunctionModule>("ZZZZFUNC")
+        .unwrap();
+
+    assert_eq!(
+        module.uri().as_str(),
+        "/sap/bc/adt/functions/groups/z_test_group/fmodules/zzzzfunc"
+    );
+
+    let direct_only = discovery.replacen(
+        r#"                        <adtcomp:templateLink
+                            rel="http://www.sap.com/adt/categories/functiongroups/functionmodules"
+                            template="/sap/bc/adt/functions/groups/{groupname}/fmodules" />
+"#,
+        "",
+        1,
+    );
+    let client = Client::new(FixtureTransport::new(direct_only));
+    Logon::default().execute(&client).await.unwrap();
+    let client = client.discover().await.unwrap();
+    let group = client.object::<FunctionGroup>("Z_TEST_GROUP").unwrap();
+
+    assert!(matches!(
+        group.subobject::<FunctionModule>("ZZZZFUNC"),
+        Err(ObjectError::MissingTemplate { .. })
+    ));
+
+    let malformed = discovery.replacen(
+        "/sap/bc/adt/functions/groups/{groupname}/fmodules\" />",
+        "//other-host/{groupname}\" />",
+        1,
+    );
+    let client = Client::new(FixtureTransport::new(malformed));
+    Logon::default().execute(&client).await.unwrap();
+    let client = client.discover().await.unwrap();
+
+    assert!(matches!(
+        client.object::<FunctionGroup>("Z_TEST_GROUP"),
+        Err(ObjectError::InvalidExpandedTarget { .. })
     ));
 }
 
@@ -310,8 +469,8 @@ async fn reqwest_transport_reuses_security_session_cookies() {
 
     logon.assert_async().await;
     assert_eq!(
-        central_discovery_user_context_first.hits_async().await
-            + central_discovery_session_first.hits_async().await,
+        central_discovery_user_context_first.calls_async().await
+            + central_discovery_session_first.calls_async().await,
         1
     );
 }
@@ -349,7 +508,7 @@ async fn unexpected_status_is_an_operation_response_error() {
             ..
         })
     ));
-    logon.assert_hits_async(2).await;
+    logon.assert_calls_async(2).await;
 }
 
 #[tokio::test]
@@ -365,14 +524,14 @@ async fn discovery_defers_collection_url_validation_until_use() {
 }
 
 struct FixtureTransport {
-    response: &'static str,
+    response: String,
     requests: Arc<Mutex<Vec<String>>>,
 }
 
 impl FixtureTransport {
-    fn new(response: &'static str) -> Self {
+    fn new(response: impl Into<String>) -> Self {
         Self {
-            response,
+            response: response.into(),
             requests: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -400,7 +559,7 @@ impl Transport for FixtureTransport {
         let response = if request.target().as_str() == "/sap/bc/adt/core/discovery" {
             CORE_DISCOVERY_XML
         } else {
-            self.response
+            self.response.as_str()
         };
         Ok(AdtResponse::new(
             StatusCode::OK,

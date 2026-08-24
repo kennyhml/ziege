@@ -1,10 +1,7 @@
 use std::{env, error::Error, io};
 
 use tracing_subscriber::EnvFilter;
-use zadt::{
-    AdtUri, CheckRunArtifact, CheckRunObject, Client, DataDefinition, ObjectCheckRun,
-    ObjectVersion, Operation, Program, ReqwestTransport, TransportExt,
-};
+use zadt::{Client, FunctionGroup, FunctionModule, Operation, ReqwestTransport, TransportExt};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -21,31 +18,44 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let username = required_env("SAP_USERNAME")?;
     let password = required_env("SAP_PASSWORD")?;
     let language = env::var("SAP_LANGUAGE").unwrap_or_else(|_| "EN".to_owned());
+    let accept_invalid_tls = enabled("SAP_DANGER_ACCEPT_INVALID_TLS");
 
     let transport = ReqwestTransport::builder()
         .destination(destination)
         .sap_client(sap_client)
         .language(language)
         .basic_auth(username, password)
-        .danger_accept_invalid_certs(true)
-        .danger_accept_invalid_hostnames(true)
+        .danger_accept_invalid_certs(accept_invalid_tls)
+        .danger_accept_invalid_hostnames(accept_invalid_tls)
         .build()?
-        .traced()
-        .with_body_logging(64 * 1024);
+        .traced();
+    let transport = if enabled("ZADT_LOG_BODIES") {
+        transport.with_body_logging(64 * 1024)
+    } else {
+        transport
+    };
 
     let client = Client::new(transport).discover().await?;
 
-    let object = client
-        .object::<DataDefinition>("I_BUSINESSPARTNER")?
+    let object = client.object::<FunctionGroup>("Z_TEST")?;
+
+    let source = object
+        .subobject::<FunctionModule>("Z_TEST_FUNC")?
+        .query()
+        .execute(&client)
+        .await?
+        .source()?
         .query()
         .execute(&client)
         .await?;
 
-    let source = object.source()?.query().execute(&client).await?;
-
     println!("{}", source.content);
 
     Ok(())
+}
+
+fn enabled(name: &str) -> bool {
+    env::var(name).is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
 }
 
 fn required_env(name: &str) -> Result<String, io::Error> {

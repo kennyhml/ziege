@@ -153,12 +153,12 @@ async fn service_definition_creation_posts_only_the_sparse_properties_payload() 
                 .path("/sap/bc/adt/ddic/srvd/sources")
                 .header("content-type", SERVICE_DEFINITION_MEDIA_TYPE)
                 .header("x-csrf-token", "CSRF-TOKEN-SRVD-CREATE")
-                .body_contains("<srvd:srvdSource")
-                .body_contains("adtcore:name=\"Z_SERVICE_DEFINITION\"")
-                .body_contains("adtcore:type=\"SRVD/SRV\"")
-                .body_contains("adtcore:description=\"Created Service Definition\"")
-                .body_contains("srvd:srvdSourceType=\"S\"")
-                .body_contains("<adtcore:packageRef adtcore:name=\"$TMP\"");
+                .body_includes("<srvd:srvdSource")
+                .body_includes("adtcore:name=\"Z_SERVICE_DEFINITION\"")
+                .body_includes("adtcore:type=\"SRVD/SRV\"")
+                .body_includes("adtcore:description=\"Created Service Definition\"")
+                .body_includes("srvd:srvdSourceType=\"S\"")
+                .body_includes("<adtcore:packageRef adtcore:name=\"$TMP\"");
             then.status(201);
         })
         .await;

@@ -355,10 +355,10 @@ mod tests {
         let response = transport.send(request).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
-        initial_fetch.assert_hits_async(1).await;
-        rejected.assert_hits_async(1).await;
-        refreshed_fetch.assert_hits_async(1).await;
-        accepted.assert_hits_async(1).await;
+        initial_fetch.assert_calls_async(1).await;
+        rejected.assert_calls_async(1).await;
+        refreshed_fetch.assert_calls_async(1).await;
+        accepted.assert_calls_async(1).await;
     }
 
     #[tokio::test]
@@ -393,8 +393,8 @@ mod tests {
         let response = transport.send(request).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
-        fetch.assert_hits_async(1).await;
-        write.assert_hits_async(1).await;
+        fetch.assert_calls_async(1).await;
+        write.assert_calls_async(1).await;
     }
 
     #[tokio::test]
@@ -417,7 +417,7 @@ mod tests {
         let response = transport.send(request).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        logon.assert_hits_async(1).await;
+        logon.assert_calls_async(1).await;
     }
 
     #[tokio::test]
@@ -460,9 +460,9 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.body(), b"ok");
-        unauthorized.assert_hits_async(1).await;
-        relogon.assert_hits_async(1).await;
-        accepted.assert_hits_async(1).await;
+        unauthorized.assert_calls_async(1).await;
+        relogon.assert_calls_async(1).await;
+        accepted.assert_calls_async(1).await;
     }
 
     #[tokio::test]
@@ -501,9 +501,9 @@ mod tests {
         let response = transport.send(request).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        initial.assert_hits_async(1).await;
-        relogon.assert_hits_async(1).await;
-        retried.assert_hits_async(1).await;
+        initial.assert_calls_async(1).await;
+        relogon.assert_calls_async(1).await;
+        retried.assert_calls_async(1).await;
     }
 
     #[tokio::test]
@@ -538,7 +538,7 @@ mod tests {
         let response = transport.send(request).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        relogon.assert_hits_async(1).await;
-        read.assert_hits_async(1).await;
+        relogon.assert_calls_async(1).await;
+        read.assert_calls_async(1).await;
     }
 }

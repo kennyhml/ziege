@@ -110,10 +110,33 @@ pub(crate) fn resolve_advertised(
             required_query_parameters,
         }) => {
             let collection = collection(client, document, category)?;
-            let template = collection
+            let variables = variables
+                .into_iter()
+                .map(|(name, value)| (name, Value::String(value)))
+                .collect::<HashMap<_, _>>();
+            let matching_link = collection
                 .template_links()
                 .iter()
-                .find(|link| link.relation() == relation)
+                .filter(|link| link.relation() == relation)
+                .find(|link| {
+                    let template = AdtUriTemplate::new(link.template());
+                    required_variables
+                        .iter()
+                        .chain(supported_variables.iter())
+                        .all(|variable| template.has_variable(variable))
+                        && template.expand(&variables).is_ok_and(|(_, query)| {
+                            required_query_parameters
+                                .iter()
+                                .all(|parameter| query.iter().any(|(name, _)| name == parameter))
+                        })
+                });
+            let template = matching_link
+                .or_else(|| {
+                    collection
+                        .template_links()
+                        .iter()
+                        .find(|link| link.relation() == relation)
+                })
                 .map(|link| AdtUriTemplate::new(link.template()))
                 .ok_or(ObjectError::MissingTemplate { relation })?;
 
@@ -135,10 +158,6 @@ pub(crate) fn resolve_advertised(
                 }
             }
 
-            let variables = variables
-                .into_iter()
-                .map(|(name, value)| (name, Value::String(value)))
-                .collect::<HashMap<_, _>>();
             let (target, query) = template.expand(&variables)?;
             for parameter in required_query_parameters {
                 if !query.iter().any(|(name, _)| name == parameter) {

@@ -60,8 +60,8 @@ fn expand_object_type_item(
     let ObjectTypeArguments {
         properties: model,
         workbench_type,
-        scheme,
-        term,
+        collection,
+        subobjects,
         capabilities,
     } = arguments;
     let conditional_attrs = attrs
@@ -171,6 +171,57 @@ fn expand_object_type_item(
         }
     };
     let has_object_structure = capabilities.structure.is_some();
+    let addressing_impl = if let Some((scheme, term)) = &collection {
+        let subobject_descriptors = subobjects.iter().map(|subobject| {
+            let object = &subobject.object;
+            let relation = &subobject.relation;
+            let parent_variable = &subobject.parent_variable;
+            quote! {
+                crate::objects::SubObjectDescriptor::new(
+                    <#object as crate::objects::ObjectType>::WORKBENCH_TYPE,
+                    #relation,
+                    #parent_variable,
+                )
+            }
+        });
+        let subobject_impls = subobjects.iter().map(|subobject| {
+            let child = &subobject.object;
+            quote! {
+                #(#conditional_attrs)*
+                impl crate::objects::SubObjects<#child> for #object {}
+            }
+        });
+        quote! {
+            #(#conditional_attrs)*
+            impl crate::objects::private::PrimaryMetadata for #object {
+                const SUBOBJECTS: &'static [crate::objects::SubObjectDescriptor] = &[
+                    #(#subobject_descriptors),*
+                ];
+            }
+
+            #(#conditional_attrs)*
+            impl crate::objects::PrimaryObjectType for #object {
+                const CATEGORY: crate::CategoryId = crate::CategoryId {
+                    scheme: #scheme,
+                    term: #term,
+                };
+            }
+
+            #(#subobject_impls)*
+        }
+    } else {
+        quote! {}
+    };
+    let runtime_category = if collection.is_some() {
+        quote!(Some(<#object as crate::objects::PrimaryObjectType>::CATEGORY))
+    } else {
+        quote!(None)
+    };
+    let runtime_subobjects = if collection.is_some() {
+        quote!(<#object as crate::objects::private::PrimaryMetadata>::SUBOBJECTS)
+    } else {
+        quote!(&[])
+    };
     Ok(quote! {
         #(#attrs)*
         #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
@@ -185,11 +236,9 @@ fn expand_object_type_item(
 
             const WORKBENCH_TYPE: crate::objects::GlobalWorkbenchType =
                 crate::objects::GlobalWorkbenchType::new(#workbench_type);
-            const CATEGORY: crate::CategoryId = crate::CategoryId {
-                scheme: #scheme,
-                term: #term,
-            };
         }
+
+        #addressing_impl
 
         #create_impl
         #source_impl
@@ -202,6 +251,14 @@ fn expand_object_type_item(
 
         #(#conditional_attrs)*
         impl crate::objects::descriptors::RuntimeObjectType for #object {
+            fn category() -> Option<crate::CategoryId> {
+                #runtime_category
+            }
+
+            fn subobjects() -> &'static [crate::objects::SubObjectDescriptor] {
+                #runtime_subobjects
+            }
+
             fn create_media_type() -> Option<&'static str> {
                 #create_media_type
             }
@@ -239,9 +296,15 @@ fn expand_object_type_item(
 struct ObjectTypeArguments {
     properties: Type,
     workbench_type: LitStr,
-    scheme: LitStr,
-    term: LitStr,
+    collection: Option<(LitStr, LitStr)>,
+    subobjects: Vec<SubObjectArgument>,
     capabilities: Capabilities,
+}
+
+struct SubObjectArgument {
+    object: Type,
+    relation: LitStr,
+    parent_variable: LitStr,
 }
 
 impl Parse for ObjectTypeArguments {
@@ -249,6 +312,8 @@ impl Parse for ObjectTypeArguments {
         let mut properties = None;
         let mut workbench_type = None;
         let mut collection = None;
+        let mut subobject = None;
+        let mut subobjects = None;
         let mut capabilities = None;
 
         while !input.is_empty() {
@@ -264,6 +329,12 @@ impl Parse for ObjectTypeArguments {
             } else if key == "collection" {
                 reject_duplicate(&collection, &key, "collection")?;
                 collection = Some(parse_collection(input)?);
+            } else if key == "subobject" {
+                reject_duplicate(&subobject, &key, "subobject")?;
+                subobject = Some(key.span());
+            } else if key == "subobjects" {
+                reject_duplicate(&subobjects, &key, "subobjects")?;
+                subobjects = Some(parse_subobjects(input)?);
             } else if key == "capabilities" {
                 reject_duplicate(&capabilities, &key, "capabilities")?;
                 capabilities = Some(parse_capabilities(input)?);
@@ -289,15 +360,41 @@ impl Parse for ObjectTypeArguments {
                 "missing required `workbench_type` argument",
             )
         })?;
-        let (scheme, term) = collection.ok_or_else(|| {
-            Error::new(Span::call_site(), "missing required `collection` argument")
-        })?;
         let capabilities = capabilities.ok_or_else(|| {
             Error::new(
                 Span::call_site(),
                 "missing required `capabilities` argument",
             )
         })?;
+
+        match (&collection, subobject) {
+            (Some(_), Some(span)) => {
+                return Err(Error::new(
+                    span,
+                    "an object cannot be both a primary object and a subobject",
+                ));
+            }
+            (None, None) => {
+                return Err(Error::new(
+                    Span::call_site(),
+                    "missing object addressing: expected `collection(...)` or `subobject`",
+                ));
+            }
+            _ => {}
+        }
+        let subobjects = subobjects.unwrap_or_default();
+        if collection.is_none() && !subobjects.is_empty() {
+            return Err(Error::new(
+                Span::call_site(),
+                "only primary objects can declare `subobjects(...)`",
+            ));
+        }
+        if collection.is_none() && capabilities.create.is_some() {
+            return Err(Error::new(
+                Span::call_site(),
+                "the `Create` capability currently requires a primary object collection",
+            ));
+        }
 
         if let Some(source_components) = capabilities.source_components
             && capabilities.source.is_none()
@@ -311,8 +408,8 @@ impl Parse for ObjectTypeArguments {
         Ok(Self {
             properties,
             workbench_type,
-            scheme,
-            term,
+            collection,
+            subobjects,
             capabilities,
         })
     }
@@ -371,6 +468,84 @@ fn parse_collection(input: ParseStream<'_>) -> Result<(LitStr, LitStr)> {
         )
     })?;
     Ok((scheme, term))
+}
+
+fn parse_subobjects(input: ParseStream<'_>) -> Result<Vec<SubObjectArgument>> {
+    let content;
+    parenthesized!(content in input);
+    let mut subobjects = Vec::new();
+
+    while !content.is_empty() {
+        let object = content.parse::<Type>()?;
+        let arguments;
+        parenthesized!(arguments in content);
+        let mut relation = None;
+        let mut parent_variable = None;
+
+        while !arguments.is_empty() {
+            let key = arguments.parse::<Ident>()?;
+            arguments.parse::<Token![=]>()?;
+            if key == "relation" {
+                reject_collection_duplicate(&relation, &key, "relation")?;
+                relation = Some(arguments.parse::<LitStr>()?);
+            } else if key == "parent_variable" {
+                reject_collection_duplicate(&parent_variable, &key, "parent_variable")?;
+                parent_variable = Some(arguments.parse::<LitStr>()?);
+            } else {
+                return Err(Error::new(
+                    key.span(),
+                    format!("unknown `subobjects` argument `{key}`"),
+                ));
+            }
+
+            if arguments.is_empty() {
+                break;
+            }
+            arguments.parse::<Token![,]>()?;
+        }
+
+        let relation = relation.ok_or_else(|| {
+            Error::new(
+                object.span(),
+                "missing required subobject argument `relation`",
+            )
+        })?;
+        let parent_variable = parent_variable.ok_or_else(|| {
+            Error::new(
+                object.span(),
+                "missing required subobject argument `parent_variable`",
+            )
+        })?;
+        if relation.value().trim().is_empty() {
+            return Err(Error::new(
+                relation.span(),
+                "subobject relation cannot be empty",
+            ));
+        }
+        if parent_variable.value().trim().is_empty() {
+            return Err(Error::new(
+                parent_variable.span(),
+                "subobject parent variable cannot be empty",
+            ));
+        }
+        if subobjects.iter().any(|existing: &SubObjectArgument| {
+            existing.object.to_token_stream().to_string() == object.to_token_stream().to_string()
+        }) {
+            return Err(Error::new(object.span(), "duplicate subobject type"));
+        }
+        subobjects.push(SubObjectArgument {
+            object,
+            relation,
+            parent_variable,
+        });
+
+        if content.is_empty() {
+            break;
+        }
+        content.parse::<Token![,]>()?;
+    }
+
+    Ok(subobjects)
 }
 
 fn reject_collection_duplicate<T>(value: &Option<T>, key: &Ident, name: &str) -> Result<()> {
@@ -998,6 +1173,8 @@ mod tests {
 
         assert!(expanded.contains("pub struct Class"));
         assert!(expanded.contains("impl crate :: objects :: ObjectType for Class"));
+        assert!(expanded.contains("impl crate :: objects :: PrimaryObjectType for Class"));
+        assert!(expanded.contains("impl crate :: objects :: private :: PrimaryMetadata for Class"));
         assert!(expanded.contains("type Properties = ClassProperties"));
         assert!(!expanded.contains("ObjectState"));
         assert!(!expanded.contains("AdtObject"));
@@ -1061,6 +1238,113 @@ mod tests {
         .unwrap()
         .to_string();
         assert!(unknown.contains("unknown object capability `Delete`"));
+    }
+
+    #[test]
+    fn object_type_generates_static_and_runtime_subobject_relationships() {
+        let expanded = expand_object_type(
+            quote! {
+                properties = FunctionGroupProperties,
+                workbench_type = "FUGR/F",
+                collection(scheme = "functions", term = "groups"),
+                subobjects(
+                    FunctionModule(
+                        relation = "functionmodules",
+                        parent_variable = "groupname",
+                    ),
+                    FunctionGroupInclude(
+                        relation = "includes",
+                        parent_variable = "groupname",
+                    ),
+                ),
+                capabilities()
+            },
+            quote!(
+                pub struct FunctionGroup;
+            ),
+        )
+        .unwrap()
+        .to_string();
+
+        assert!(
+            expanded.contains(
+                "impl crate :: objects :: SubObjects < FunctionModule > for FunctionGroup"
+            )
+        );
+        assert!(expanded.contains(
+            "impl crate :: objects :: SubObjects < FunctionGroupInclude > for FunctionGroup"
+        ));
+        assert!(expanded.contains("SubObjectDescriptor :: new"));
+        assert!(expanded.contains("\"functionmodules\""));
+        assert!(expanded.contains("\"groupname\""));
+    }
+
+    #[test]
+    fn object_type_generates_subobjects_without_a_primary_collection() {
+        let expanded = expand_object_type(
+            quote! {
+                properties = FunctionModuleProperties,
+                workbench_type = "FUGR/FF",
+                subobject,
+                capabilities(Source(properties.source_uri))
+            },
+            quote!(
+                pub struct FunctionModule;
+            ),
+        )
+        .unwrap()
+        .to_string();
+
+        assert!(!expanded.contains("PrimaryObjectType for FunctionModule"));
+        assert!(expanded.contains("fn category () -> Option < crate :: CategoryId > { None }"));
+    }
+
+    #[test]
+    fn object_type_requires_exactly_one_addressing_kind() {
+        let missing = syn::parse2::<ObjectTypeArguments>(quote! {
+            properties = Properties,
+            workbench_type = "TEST/X",
+            capabilities()
+        })
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(missing.contains("expected `collection(...)` or `subobject`"));
+
+        let ambiguous = syn::parse2::<ObjectTypeArguments>(quote! {
+            properties = Properties,
+            workbench_type = "TEST/X",
+            collection(scheme = "test", term = "objects"),
+            subobject,
+            capabilities()
+        })
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(ambiguous.contains("cannot be both a primary object and a subobject"));
+
+        let nested_create = syn::parse2::<ObjectTypeArguments>(quote! {
+            properties = Properties,
+            workbench_type = "TEST/X",
+            subobject,
+            capabilities(Create(CreateProperties, Version::V1))
+        })
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(nested_create.contains("`Create` capability currently requires"));
+
+        let empty_relation = syn::parse2::<ObjectTypeArguments>(quote! {
+            properties = Properties,
+            workbench_type = "TEST/X",
+            collection(scheme = "test", term = "objects"),
+            subobjects(Child(relation = "", parent_variable = "parent")),
+            capabilities()
+        })
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(empty_relation.contains("relation cannot be empty"));
     }
 
     #[test]

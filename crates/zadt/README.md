@@ -18,6 +18,15 @@ Create a typed reference from the collection advertised by discovery:
 let class = client.object::<Class>("ZCL_DEMO")?;
 ```
 
+Only primary object types can be constructed directly from a discovery
+collection. Subobjects are constructed through a parent reference and the URI
+templates advertised by that parent's collection:
+
+```rust,ignore
+let group = client.object::<FunctionGroup>("Z_GROUP")?;
+let module = group.subobject::<FunctionModule>("Z_FUNCTION")?;
+```
+
 Operations that only need object identity can use the reference directly:
 
 ```rust,ignore
@@ -41,6 +50,13 @@ contains `ClassProperties` and the response metadata. Static capabilities come f
 traits such as `Source` implemented by the marker. Loaded properties determine which
 concrete source resources are available, letting ZAFF project modern and legacy class
 layouts without guessing paths.
+
+`ObjectType` contains the common property and Workbench-type contract used by
+all exact object references. `PrimaryObjectType` adds top-level collection
+addressing, while `SubObjects<C>` records the parent-child combinations accepted
+by the typed API. Once any object has a concrete `ObjectRef`, ordinary query,
+lock, update, source, and activation operations continue to use the common
+`ObjectType` contract.
 
 ### Object model and capabilities
 
@@ -69,12 +85,12 @@ flowchart TB
 
         subgraph MARKERS["Marker traits"]
             direction LR
-            UPDATE["UpdateProperties"]
+            PRIMARY["PrimaryObjectType"]
             RUN["ImmediateRun"]
         end
 
         DECLARATION --> FAMILY
-        FAMILY --> UPDATE
+        FAMILY --> PRIMARY
         FAMILY --> RUN
     end
 
@@ -90,7 +106,7 @@ flowchart TB
 
         subgraph STATIC["Static dispatch"]
             direction TB
-            CAPABILITIES["Capability implementations<br>Source / Create / UpdateProperties / ImmediateRun"]
+            CAPABILITIES["Capability implementations<br>Source / Create / Structure / ImmediateRun"]
             TYPED_CALL["ObjectRef&lt;Class&gt;<br>direct static call"]
         end
 
@@ -124,7 +140,7 @@ flowchart TB
     CREATE --> CAPABILITIES
     SOURCE --> CAPABILITIES
     IDENTITY --> TYPED_CALL
-    UPDATE --> CAPABILITIES
+    PRIMARY --> CAPABILITIES
     RUN --> CAPABILITIES
     CAPABILITIES -->|exposes methods on| TYPED_CALL
 
@@ -154,7 +170,7 @@ flowchart TB
     classDef backend fill:#334155,color:#ffffff,stroke:#475569,stroke-width:2px
 
     class DECLARATION declaration
-    class FAMILY,UPDATE,RUN accent
+    class FAMILY,PRIMARY,RUN accent
     class CREATE,SOURCE,IDENTITY,CAPABILITIES,TYPED_CALL,DESCRIPTOR,REGISTRY,RUNTIME_CALL node
     class TYPED_OBJECT,RUNTIME_OBJECT,LOGIC,ENCODED,REQUEST,EXECUTOR,TRANSPORT muted
     class SAP backend

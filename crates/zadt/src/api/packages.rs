@@ -4,7 +4,7 @@ use serde::Deserialize;
 use crate::{
     AdtUri, Advertised, AdvertisedObjectReference, CategoryId, Client, EncodeError,
     EncodedOperation, GlobalWorkbenchType, ObjectError, ObjectRef, ObjectType, Operation,
-    OperationResponse, Package, Ready, ResponseError, Stateless,
+    OperationResponse, Package, PrimaryObjectType, Ready, ResponseError, Stateless,
     operation::{CollectionTarget, TemplateTarget},
     resource::resolve_href,
 };
@@ -505,6 +505,35 @@ mod tests {
             [
                 ("packagename".to_owned(), "/DMO/FLIGHT".to_owned()),
                 ("type".to_owned(), "super".to_owned()),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn selects_a_template_with_required_query_variables() {
+        let discovery = String::from_utf8(DISCOVERY_XML.to_vec()).unwrap().replacen(
+            "<adtcomp:templateLink\n                    rel=\"tree\"",
+            "<adtcomp:templateLink\n                    rel=\"tree\"\n                    template=\"/sap/bc/adt/packages/$tree/{packagename}/{type}\" />\n                <adtcomp:templateLink\n                    rel=\"tree\"",
+            1,
+        );
+        let (client, requests) = ready_client(discovery.as_bytes());
+        let package = ObjectRef::<Package>::new(
+            "SADT_MAIN".to_owned(),
+            AdtUri::parse("/sap/bc/adt/packages/sadt_main").unwrap(),
+        );
+
+        PackageTreeQuery::new(package, PackageTreeKind::Sub)
+            .execute(&client)
+            .await
+            .unwrap();
+
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests[0].target().as_str(), "/sap/bc/adt/packages/$tree");
+        assert_eq!(
+            requests[0].query(),
+            [
+                ("packagename".to_owned(), "SADT_MAIN".to_owned()),
+                ("type".to_owned(), "sub".to_owned()),
             ]
         );
     }

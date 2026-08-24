@@ -147,11 +147,11 @@ async fn data_definition_creation_posts_only_the_sparse_properties_payload() {
                 .path("/sap/bc/adt/ddic/ddl/sources")
                 .header("content-type", DATA_DEFINITION_MEDIA_TYPE)
                 .header("x-csrf-token", "CSRF-TOKEN-DDLS-CREATE")
-                .body_contains("<ddl:ddlSource")
-                .body_contains("adtcore:name=\"Z_DATA_DEFINITION\"")
-                .body_contains("adtcore:type=\"DDLS/DF\"")
-                .body_contains("adtcore:description=\"Created Data Definition\"")
-                .body_contains("<adtcore:packageRef adtcore:name=\"$TMP\"");
+                .body_includes("<ddl:ddlSource")
+                .body_includes("adtcore:name=\"Z_DATA_DEFINITION\"")
+                .body_includes("adtcore:type=\"DDLS/DF\"")
+                .body_includes("adtcore:description=\"Created Data Definition\"")
+                .body_includes("<adtcore:packageRef adtcore:name=\"$TMP\"");
             then.status(201);
         })
         .await;

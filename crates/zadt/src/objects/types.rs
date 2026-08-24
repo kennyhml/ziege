@@ -6,6 +6,7 @@ mod ddlx;
 mod devc;
 mod doma;
 mod dtel;
+mod fugr;
 mod intf;
 mod prog;
 mod srvd;
@@ -47,6 +48,11 @@ pub use doma::{
 };
 pub use dtel::{
     DataElement, DataElementDefinition, DataElementProperties, DataElementPropertiesVersion,
+};
+pub use fugr::{
+    FunctionGroup, FunctionGroupInclude, FunctionGroupIncludeProperties,
+    FunctionGroupIncludePropertiesVersion, FunctionGroupProperties, FunctionGroupPropertiesVersion,
+    FunctionModule, FunctionModuleProperties, FunctionModulePropertiesVersion,
 };
 pub use intf::{
     Interface, InterfaceCreateProperties, InterfaceCreatePropertiesBuilder,

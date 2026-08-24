@@ -44,6 +44,7 @@ impl<T, P> CreateObjectRequest<T, P> {
         body: Vec<u8>,
     ) -> Result<EncodedOperation<Advertised>, EncodeError> {
         let mut request = CollectionTarget::new(object_category).operation(Method::POST);
+        request.set_accept(self.media_type);
         request.set_content_type(self.media_type);
         request.set_body(body);
         if let Some(transport) = &self.transport_request {
@@ -85,7 +86,11 @@ impl Operation for CreateObjectRequest<(), serde_json::Value> {
     fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
         let descriptor = self.reference.require_descriptor()?;
         self.build_request(
-            descriptor.category(),
+            descriptor
+                .category()
+                .ok_or_else(|| ObjectError::ParentObjectRequired {
+                    object_type: self.reference.object_type().clone(),
+                })?,
             descriptor.creation_properties_to_xml(&self.reference, self.payload.clone())?,
         )
     }
@@ -209,6 +214,10 @@ mod tests {
         let runtime_request = runtime.encode().unwrap();
 
         assert_eq!(typed_request.method(), Method::POST);
+        assert_eq!(
+            typed_request.headers()[header::ACCEPT],
+            ClassPropertiesVersion::V4.media_type()
+        );
         assert_eq!(
             typed_request.headers()[header::CONTENT_TYPE],
             ClassPropertiesVersion::V4.media_type()

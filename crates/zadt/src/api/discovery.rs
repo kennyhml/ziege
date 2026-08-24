@@ -322,7 +322,7 @@ fn collection_target(href: &str) -> Result<AdtUri, crate::AdtUriError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ObjectType, Program};
+    use crate::{PrimaryObjectType, Program};
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
     const INVALID_DISCOVERY_XML: &[u8] =

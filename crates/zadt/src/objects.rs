@@ -15,38 +15,19 @@ pub(crate) use descriptors::ObjectTypeDescriptor;
 pub(crate) use descriptors::RuntimeObjectTypeDescriptor;
 pub use object::{AnyObject, Object};
 pub use reference::{AdvertisedObjectReference, ObjectRef, ObjectReferences};
-pub use types::{
-    AccessControl, AccessControlCreateProperties, AccessControlCreatePropertiesBuilder,
-    AccessControlCreatePropertiesBuilderError, AccessControlProperties,
-    AccessControlPropertiesVersion, AnnotationDefinition, AnnotationDefinitionCreateProperties,
-    AnnotationDefinitionCreatePropertiesBuilder, AnnotationDefinitionCreatePropertiesBuilderError,
-    AnnotationDefinitionProperties, AnnotationDefinitionPropertiesVersion, Class, ClassCategory,
-    ClassCreateProperties, ClassCreatePropertiesBuilder, ClassCreatePropertiesBuilderError,
-    ClassProperties, ClassPropertiesVersion, ClassSourceComponent, ClassSourceProperties,
-    ClassTemplate, ClassTemplateProperty, DataDefinition, DataDefinitionCreateProperties,
-    DataDefinitionCreatePropertiesBuilder, DataDefinitionCreatePropertiesBuilderError,
-    DataDefinitionProperties, DataDefinitionPropertiesVersion, DataElement, DataElementDefinition,
-    DataElementProperties, DataElementPropertiesVersion, Domain, DomainContent,
-    DomainCreateProperties, DomainCreatePropertiesBuilder, DomainCreatePropertiesBuilderError,
-    DomainFixedValue, DomainFixedValues, DomainOutputInformation, DomainProperties,
-    DomainPropertiesVersion, DomainTypeInformation, DomainValueInformation, Include,
-    IncludeProperties, IncludePropertyVersion, Interface, InterfaceCreateProperties,
-    InterfaceCreatePropertiesBuilder, InterfaceCreatePropertiesBuilderError, InterfaceProperties,
-    InterfacePropertiesVersion, MetadataExtension, MetadataExtensionCreateProperties,
-    MetadataExtensionCreatePropertiesBuilder, MetadataExtensionCreatePropertiesBuilderError,
-    MetadataExtensionProperties, MetadataExtensionPropertiesVersion, Package, PackageAssignment,
-    PackageAttributes, PackageProperties, PackagePropertiesVersion, PackageTransport,
-    PackageUseAccess, Program, ProgramProperties, ProgramPropertiesVersion, ServiceDefinition,
-    ServiceDefinitionCreateProperties, ServiceDefinitionCreatePropertiesBuilder,
-    ServiceDefinitionCreatePropertiesBuilderError, ServiceDefinitionProperties,
-    ServiceDefinitionPropertiesVersion, SyntaxConfiguration, SyntaxLanguage,
-};
+pub use types::*;
 pub use workbench::{
     AbapLanguageVersion, GlobalWorkbenchType, InvalidWorkbenchType, ObjectVersion,
 };
 
 pub(crate) mod private {
+    use super::SubObjectDescriptor;
+
     pub trait Sealed {}
+
+    pub trait PrimaryMetadata {
+        const SUBOBJECTS: &'static [SubObjectDescriptor];
+    }
 }
 
 /// Statically identified ADT object resource family.
@@ -56,7 +37,48 @@ pub trait ObjectType: private::Sealed + Send + Sync + Sized + 'static {
 
     /// The object's global Workbench type.
     const WORKBENCH_TYPE: GlobalWorkbenchType;
+}
 
+/// An object family addressed directly through an ADT discovery collection.
+pub trait PrimaryObjectType: ObjectType + private::PrimaryMetadata {
     /// The stable category identifying the canonical object collection.
     const CATEGORY: CategoryId;
+}
+
+/// Declares that a primary object supports children of type `C`.
+pub trait SubObjects<C: ObjectType>: PrimaryObjectType {}
+
+/// Runtime metadata for one statically declared parent-child relationship.
+#[derive(Clone, Debug)]
+#[doc(hidden)]
+pub struct SubObjectDescriptor {
+    object_type: GlobalWorkbenchType,
+    relation: &'static str,
+    parent_variable: &'static str,
+}
+
+impl SubObjectDescriptor {
+    pub(crate) const fn new(
+        object_type: GlobalWorkbenchType,
+        relation: &'static str,
+        parent_variable: &'static str,
+    ) -> Self {
+        Self {
+            object_type,
+            relation,
+            parent_variable,
+        }
+    }
+
+    pub(crate) fn object_type(&self) -> &GlobalWorkbenchType {
+        &self.object_type
+    }
+
+    pub(crate) const fn relation(&self) -> &'static str {
+        self.relation
+    }
+
+    pub(crate) const fn parent_variable(&self) -> &'static str {
+        self.parent_variable
+    }
 }

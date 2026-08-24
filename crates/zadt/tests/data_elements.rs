@@ -161,13 +161,13 @@ async fn runtime_data_element_update_reuses_json_properties_in_the_lock_session(
                     "cookie",
                     "sap-usercontext=sap-client=001&sap-language=EN; sap-contextid=DATA-ELEMENT-SESSION",
                 )
-                .body_contains("adtcore:name=\"ZTFRWTFRT\"")
-                .body_contains("adtcore:changedAt=")
-                .body_contains("<adtcore:packageRef")
-                .body_contains("<atom:link")
-                .body_contains("adtcore:description=\"Updated description\"")
-                .body_contains("<dtel:dataType>CHAR</dtel:dataType>")
-                .body_contains("<dtel:searchHelp");
+                .body_includes("adtcore:name=\"ZTFRWTFRT\"")
+                .body_includes("adtcore:changedAt=")
+                .body_includes("<adtcore:packageRef")
+                .body_includes("<atom:link")
+                .body_includes("adtcore:description=\"Updated description\"")
+                .body_includes("<dtel:dataType>CHAR</dtel:dataType>")
+                .body_includes("<dtel:searchHelp");
             then.status(200)
                 .header(
                     "content-type",
