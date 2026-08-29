@@ -6,13 +6,47 @@ use super::{
     AccessControl, AnnotationDefinition, AnyObject, Class, DataDefinition, DataElement, Domain,
     FunctionGroup, FunctionGroupInclude, FunctionModule, GlobalWorkbenchType, Include, Interface,
     MetadataExtension, ObjectRef, ObjectType, ObjectVersion, Package, Program, PropertyModel,
-    RunCapability, ServiceDefinition, SubObjectDescriptor,
+    RunCapability, ServiceDefinition,
 };
 use crate::{
     CategoryId,
     error::{EncodeError, ObjectError, ResponseError},
     operation::{EncodedOperation, Operation, OperationResponse, Owned},
 };
+
+/// Runtime metadata for one statically declared parent-child relationship.
+#[derive(Clone, Debug)]
+pub struct SubObjectDescriptor {
+    object_type: GlobalWorkbenchType,
+    relation: &'static str,
+    parent_variable: &'static str,
+}
+
+impl SubObjectDescriptor {
+    pub(crate) const fn new(
+        object_type: GlobalWorkbenchType,
+        relation: &'static str,
+        parent_variable: &'static str,
+    ) -> Self {
+        Self {
+            object_type,
+            relation,
+            parent_variable,
+        }
+    }
+
+    pub(crate) fn object_type(&self) -> &GlobalWorkbenchType {
+        &self.object_type
+    }
+
+    pub(crate) const fn relation(&self) -> &'static str {
+        self.relation
+    }
+
+    pub(crate) const fn parent_variable(&self) -> &'static str {
+        self.parent_variable
+    }
+}
 
 /// Runtime capabilities for one modeled ADT object type.
 pub(crate) trait RuntimeObjectTypeDescriptor: std::fmt::Debug + Sync {
