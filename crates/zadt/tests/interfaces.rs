@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Client, EntityTag, Interface, InterfaceCreateProperties, InterfacePropertiesVersion, Logon,
-    ObjectVersion, Operation, Ready, ReqwestTransport,
+    Client, EntityTag, Interface, InterfaceCreateProperties, InterfaceProperties, Logon,
+    MediaTyped, ObjectVersion, Operation, Ready, ReqwestTransport,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -100,7 +100,7 @@ async fn interface_properties_advertise_source_and_structure() {
     let reference = client.object::<Interface>("IF_ADT_URI_MAPPER").unwrap();
     let object = reference
         .query()
-        .version(ObjectVersion::Active)
+        .workbench_version(ObjectVersion::Active)
         .execute(&client)
         .await
         .unwrap();
@@ -113,8 +113,8 @@ async fn interface_properties_advertise_source_and_structure() {
         .unwrap();
     let structure = object.object_structure().unwrap();
 
-    assert_eq!(object.media_version(), InterfacePropertiesVersion::V5);
-    assert_eq!(object.properties.source_uri, "source/main");
+    assert_eq!(object.media_type(), InterfaceProperties::MEDIA_TYPES[0]);
+    assert_eq!(object.properties().source_uri, "source/main");
     assert_eq!(
         structure.resource.uri.as_str(),
         "/sap/bc/adt/oo/interfaces/if_adt_uri_mapper/objectstructure"

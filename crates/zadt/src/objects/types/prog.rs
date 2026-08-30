@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use zadt_macros::object_type;
 
 use super::super::{
-    AbapLanguageVersion, GlobalWorkbenchType, ObjectRef, ObjectVersion, PropertyModel, Structure,
+    AbapLanguageVersion, GlobalWorkbenchType, MediaTyped, ObjectRef, ObjectVersion, ToXml,
 };
 use crate::{AdvertisedLink, AdvertisedObjectReference};
 
@@ -41,40 +41,6 @@ impl ObjectRef<Include> {
     #[cfg(test)]
     pub(crate) fn for_test(name: &str, uri: crate::AdtUri) -> Self {
         Self::new(name.to_ascii_uppercase(), uri)
-    }
-}
-
-/// The SAP media-type version used to decode program properties.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct ProgramPropertiesVersion {
-    media_type: &'static str,
-}
-
-impl ProgramPropertiesVersion {
-    pub const V2: Self = Self {
-        media_type: "application/vnd.sap.adt.programs.programs.v2+xml",
-    };
-
-    pub const V3: Self = Self {
-        media_type: "application/vnd.sap.adt.programs.programs.v3+xml",
-    };
-
-    pub const fn media_type(self) -> &'static str {
-        self.media_type
-    }
-}
-
-/// The SAP media-type version used to decode include properties.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum IncludePropertyVersion {
-    V2,
-}
-
-impl IncludePropertyVersion {
-    pub const fn media_type(self) -> &'static str {
-        match self {
-            Self::V2 => "application/vnd.sap.adt.programs.includes.v2+xml",
-        }
     }
 }
 
@@ -193,36 +159,21 @@ pub struct ProgramProperties {
     pub links: Vec<AdvertisedLink>,
 }
 
-impl PropertyModel for ProgramProperties {
-    type Version = ProgramPropertiesVersion;
+impl MediaTyped for ProgramProperties {
+    const MEDIA_TYPES: &'static [&'static str] = &[
+        "application/vnd.sap.adt.programs.programs.v3+xml",
+        "application/vnd.sap.adt.programs.programs.v2+xml",
+    ];
+}
 
-    const SUPPORTED_VERSIONS: &'static [Self::Version] =
-        &[ProgramPropertiesVersion::V3, ProgramPropertiesVersion::V2];
+impl ToXml for ProgramProperties {
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
         ("program", "http://www.sap.com/adt/programs/programs"),
         ("abapsource", "http://www.sap.com/adt/abapsource"),
         ("adtcore", "http://www.sap.com/adt/core"),
         ("atom", "http://www.w3.org/2005/Atom"),
     ];
-
-    fn media_type(version: Self::Version) -> &'static str {
-        version.media_type()
-    }
-
-    fn object_name(&self) -> &str {
-        &self.name
-    }
-
-    fn object_type(&self) -> &GlobalWorkbenchType {
-        &self.object_type
-    }
-
-    fn links(&self) -> &[AdvertisedLink] {
-        &self.links
-    }
 }
-
-impl Structure for Program {}
 
 /// The complete standalone ABAP include-properties payload.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -305,32 +256,18 @@ pub struct IncludeProperties {
     pub links: Vec<AdvertisedLink>,
 }
 
-impl PropertyModel for IncludeProperties {
-    type Version = IncludePropertyVersion;
+impl MediaTyped for IncludeProperties {
+    const MEDIA_TYPES: &'static [&'static str] =
+        &["application/vnd.sap.adt.programs.includes.v2+xml"];
+}
 
-    const SUPPORTED_VERSIONS: &'static [Self::Version] = &[IncludePropertyVersion::V2];
+impl ToXml for IncludeProperties {
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
         ("include", "http://www.sap.com/adt/programs/includes"),
         ("abapsource", "http://www.sap.com/adt/abapsource"),
         ("adtcore", "http://www.sap.com/adt/core"),
         ("atom", "http://www.w3.org/2005/Atom"),
     ];
-
-    fn media_type(version: Self::Version) -> &'static str {
-        version.media_type()
-    }
-
-    fn object_name(&self) -> &str {
-        &self.name
-    }
-
-    fn object_type(&self) -> &GlobalWorkbenchType {
-        &self.object_type
-    }
-
-    fn links(&self) -> &[AdvertisedLink] {
-        &self.links
-    }
 }
 
 #[cfg(test)]
@@ -407,14 +344,17 @@ mod tests {
     #[test]
     fn serializes_program_properties_as_a_complete_update_payload() {
         let program = parse_program(PROGRAM_XML).unwrap();
-        let object = crate::ObjectRef::erased(
+        let reference = ObjectRef::<Program>::new(
             program.name.clone(),
             crate::AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
-            Program::WORKBENCH_TYPE,
-        );
+        )
+        .erase();
+        let properties = Program::DESCRIPTOR
+            .properties_from_json(&reference, serde_json::to_value(&program).unwrap())
+            .unwrap();
         let xml = String::from_utf8(
             Program::DESCRIPTOR
-                .properties_to_xml(&object, serde_json::to_value(&program).unwrap())
+                .properties_to_xml(&reference, &properties)
                 .unwrap(),
         )
         .unwrap();
@@ -433,14 +373,17 @@ mod tests {
     #[test]
     fn serializes_include_properties_as_a_complete_update_payload() {
         let include = parse_include(INCLUDE_XML).unwrap();
-        let object = crate::ObjectRef::erased(
+        let reference = ObjectRef::<Include>::new(
             include.name.clone(),
             crate::AdtUri::parse("/sap/bc/adt/programs/includes/ztest").unwrap(),
-            Include::WORKBENCH_TYPE,
-        );
+        )
+        .erase();
+        let properties = Include::DESCRIPTOR
+            .properties_from_json(&reference, serde_json::to_value(&include).unwrap())
+            .unwrap();
         let xml = String::from_utf8(
             Include::DESCRIPTOR
-                .properties_to_xml(&object, serde_json::to_value(&include).unwrap())
+                .properties_to_xml(&reference, &properties)
                 .unwrap(),
         )
         .unwrap();

@@ -1,18 +1,380 @@
-use std::marker::PhantomData;
-
-use http::Method;
-
 use super::{
-    AccessControl, AnnotationDefinition, AnyObject, Class, DataDefinition, DataElement, Domain,
-    FunctionGroup, FunctionGroupInclude, FunctionModule, GlobalWorkbenchType, Include, Interface,
-    MetadataExtension, ObjectRef, ObjectType, ObjectVersion, Package, Program, PropertyModel,
-    RunCapability, ServiceDefinition,
+    AccessControl, AnnotationDefinition, AssignObjectIdentity, Class, Create, DataDefinition,
+    DataElement, Domain, ErasedObject, ErasedProperties, FunctionGroup, FunctionGroupInclude,
+    FunctionModule, GlobalWorkbenchType, Include, Interface, MediaTyped, MetadataExtension, Object,
+    ObjectIdentity, ObjectRef, ObjectType, Package, Program, RunCapability, ServiceDefinition,
+    Source, SourceComponents, Structure, ToXml, XmlConversion,
 };
 use crate::{
-    CategoryId,
-    error::{EncodeError, ObjectError, ResponseError},
-    operation::{EncodedOperation, Operation, OperationResponse, Owned},
+    CategoryId, ObjectStructureQuery, SourceRef, compatibility::matching_media_type,
+    error::ObjectError,
 };
+
+/// Runtime metadata and type-erased capability functions for one modeled object type.
+#[derive(Clone, Debug)]
+pub(crate) struct ObjectTypeDescriptor {
+    object_type: GlobalWorkbenchType,
+    addressing: ObjectAddressing,
+    properties: PropertiesCodec,
+    capabilities: RuntimeCapabilities,
+}
+
+impl ObjectTypeDescriptor {
+    pub(crate) const fn new(
+        object_type: GlobalWorkbenchType,
+        addressing: ObjectAddressing,
+        properties: PropertiesCodec,
+        capabilities: RuntimeCapabilities,
+    ) -> Self {
+        Self {
+            object_type,
+            addressing,
+            properties,
+            capabilities,
+        }
+    }
+
+    pub(crate) fn object_type(&self) -> &GlobalWorkbenchType {
+        &self.object_type
+    }
+
+    pub(crate) const fn category(&self) -> Option<CategoryId> {
+        match self.addressing {
+            ObjectAddressing::Primary { category, .. } => Some(category),
+            ObjectAddressing::Child => None,
+        }
+    }
+
+    pub(crate) const fn subobjects(&self) -> &'static [SubObjectDescriptor] {
+        match self.addressing {
+            ObjectAddressing::Primary { subobjects, .. } => subobjects,
+            ObjectAddressing::Child => &[],
+        }
+    }
+
+    pub(crate) fn create_media_types(&self) -> Option<&'static [&'static str]> {
+        self.capabilities.create.map(|create| create.media_types)
+    }
+
+    pub(crate) fn creation_payload_to_xml(
+        &self,
+        reference: &ObjectRef<()>,
+        payload: serde_json::Value,
+    ) -> Result<Vec<u8>, ObjectError> {
+        let create = self
+            .capabilities
+            .create
+            .ok_or_else(|| reference.unsupported_capability("object creation"))?;
+        (create.encode)(reference, payload)
+    }
+
+    pub(crate) const fn run(&self) -> Option<RunCapability> {
+        self.capabilities.run
+    }
+
+    pub(crate) fn source(&self, object: &ErasedObject) -> Result<SourceRef, ObjectError> {
+        let source = self
+            .capabilities
+            .source
+            .ok_or_else(|| object.reference().unsupported_capability("source"))?;
+        source(object)
+    }
+
+    pub(crate) fn source_component(
+        &self,
+        object: &ErasedObject,
+        name: &str,
+    ) -> Result<Option<crate::SourceRef>, ObjectError> {
+        let source_component = self.capabilities.source_component.ok_or_else(|| {
+            object
+                .reference()
+                .unsupported_capability("source components")
+        })?;
+        source_component(object, name)
+    }
+
+    pub(crate) fn object_structure(
+        &self,
+        object: &ErasedObject,
+    ) -> Result<ObjectStructureQuery, ObjectError> {
+        let object_structure = self.capabilities.object_structure.ok_or_else(|| {
+            object
+                .reference()
+                .unsupported_capability("object structure")
+        })?;
+        object_structure(object)
+    }
+
+    pub(crate) fn properties_from_xml(
+        &self,
+        object: &ObjectRef<()>,
+        body: &[u8],
+    ) -> Result<ErasedProperties, ObjectError> {
+        (self.properties.decode_xml)(object, body)
+    }
+
+    pub(crate) fn properties_to_xml(
+        &self,
+        object: &ObjectRef<()>,
+        properties: &ErasedProperties,
+    ) -> Result<Vec<u8>, ObjectError> {
+        (self.properties.encode_xml)(object, properties)
+    }
+
+    pub(crate) fn properties_from_json(
+        &self,
+        object: &ObjectRef<()>,
+        properties: serde_json::Value,
+    ) -> Result<ErasedProperties, ObjectError> {
+        (self.properties.decode_json)(object, properties)
+    }
+
+    pub(crate) fn properties_to_json(
+        &self,
+        object: &ObjectRef<()>,
+        properties: &ErasedProperties,
+    ) -> Result<serde_json::Value, ObjectError> {
+        (self.properties.encode_json)(object, properties)
+    }
+
+    pub(crate) fn properties_media_type(&self, media_type: &str) -> Option<&'static str> {
+        matching_media_type(self.properties.media_types, media_type)
+    }
+
+    pub(crate) const fn properties_media_types(&self) -> &'static [&'static str] {
+        self.properties.media_types
+    }
+}
+
+type DecodeXmlFn = fn(&ObjectRef, &[u8]) -> Result<ErasedProperties, ObjectError>;
+type DecodeJsonFn = fn(&ObjectRef, serde_json::Value) -> Result<ErasedProperties, ObjectError>;
+type EncodeXmlFn = fn(&ObjectRef, &ErasedProperties) -> Result<Vec<u8>, ObjectError>;
+type EncodeJsonFn = fn(&ObjectRef, &ErasedProperties) -> Result<serde_json::Value, ObjectError>;
+type EncodeCreationFn = fn(&ObjectRef, serde_json::Value) -> Result<Vec<u8>, ObjectError>;
+type SourceFn = fn(&ErasedObject) -> Result<SourceRef, ObjectError>;
+type SourceComponentFn = fn(&ErasedObject, &str) -> Result<Option<SourceRef>, ObjectError>;
+type ObjectStructureFn = fn(&ErasedObject) -> Result<ObjectStructureQuery, ObjectError>;
+
+/// Type-erased codecs for one complete properties representation.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PropertiesCodec {
+    media_types: &'static [&'static str],
+    decode_xml: DecodeXmlFn,
+    decode_json: DecodeJsonFn,
+    encode_xml: EncodeXmlFn,
+    encode_json: EncodeJsonFn,
+}
+
+impl PropertiesCodec {
+    pub(crate) const fn for_type<T: ObjectType>() -> Self {
+        Self {
+            media_types: T::Properties::MEDIA_TYPES,
+            decode_xml: Self::decode_xml::<T>,
+            decode_json: Self::decode_json::<T>,
+            encode_xml: Self::encode_xml::<T>,
+            encode_json: Self::encode_json::<T>,
+        }
+    }
+
+    fn decode_xml<T: ObjectType>(
+        object: &ObjectRef,
+        body: &[u8],
+    ) -> Result<ErasedProperties, ObjectError> {
+        validate_object_type::<T>(object)?;
+        let properties = T::Properties::from_xml(body)?;
+        properties.validate_for(object)?;
+        Ok(std::sync::Arc::new(properties))
+    }
+
+    fn decode_json<T: ObjectType>(
+        object: &ObjectRef,
+        properties: serde_json::Value,
+    ) -> Result<ErasedProperties, ObjectError> {
+        validate_object_type::<T>(object)?;
+        let properties: T::Properties =
+            serde_json::from_value(properties).map_err(ObjectError::InvalidPropertiesJson)?;
+        properties.validate_for(object)?;
+        Ok(std::sync::Arc::new(properties))
+    }
+
+    fn encode_xml<T: ObjectType>(
+        object: &ObjectRef,
+        properties: &ErasedProperties,
+    ) -> Result<Vec<u8>, ObjectError> {
+        validate_object_type::<T>(object)?;
+        let properties = Self::properties::<T>(properties);
+        properties.validate_for(object)?;
+        properties.to_xml()
+    }
+
+    fn encode_json<T: ObjectType>(
+        object: &ObjectRef,
+        properties: &ErasedProperties,
+    ) -> Result<serde_json::Value, ObjectError> {
+        validate_object_type::<T>(object)?;
+        let properties = Self::properties::<T>(properties);
+        properties.validate_for(object)?;
+        serde_json::to_value(properties).map_err(ObjectError::InvalidPropertiesJson)
+    }
+
+    fn properties<T: ObjectType>(properties: &ErasedProperties) -> &T::Properties {
+        properties
+            .downcast_ref::<T::Properties>()
+            .expect("registered descriptor must retain its concrete property type")
+    }
+}
+
+/// Type-erased codec and media types for an object-creation payload.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CreateCodec {
+    media_types: &'static [&'static str],
+    encode: EncodeCreationFn,
+}
+
+impl CreateCodec {
+    pub(crate) const fn for_type<T>() -> Self
+    where
+        T: Create,
+        T::Payload: serde::de::DeserializeOwned,
+    {
+        Self {
+            media_types: T::CREATE_MEDIA_TYPES,
+            encode: Self::encode::<T>,
+        }
+    }
+
+    fn encode<T>(reference: &ObjectRef, payload: serde_json::Value) -> Result<Vec<u8>, ObjectError>
+    where
+        T: Create,
+        T::Payload: serde::de::DeserializeOwned,
+    {
+        validate_object_type::<T>(reference)?;
+        let mut payload: T::Payload =
+            serde_json::from_value(payload).map_err(ObjectError::InvalidPropertiesJson)?;
+        payload.assign_identity(reference);
+        payload.to_xml()
+    }
+}
+
+/// Runtime addressing metadata for one object type.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ObjectAddressing {
+    Primary {
+        category: CategoryId,
+        subobjects: &'static [SubObjectDescriptor],
+    },
+    Child,
+}
+
+/// Optional operations available through a type-erased object reference.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RuntimeCapabilities {
+    create: Option<CreateCodec>,
+    run: Option<RunCapability>,
+    source: Option<SourceFn>,
+    source_component: Option<SourceComponentFn>,
+    object_structure: Option<ObjectStructureFn>,
+}
+
+impl RuntimeCapabilities {
+    pub(crate) const fn new(
+        create: Option<CreateCodec>,
+        run: Option<RunCapability>,
+        source: Option<SourceFn>,
+        source_component: Option<SourceComponentFn>,
+        object_structure: Option<ObjectStructureFn>,
+    ) -> Self {
+        Self {
+            create,
+            run,
+            source,
+            source_component,
+            object_structure,
+        }
+    }
+
+    pub(crate) fn source_adapter<T: Source>(
+        object: &ErasedObject,
+    ) -> Result<SourceRef, ObjectError> {
+        Object::<T>::source_from_parts(
+            &object.typed_reference::<T>()?,
+            object.typed_properties::<T>(),
+        )
+    }
+
+    pub(crate) fn source_component_adapter<T: SourceComponents>(
+        object: &ErasedObject,
+        name: &str,
+    ) -> Result<Option<SourceRef>, ObjectError> {
+        Object::<T>::source_component_from_parts(
+            &object.typed_reference::<T>()?,
+            object.typed_properties::<T>(),
+            name,
+        )
+    }
+
+    pub(crate) fn object_structure_adapter<T: Structure>(
+        object: &ErasedObject,
+    ) -> Result<ObjectStructureQuery, ObjectError> {
+        Object::<T>::object_structure_from_parts(
+            &object.typed_reference::<T>()?,
+            object.typed_properties::<T>(),
+        )
+    }
+}
+
+fn validate_object_type<T: ObjectType>(object: &ObjectRef<()>) -> Result<(), ObjectError> {
+    if object.object_type() == &T::WORKBENCH_TYPE {
+        return Ok(());
+    }
+    Err(ObjectError::UnexpectedObjectType {
+        expected: T::WORKBENCH_TYPE,
+        actual: object.object_type().clone(),
+    })
+}
+
+static OBJECT_TYPES: &[&ObjectTypeDescriptor] = &[
+    Program::DESCRIPTOR,
+    Include::DESCRIPTOR,
+    Class::DESCRIPTOR,
+    Package::DESCRIPTOR,
+    DataElement::DESCRIPTOR,
+    DataDefinition::DESCRIPTOR,
+    AccessControl::DESCRIPTOR,
+    Interface::DESCRIPTOR,
+    MetadataExtension::DESCRIPTOR,
+    ServiceDefinition::DESCRIPTOR,
+    AnnotationDefinition::DESCRIPTOR,
+    Domain::DESCRIPTOR,
+    FunctionGroup::DESCRIPTOR,
+    FunctionModule::DESCRIPTOR,
+    FunctionGroupInclude::DESCRIPTOR,
+];
+
+pub(crate) fn object_type_descriptor(
+    object_type: &GlobalWorkbenchType,
+) -> Option<&'static ObjectTypeDescriptor> {
+    OBJECT_TYPES
+        .iter()
+        .copied()
+        .find(|descriptor| descriptor.object_type() == object_type)
+}
+
+pub(crate) fn requires_parent(object_type: &GlobalWorkbenchType) -> bool {
+    object_type_descriptor(object_type).is_some_and(|descriptor| descriptor.category().is_none())
+}
+
+pub(crate) fn supports_subobject(
+    parent_type: &GlobalWorkbenchType,
+    child_type: &GlobalWorkbenchType,
+) -> bool {
+    object_type_descriptor(parent_type).is_some_and(|descriptor| {
+        descriptor
+            .subobjects()
+            .iter()
+            .any(|subobject| subobject.object_type() == child_type)
+    })
+}
 
 /// Runtime metadata for one statically declared parent-child relationship.
 #[derive(Clone, Debug)]
@@ -48,294 +410,6 @@ impl SubObjectDescriptor {
     }
 }
 
-/// Runtime capabilities for one modeled ADT object type.
-pub(crate) trait RuntimeObjectTypeDescriptor: std::fmt::Debug + Sync {
-    fn object_type(&self) -> GlobalWorkbenchType;
-
-    fn category(&self) -> Option<CategoryId>;
-
-    fn subobjects(&self) -> &'static [SubObjectDescriptor];
-
-    fn create_media_type(&self) -> Option<&'static str>;
-
-    fn creation_properties_to_xml(
-        &self,
-        reference: &ObjectRef<()>,
-        properties: serde_json::Value,
-    ) -> Result<Vec<u8>, ObjectError>;
-
-    fn run(&self) -> Option<RunCapability>;
-
-    fn source(
-        &self,
-        object: &ObjectRef<()>,
-        properties: &serde_json::Value,
-    ) -> Result<Option<crate::SourceRef>, ObjectError>;
-
-    fn source_component(
-        &self,
-        object: &ObjectRef<()>,
-        properties: &serde_json::Value,
-        name: &str,
-    ) -> Result<Option<crate::SourceRef>, ObjectError>;
-
-    fn object_structure(
-        &self,
-        object: &ObjectRef<()>,
-        properties: &serde_json::Value,
-    ) -> Result<Option<crate::ObjectStructureRef>, ObjectError>;
-
-    fn properties_request(
-        &self,
-        object: &ObjectRef<()>,
-        version: Option<ObjectVersion>,
-    ) -> Result<EncodedOperation<Owned>, EncodeError>;
-
-    fn properties_to_json(
-        &self,
-        object: &ObjectRef<()>,
-        response: OperationResponse,
-    ) -> Result<AnyObject, ResponseError>;
-
-    fn properties_to_xml(
-        &self,
-        object: &ObjectRef<()>,
-        properties: serde_json::Value,
-    ) -> Result<Vec<u8>, ObjectError>;
-
-    fn properties_media_type(&self, media_type: &str) -> Option<&'static str>;
-}
-
-pub(crate) trait RuntimeObjectType: ObjectType {
-    fn category() -> Option<CategoryId>;
-
-    fn subobjects() -> &'static [SubObjectDescriptor];
-
-    fn create_media_type() -> Option<&'static str>;
-
-    fn creation_properties_to_xml(
-        reference: &ObjectRef<()>,
-        properties: serde_json::Value,
-    ) -> Result<Vec<u8>, ObjectError>;
-
-    fn run() -> Option<RunCapability>;
-
-    fn source_uri(_properties: &Self::Properties) -> Option<&str> {
-        None
-    }
-
-    fn source_component_uri<'a>(_properties: &'a Self::Properties, _name: &str) -> Option<&'a str> {
-        None
-    }
-
-    fn has_object_structure() -> bool {
-        false
-    }
-}
-
-pub(crate) struct ObjectTypeDescriptor<T>(PhantomData<fn() -> T>);
-
-impl<T> ObjectTypeDescriptor<T> {
-    pub(crate) const fn new() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<T> std::fmt::Debug for ObjectTypeDescriptor<T> {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_tuple("ObjectTypeDescriptor")
-            .field(&std::any::type_name::<T>())
-            .finish()
-    }
-}
-
-impl<T> RuntimeObjectTypeDescriptor for ObjectTypeDescriptor<T>
-where
-    T: RuntimeObjectType,
-{
-    fn object_type(&self) -> GlobalWorkbenchType {
-        T::WORKBENCH_TYPE
-    }
-
-    fn category(&self) -> Option<CategoryId> {
-        T::category()
-    }
-
-    fn subobjects(&self) -> &'static [SubObjectDescriptor] {
-        T::subobjects()
-    }
-
-    fn create_media_type(&self) -> Option<&'static str> {
-        T::create_media_type()
-    }
-
-    fn creation_properties_to_xml(
-        &self,
-        reference: &ObjectRef<()>,
-        properties: serde_json::Value,
-    ) -> Result<Vec<u8>, ObjectError> {
-        T::creation_properties_to_xml(reference, properties)
-    }
-
-    fn run(&self) -> Option<RunCapability> {
-        T::run()
-    }
-
-    fn source(
-        &self,
-        object: &ObjectRef<()>,
-        properties: &serde_json::Value,
-    ) -> Result<Option<crate::SourceRef>, ObjectError> {
-        let properties = validated_properties::<T>(object, properties)?;
-        T::source_uri(&properties)
-            .map(|href| crate::resource::refs::source_from_href(object.clone(), href))
-            .transpose()
-    }
-
-    fn source_component(
-        &self,
-        object: &ObjectRef<()>,
-        properties: &serde_json::Value,
-        name: &str,
-    ) -> Result<Option<crate::SourceRef>, ObjectError> {
-        let properties = validated_properties::<T>(object, properties)?;
-        T::source_component_uri(&properties, name)
-            .map(|href| crate::resource::refs::source_from_href(object.clone(), href))
-            .transpose()
-    }
-
-    fn object_structure(
-        &self,
-        object: &ObjectRef<()>,
-        properties: &serde_json::Value,
-    ) -> Result<Option<crate::ObjectStructureRef>, ObjectError> {
-        let properties = validated_properties::<T>(object, properties)?;
-        if !T::has_object_structure() {
-            return Ok(None);
-        }
-        crate::ObjectStructureRef::from_relations(object.clone(), properties.links())
-    }
-
-    fn properties_request(
-        &self,
-        object: &ObjectRef<()>,
-        version: Option<ObjectVersion>,
-    ) -> Result<EncodedOperation<Owned>, EncodeError> {
-        if object.object_type() != &T::WORKBENCH_TYPE {
-            return Err(ObjectError::UnexpectedObjectType {
-                expected: T::WORKBENCH_TYPE,
-                actual: object.object_type().clone(),
-            }
-            .into());
-        }
-        let mut request = EncodedOperation::owned(Method::GET, object.uri().clone());
-        if let Some(version) = version {
-            request.push_query(ObjectVersion::QUERY_PARAMETER, version.as_str());
-        }
-        let media_types = T::Properties::SUPPORTED_VERSIONS
-            .iter()
-            .map(|version| T::Properties::media_type(*version))
-            .collect::<Vec<_>>();
-        request.set_accepts(&media_types);
-        request.set_cache_revalidation(None);
-        Ok(request)
-    }
-
-    fn properties_to_json(
-        &self,
-        object: &ObjectRef<()>,
-        response: OperationResponse,
-    ) -> Result<AnyObject, ResponseError> {
-        let resource = object
-            .typed::<T>()
-            .ok_or_else(|| ObjectError::UnexpectedObjectType {
-                expected: T::WORKBENCH_TYPE,
-                actual: object.object_type().clone(),
-            })?;
-        let loaded = resource.query().decode(response)?;
-        let (_reference, media_type, etag, properties) = loaded.into_parts();
-        Ok(AnyObject::new(
-            resource.erase(),
-            media_type,
-            etag,
-            serde_json::to_value(properties)?,
-        ))
-    }
-
-    fn properties_to_xml(
-        &self,
-        object: &ObjectRef<()>,
-        properties: serde_json::Value,
-    ) -> Result<Vec<u8>, ObjectError> {
-        let properties: T::Properties =
-            serde_json::from_value(properties).map_err(ObjectError::InvalidPropertiesJson)?;
-        properties.to_xml_for(object)
-    }
-
-    fn properties_media_type(&self, media_type: &str) -> Option<&'static str> {
-        T::Properties::version_from_media_type(media_type).map(T::Properties::media_type)
-    }
-}
-
-fn validated_properties<T: ObjectType>(
-    object: &ObjectRef<()>,
-    properties: &serde_json::Value,
-) -> Result<T::Properties, ObjectError> {
-    let properties: T::Properties =
-        serde_json::from_value(properties.clone()).map_err(ObjectError::InvalidPropertiesJson)?;
-    if !properties.belongs_to(object) {
-        return Err(ObjectError::UnexpectedObjectReference {
-            expected: object.to_string(),
-            actual: properties.object_description(),
-        });
-    }
-    Ok(properties)
-}
-
-static OBJECT_TYPES: &[&dyn RuntimeObjectTypeDescriptor] = &[
-    Program::DESCRIPTOR,
-    Include::DESCRIPTOR,
-    Class::DESCRIPTOR,
-    Package::DESCRIPTOR,
-    DataElement::DESCRIPTOR,
-    DataDefinition::DESCRIPTOR,
-    AccessControl::DESCRIPTOR,
-    Interface::DESCRIPTOR,
-    MetadataExtension::DESCRIPTOR,
-    ServiceDefinition::DESCRIPTOR,
-    AnnotationDefinition::DESCRIPTOR,
-    Domain::DESCRIPTOR,
-    FunctionGroup::DESCRIPTOR,
-    FunctionModule::DESCRIPTOR,
-    FunctionGroupInclude::DESCRIPTOR,
-];
-
-pub(crate) fn object_type_descriptor(
-    object_type: &GlobalWorkbenchType,
-) -> Option<&'static dyn RuntimeObjectTypeDescriptor> {
-    OBJECT_TYPES
-        .iter()
-        .copied()
-        .find(|descriptor| &descriptor.object_type() == object_type)
-}
-
-pub(crate) fn requires_parent(object_type: &GlobalWorkbenchType) -> bool {
-    object_type_descriptor(object_type).is_some_and(|descriptor| descriptor.category().is_none())
-}
-
-pub(crate) fn supports_subobject(
-    parent_type: &GlobalWorkbenchType,
-    child_type: &GlobalWorkbenchType,
-) -> bool {
-    object_type_descriptor(parent_type).is_some_and(|descriptor| {
-        descriptor
-            .subobjects()
-            .iter()
-            .any(|subobject| subobject.object_type() == child_type)
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -363,7 +437,7 @@ mod tests {
             let parent_count = OBJECT_TYPES
                 .iter()
                 .flat_map(|parent| parent.subobjects())
-                .filter(|subobject| subobject.object_type() == &child.object_type())
+                .filter(|subobject| subobject.object_type() == child.object_type())
                 .count();
             assert_eq!(
                 parent_count,
@@ -392,17 +466,19 @@ mod tests {
             "../../tests/fixtures/class-cl-adt-uri-mapper-v4.xml"
         ))
         .unwrap();
-        let properties = serde_json::to_value(properties).unwrap();
-        let object = ObjectRef::<Class>::new(
-            "CL_ADT_URI_MAPPER".to_owned(),
-            AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
+        let object = crate::Object::new(
+            ObjectRef::<Class>::new(
+                "CL_ADT_URI_MAPPER".to_owned(),
+                AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
+            ),
+            "application/vnd.sap.adt.oo.classes.v4+xml",
+            None,
+            properties,
         )
-        .erase();
+        .try_into_erased()
+        .unwrap();
 
-        let source = Class::DESCRIPTOR
-            .source(&object, &properties)
-            .unwrap()
-            .unwrap();
+        let source = Class::DESCRIPTOR.source(&object).unwrap();
 
         assert_eq!(
             source.uri.as_str(),

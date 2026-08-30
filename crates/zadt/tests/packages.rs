@@ -3,7 +3,7 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    AccessMode, Client, Operation, Package, PackagePropertiesVersion, Ready, ReqwestTransport,
+    AccessMode, Client, MediaTyped, Operation, Package, PackageProperties, Ready, ReqwestTransport,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -88,8 +88,8 @@ async fn package_properties_advertise_all_supported_contracts() {
     let client = ready_client(&server).await;
     let reference = client.object::<Package>("sadt_tools_core").unwrap();
     let response = reference.query().execute(&client).await.unwrap();
-    assert_eq!(response.media_version(), PackagePropertiesVersion::V2);
-    let package = &response.properties;
+    assert_eq!(response.media_type(), PackageProperties::MEDIA_TYPES[0]);
+    let package = response.properties();
 
     assert_eq!(package.name, "SADT_TOOLS_CORE");
     assert_eq!(
@@ -113,7 +113,7 @@ async fn package_properties_advertise_all_supported_contracts() {
 }
 
 #[tokio::test]
-async fn package_properties_use_the_universal_locked_update_flow() {
+async fn package_properties_update_returns_a_new_snapshot_for_an_empty_response() {
     let server = MockServer::start_async().await;
     let logon = mock_logon(&server).await;
     let discovery = mock_discovery(&server).await;
@@ -196,8 +196,10 @@ async fn package_properties_use_the_universal_locked_update_flow() {
 
     let client = ready_client(&server).await;
     let reference = client.object::<Package>("SADT_TOOLS_CORE").unwrap();
-    let mut package = reference.query().execute(&client).await.unwrap();
-    package.properties.description = "Updated package description".to_owned();
+    let package = reference.query().execute(&client).await.unwrap();
+    let original_description = package.properties().description.clone();
+    let mut updated_properties = package.properties().clone();
+    updated_properties.description = "Updated package description".to_owned();
     let session = client.create_user_session();
     let object_lock = reference
         .lock(AccessMode::Modify)
@@ -205,7 +207,7 @@ async fn package_properties_use_the_universal_locked_update_flow() {
         .await
         .unwrap();
     let result = package
-        .update(&object_lock)
+        .update(&object_lock, updated_properties)
         .unwrap()
         .execute(&session)
         .await
@@ -218,7 +220,12 @@ async fn package_properties_use_the_universal_locked_update_flow() {
         .unwrap();
     session.close().await.unwrap();
 
-    assert!(result.is_none());
+    assert_eq!(package.properties().description, original_description);
+    assert_eq!(
+        result.properties().description,
+        "Updated package description"
+    );
+    assert!(result.etag.is_none());
     logon.assert_async().await;
     discovery.assert_async().await;
     csrf.assert_async().await;

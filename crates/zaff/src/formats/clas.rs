@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use zadt::{
-    AbapLanguageVersion, AdvertisedObjectReference, AnyObject, Class, ClassCategory,
-    ClassProperties, GlobalWorkbenchType, ObjectType,
+    AbapLanguageVersion, AdvertisedObjectReference, Class, ClassCategory, ClassProperties,
+    ErasedObject, GlobalWorkbenchType, ObjectType,
 };
 
 use crate::{
@@ -117,17 +117,17 @@ impl FileDescriptor for ClassMetadata {
 }
 
 impl PropertiesCodec for ClassMetadata {
-    fn render(&self, properties: &AnyObject) -> Result<String, ProjectionError> {
+    fn render(&self, properties: &ErasedObject) -> Result<String, ProjectionError> {
         render_class_properties(&decode_properties::<ClassProperties>(properties, "CLAS")?)
     }
 
-    fn merge(&self, original: &AnyObject, edited: &str) -> Result<AnyObject, ProjectionError> {
+    fn merge(
+        &self,
+        original: &ErasedObject,
+        edited: &str,
+    ) -> Result<serde_json::Value, ProjectionError> {
         let properties = decode_properties::<ClassProperties>(original, "CLAS")?;
-        encode_properties(
-            original,
-            merge_class_properties(&properties, edited)?,
-            "CLAS",
-        )
+        encode_properties(merge_class_properties(&properties, edited)?, "CLAS")
     }
 }
 
@@ -536,7 +536,7 @@ fn is_false(value: &bool) -> bool {
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
-    use zadt::{Class, ClassPropertiesVersion};
+    use zadt::{Class, ClassProperties, MediaTyped};
 
     use super::*;
 
@@ -550,11 +550,12 @@ mod tests {
         );
         crate::test_support::properties(
             &reference,
-            ClassPropertiesVersion::V4.media_type(),
+            ClassProperties::MEDIA_TYPES[0],
             "class-etag",
             CLASS_XML,
         )
-        .properties
+        .properties()
+        .clone()
     }
 
     #[test]

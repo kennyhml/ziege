@@ -71,35 +71,16 @@ fn expand_object_type_item(
 
     let create_impl = capabilities.create.as_ref().map(|create| {
         let properties = &create.properties;
-        let version = &create.version;
         quote! {
             #(#conditional_attrs)*
-            impl crate::objects::PropertyModel for #properties {
-                type Version = <#model as crate::objects::PropertyModel>::Version;
-
-                const SUPPORTED_VERSIONS: &'static [Self::Version] = &[#version];
+            impl crate::objects::ToXml for #properties {
                 const XML_NAMESPACES: &'static [(&'static str, &'static str)] =
-                    <#model as crate::objects::PropertyModel>::XML_NAMESPACES;
-
-                fn media_type(version: Self::Version) -> &'static str {
-                    <#model as crate::objects::PropertyModel>::media_type(version)
-                }
-
-                fn object_name(&self) -> &str {
-                    &self.name
-                }
-
-                fn object_type(&self) -> &crate::objects::GlobalWorkbenchType {
-                    &self.object_type
-                }
+                    <#model as crate::objects::ToXml>::XML_NAMESPACES;
             }
 
             #(#conditional_attrs)*
             impl crate::objects::Create for #object {
-                type CreateProperties = #properties;
-
-                const CREATE_VERSION: <#properties as crate::objects::PropertyModel>::Version =
-                    #version;
+                type Payload = #properties;
             }
         }
     });
@@ -115,62 +96,51 @@ fn expand_object_type_item(
             }
         })
     });
-    let create_media_type = if capabilities.create.is_some() {
+    let runtime_create = if capabilities.create.is_some() {
         quote! {
-            Some(<<#object as crate::objects::Create>::CreateProperties as crate::objects::PropertyModel>::media_type(
-                <#object as crate::objects::Create>::CREATE_VERSION,
-            ))
+            Some(crate::objects::descriptors::CreateCodec::for_type::<#object>())
         }
     } else {
         quote!(None)
     };
-    let creation_properties_to_xml = if capabilities.create.is_some() {
-        quote! {
-            <#object as crate::objects::Create>::creation_properties_to_xml(reference, properties)
-        }
-    } else {
-        quote! {
-            {
-                let _ = (reference, properties);
-                Err(crate::error::ObjectError::UnsupportedCapability {
-                    object_type: <#object as crate::objects::ObjectType>::WORKBENCH_TYPE,
-                    capability: "object creation",
-                })
-            }
-        }
-    };
-    let run = if capabilities.run.is_some() {
+    let runtime_run = if capabilities.run.is_some() {
         quote! {
             Some(<#object as crate::objects::ImmediateRun>::RUN)
         }
     } else {
         quote!(None)
     };
-    let source_uri = if capabilities.source.is_some() {
+    let runtime_source = if capabilities.source.is_some() {
         quote! {
-            <#object as crate::objects::Source>::source_uri(properties)
+            Some(crate::objects::descriptors::RuntimeCapabilities::source_adapter::<#object>)
         }
     } else {
-        quote! {
-            {
-                let _ = properties;
-                None
-            }
-        }
+        quote!(None)
     };
-    let source_component_uri = if capabilities.source_components.is_some() {
+    let runtime_source_component = if capabilities.source_components.is_some() {
         quote! {
-            <#object as crate::objects::SourceComponents>::source_component_uri(properties, name)
+            Some(
+                crate::objects::descriptors::RuntimeCapabilities::source_component_adapter::<#object>
+            )
         }
     } else {
-        quote! {
-            {
-                let _ = (properties, name);
-                None
-            }
-        }
+        quote!(None)
     };
-    let has_object_structure = capabilities.structure.is_some();
+    let runtime_object_structure = if capabilities.structure.is_some() {
+        quote! {
+            Some(
+                crate::objects::descriptors::RuntimeCapabilities::object_structure_adapter::<#object>
+            )
+        }
+    } else {
+        quote!(None)
+    };
+    let structure_impl = capabilities.structure.is_some().then(|| {
+        quote! {
+            #(#conditional_attrs)*
+            impl crate::objects::Structure for #object {}
+        }
+    });
     let addressing_impl = if let Some((scheme, term)) = &collection {
         let subobject_descriptors = subobjects.iter().map(|subobject| {
             let object = &subobject.object;
@@ -212,15 +182,15 @@ fn expand_object_type_item(
     } else {
         quote! {}
     };
-    let runtime_category = if collection.is_some() {
-        quote!(Some(<#object as crate::objects::PrimaryObjectType>::CATEGORY))
+    let runtime_addressing = if collection.is_some() {
+        quote! {
+            crate::objects::descriptors::ObjectAddressing::Primary {
+                category: <#object as crate::objects::PrimaryObjectType>::CATEGORY,
+                subobjects: <#object as crate::objects::private::PrimaryMetadata>::SUBOBJECTS,
+            }
+        }
     } else {
-        quote!(None)
-    };
-    let runtime_subobjects = if collection.is_some() {
-        quote!(<#object as crate::objects::private::PrimaryMetadata>::SUBOBJECTS)
-    } else {
-        quote!(&[])
+        quote!(crate::objects::descriptors::ObjectAddressing::Child)
     };
     Ok(quote! {
         #(#attrs)*
@@ -229,6 +199,24 @@ fn expand_object_type_item(
 
         #(#conditional_attrs)*
         impl crate::objects::private::Sealed for #object {}
+
+        #(#conditional_attrs)*
+        impl crate::objects::Links for #model {
+            fn links(&self) -> &[crate::AdvertisedLink] {
+                &self.links
+            }
+        }
+
+        #(#conditional_attrs)*
+        impl crate::objects::ObjectIdentity for #model {
+            fn object_name(&self) -> &str {
+                &self.name
+            }
+
+            fn object_type(&self) -> &crate::objects::GlobalWorkbenchType {
+                &self.object_type
+            }
+        }
 
         #(#conditional_attrs)*
         impl crate::objects::ObjectType for #object {
@@ -242,53 +230,23 @@ fn expand_object_type_item(
 
         #create_impl
         #source_impl
+        #structure_impl
 
         #(#conditional_attrs)*
         impl #object {
-            pub(crate) const DESCRIPTOR: &'static dyn crate::objects::RuntimeObjectTypeDescriptor =
-                &crate::objects::ObjectTypeDescriptor::<Self>::new();
-        }
-
-        #(#conditional_attrs)*
-        impl crate::objects::descriptors::RuntimeObjectType for #object {
-            fn category() -> Option<crate::CategoryId> {
-                #runtime_category
-            }
-
-            fn subobjects() -> &'static [crate::objects::SubObjectDescriptor] {
-                #runtime_subobjects
-            }
-
-            fn create_media_type() -> Option<&'static str> {
-                #create_media_type
-            }
-
-            fn creation_properties_to_xml(
-                reference: &crate::objects::ObjectRef<()>,
-                properties: serde_json::Value,
-            ) -> Result<Vec<u8>, crate::error::ObjectError> {
-                #creation_properties_to_xml
-            }
-
-            fn run() -> Option<crate::objects::RunCapability> {
-                #run
-            }
-
-            fn source_uri(properties: &Self::Properties) -> Option<&str> {
-                #source_uri
-            }
-
-            fn source_component_uri<'a>(
-                properties: &'a Self::Properties,
-                name: &str,
-            ) -> Option<&'a str> {
-                #source_component_uri
-            }
-
-            fn has_object_structure() -> bool {
-                #has_object_structure
-            }
-
+            pub(crate) const DESCRIPTOR: &'static crate::objects::descriptors::ObjectTypeDescriptor =
+                &crate::objects::descriptors::ObjectTypeDescriptor::new(
+                    <Self as crate::objects::ObjectType>::WORKBENCH_TYPE,
+                    #runtime_addressing,
+                    crate::objects::descriptors::PropertiesCodec::for_type::<Self>(),
+                    crate::objects::descriptors::RuntimeCapabilities::new(
+                        #runtime_create,
+                        #runtime_run,
+                        #runtime_source,
+                        #runtime_source_component,
+                        #runtime_object_structure,
+                    ),
+                );
         }
     })
 }
@@ -570,7 +528,6 @@ struct Capabilities {
 
 struct CreateCapability {
     properties: Type,
-    version: Expr,
 }
 
 struct SourceCapability {
@@ -592,18 +549,13 @@ fn parse_capabilities(input: ParseStream<'_>) -> Result<Capabilities> {
             let arguments;
             parenthesized!(arguments in content);
             let properties = arguments.parse::<Type>()?;
-            arguments.parse::<Token![,]>()?;
-            let version = arguments.parse::<Expr>()?;
             if !arguments.is_empty() {
                 arguments.parse::<Token![,]>()?;
             }
             if !arguments.is_empty() {
                 return Err(arguments.error("unexpected `Create` capability argument"));
             }
-            capabilities.create = Some(CreateCapability {
-                properties,
-                version,
-            });
+            capabilities.create = Some(CreateCapability { properties });
         } else if capability == "Source" {
             if capabilities.source.is_some() {
                 return Err(duplicate_capability(&capability));
@@ -865,10 +817,23 @@ fn expand_create_properties(input: DeriveInput) -> Result<TokenStream2> {
             }
         }
 
-        impl crate::objects::CreationPropertyModel for #generated_name {
-            fn set_identity<T>(&mut self, reference: &crate::objects::ObjectRef<T>) {
-                self.#name_identity = reference.name().to_owned();
-                self.#object_type_identity = reference.object_type().clone();
+        impl crate::objects::ObjectIdentity for #generated_name {
+            fn object_name(&self) -> &str {
+                &self.#name_identity
+            }
+
+            fn object_type(&self) -> &crate::objects::GlobalWorkbenchType {
+                &self.#object_type_identity
+            }
+        }
+
+        impl crate::objects::AssignObjectIdentity for #generated_name {
+            fn assign_identity(
+                &mut self,
+                identity: &impl crate::objects::ObjectIdentity,
+            ) {
+                self.#name_identity = identity.object_name().to_owned();
+                self.#object_type_identity = identity.object_type().clone();
             }
         }
     })
@@ -1173,12 +1138,17 @@ mod tests {
 
         assert!(expanded.contains("pub struct Class"));
         assert!(expanded.contains("impl crate :: objects :: ObjectType for Class"));
+        assert!(expanded.contains("impl crate :: objects :: Links for ClassProperties"));
+        assert!(expanded.contains("impl crate :: objects :: ObjectIdentity for ClassProperties"));
         assert!(expanded.contains("impl crate :: objects :: PrimaryObjectType for Class"));
         assert!(expanded.contains("impl crate :: objects :: private :: PrimaryMetadata for Class"));
         assert!(expanded.contains("type Properties = ClassProperties"));
         assert!(!expanded.contains("ObjectState"));
         assert!(!expanded.contains("AdtObject"));
-        assert!(expanded.contains("capability : \"object creation\""));
+        assert!(expanded.contains("ObjectTypeDescriptor :: new"));
+        assert!(expanded.contains("PropertiesCodec :: for_type :: < Self >"));
+        assert!(expanded.contains("RuntimeCapabilities :: new"));
+        assert!(!expanded.contains("RuntimeObjectType"));
         assert!(!expanded.contains("impl crate :: objects :: Create for Class"));
     }
 
@@ -1186,9 +1156,10 @@ mod tests {
     fn object_type_emits_configured_capability_branches() {
         let expanded = expand_object_type(
             object_arguments(quote! {
-                Create(ClassCreateProperties, ClassPropertiesVersion::V4),
+                Create(ClassCreateProperties),
                 Source(properties.source_uri),
                 SourceComponents,
+                Structure,
                 Run,
             }),
             quote!(
@@ -1199,17 +1170,19 @@ mod tests {
         .to_string();
 
         assert!(expanded.contains("impl crate :: objects :: Create for Class"));
+        assert!(expanded.contains("type Payload = ClassCreateProperties"));
+        assert!(expanded.contains("impl crate :: objects :: ToXml for ClassCreateProperties"));
+        assert!(!expanded.contains("fn set_identity"));
+        assert!(expanded.contains("CreateCodec :: for_type :: < Class >"));
         assert!(
-            expanded.contains("impl crate :: objects :: PropertyModel for ClassCreateProperties")
+            expanded.contains("< ClassProperties as crate :: objects :: ToXml > :: XML_NAMESPACES")
         );
-        assert!(expanded.contains(
-            "< ClassProperties as crate :: objects :: PropertyModel > :: XML_NAMESPACES"
-        ));
         assert!(expanded.contains("impl crate :: objects :: Source for Class"));
+        assert!(expanded.contains("impl crate :: objects :: Structure for Class"));
+        assert!(expanded.contains("RuntimeCapabilities :: source_adapter :: < Class >"));
+        assert!(expanded.contains("RuntimeCapabilities :: source_component_adapter :: < Class >"));
+        assert!(expanded.contains("RuntimeCapabilities :: object_structure_adapter :: < Class >"));
         assert!(expanded.contains("properties . source_uri"));
-        assert!(
-            expanded.contains("crate :: objects :: SourceComponents > :: source_component_uri")
-        );
         assert!(expanded.contains("crate :: objects :: ImmediateRun > :: RUN"));
     }
 
@@ -1296,7 +1269,7 @@ mod tests {
         .to_string();
 
         assert!(!expanded.contains("PrimaryObjectType for FunctionModule"));
-        assert!(expanded.contains("fn category () -> Option < crate :: CategoryId > { None }"));
+        assert!(expanded.contains("ObjectAddressing :: Child"));
     }
 
     #[test]
@@ -1327,7 +1300,7 @@ mod tests {
             properties = Properties,
             workbench_type = "TEST/X",
             subobject,
-            capabilities(Create(CreateProperties, Version::V1))
+            capabilities(Create(CreateProperties))
         })
         .err()
         .unwrap()
@@ -1385,8 +1358,17 @@ mod tests {
         assert!(expanded.contains("skip_serializing_if = \"Option::is_none\""));
         assert!(expanded.contains("setter (each (name = \"source\"))"));
         assert!(expanded.contains("serde (with = \"wire\")"));
-        assert!(expanded.contains("self . name = reference . name () . to_owned ()"));
+        assert!(expanded.contains("self . name = identity . object_name () . to_owned ()"));
         assert!(!expanded.contains("ignored"));
+        assert!(
+            expanded.contains("impl crate :: objects :: ObjectIdentity for ClassCreateProperties")
+        );
+        assert!(
+            expanded.contains(
+                "impl crate :: objects :: AssignObjectIdentity for ClassCreateProperties"
+            )
+        );
+        assert!(expanded.contains("fn assign_identity"));
         assert!(!expanded.contains("impl crate :: objects :: PropertyModel"));
     }
 

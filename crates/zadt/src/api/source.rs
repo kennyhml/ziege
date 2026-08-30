@@ -2,7 +2,7 @@ use http::{Method, StatusCode};
 
 use crate::{
     error::{EncodeError, ObjectError, ResponseError},
-    objects::{AnyObject, Object, Source, SourceComponents},
+    objects::{ErasedObject, Object, Source, SourceComponents},
     operation::{EncodedOperation, Operation, OperationResponse, Owned, Stateful, Stateless},
     protocol::{EntityTag, TEXT_PLAIN_MEDIA_TYPE},
     resource::{SourceRef, refs::source_from_href},
@@ -97,36 +97,46 @@ impl Operation for ObjectSourceQuery {
 }
 
 impl<T: Source> Object<T> {
+    pub(crate) fn source_from_parts(
+        reference: &crate::ObjectRef<T>,
+        properties: &T::Properties,
+    ) -> Result<SourceRef, ObjectError> {
+        let href =
+            T::source_uri(properties).ok_or(ObjectError::MissingRelation { relation: "source" })?;
+        source_from_href(reference.erase(), href)
+    }
+
     /// Resolves the primary source advertised by this loaded object.
     pub fn source(&self) -> Result<SourceRef, ObjectError> {
-        let href = T::source_uri(&self.properties)
-            .ok_or(ObjectError::MissingRelation { relation: "source" })?;
-        source_from_href(self.reference().erase(), href)
+        Self::source_from_parts(self.reference(), self.properties())
     }
 }
 
 impl<T: SourceComponents> Object<T> {
+    pub(crate) fn source_component_from_parts(
+        reference: &crate::ObjectRef<T>,
+        properties: &T::Properties,
+        name: &str,
+    ) -> Result<Option<SourceRef>, ObjectError> {
+        let Some(href) = T::source_component_uri(properties, name) else {
+            return Ok(None);
+        };
+        source_from_href(reference.erase(), href).map(Some)
+    }
+
     /// Resolves one named source component supported by this loaded object family.
     pub fn source_component(
         &self,
         name: impl AsRef<str>,
     ) -> Result<Option<SourceRef>, ObjectError> {
-        let Some(href) = T::source_component_uri(&self.properties, name.as_ref()) else {
-            return Ok(None);
-        };
-        source_from_href(self.reference().erase(), href).map(Some)
+        Self::source_component_from_parts(self.reference(), self.properties(), name.as_ref())
     }
 }
 
-impl AnyObject {
+impl ErasedObject {
     /// Resolves the primary source advertised by this runtime-typed object.
     pub fn source(&self) -> Result<SourceRef, ObjectError> {
-        let Some(descriptor) = self.reference().descriptor() else {
-            return Err(ObjectError::MissingRelation { relation: "source" });
-        };
-        descriptor
-            .source(self.reference(), &self.properties)?
-            .ok_or(ObjectError::MissingRelation { relation: "source" })
+        self.reference().require_descriptor()?.source(self)
     }
 
     /// Resolves one named source component supported by this runtime-typed object.
@@ -134,10 +144,9 @@ impl AnyObject {
         &self,
         name: impl AsRef<str>,
     ) -> Result<Option<SourceRef>, ObjectError> {
-        let Some(descriptor) = self.reference().descriptor() else {
-            return Ok(None);
-        };
-        descriptor.source_component(self.reference(), &self.properties, name.as_ref())
+        self.reference()
+            .require_descriptor()?
+            .source_component(self, name.as_ref())
     }
 }
 

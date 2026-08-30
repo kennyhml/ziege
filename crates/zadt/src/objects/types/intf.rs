@@ -3,7 +3,7 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    ObjectVersion, PropertyModel, Source, Structure, SyntaxConfiguration,
+    MediaTyped, ObjectVersion, Source, SyntaxConfiguration, ToXml,
 };
 
 #[object_type(
@@ -14,31 +14,13 @@ use crate::{
         term = "interfaces",
     ),
     capabilities(
-        Create(InterfaceCreateProperties, InterfacePropertiesVersion::V5),
+        Create(InterfaceCreateProperties),
         Source,
         Structure,
     )
 )]
 /// A global ABAP interface.
 pub struct Interface;
-
-/// The SAP media-type version used to decode interface properties.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum InterfacePropertiesVersion {
-    /// Interface properties V4.
-    V4,
-    /// Interface properties V5, including the direct ABAP language version.
-    V5,
-}
-
-impl InterfacePropertiesVersion {
-    pub const fn media_type(self) -> &'static str {
-        match self {
-            Self::V4 => "application/vnd.sap.adt.oo.interfaces.v4+xml",
-            Self::V5 => "application/vnd.sap.adt.oo.interfaces.v5+xml",
-        }
-    }
-}
 
 /// The complete interface properties payload.
 #[derive(Clone, CreateProperties, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -145,13 +127,14 @@ pub struct InterfaceProperties {
     pub syntax_configuration: SyntaxConfiguration,
 }
 
-impl PropertyModel for InterfaceProperties {
-    type Version = InterfacePropertiesVersion;
-
-    const SUPPORTED_VERSIONS: &'static [Self::Version] = &[
-        InterfacePropertiesVersion::V5,
-        InterfacePropertiesVersion::V4,
+impl MediaTyped for InterfaceProperties {
+    const MEDIA_TYPES: &'static [&'static str] = &[
+        "application/vnd.sap.adt.oo.interfaces.v5+xml",
+        "application/vnd.sap.adt.oo.interfaces.v4+xml",
     ];
+}
+
+impl ToXml for InterfaceProperties {
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
         ("intf", "http://www.sap.com/adt/oo/interfaces"),
         ("abapoo", "http://www.sap.com/adt/oo"),
@@ -159,22 +142,6 @@ impl PropertyModel for InterfaceProperties {
         ("adtcore", "http://www.sap.com/adt/core"),
         ("atom", "http://www.w3.org/2005/Atom"),
     ];
-
-    fn media_type(version: Self::Version) -> &'static str {
-        version.media_type()
-    }
-
-    fn object_name(&self) -> &str {
-        &self.name
-    }
-
-    fn object_type(&self) -> &GlobalWorkbenchType {
-        &self.object_type
-    }
-
-    fn links(&self) -> &[AdvertisedLink] {
-        &self.links
-    }
 }
 
 impl Source for Interface {
@@ -182,8 +149,6 @@ impl Source for Interface {
         (!properties.modeled).then_some(properties.source_uri.as_str())
     }
 }
-
-impl Structure for Interface {}
 
 #[cfg(test)]
 mod tests {
@@ -286,11 +251,7 @@ mod tests {
     #[test]
     fn serializes_complete_properties_for_updates() {
         let properties = properties();
-        let object = ObjectRef::<Interface>::new(
-            properties.name.clone(),
-            AdtUri::parse("/sap/bc/adt/oo/interfaces/if_adt_uri_mapper").unwrap(),
-        );
-        let xml = String::from_utf8(properties.to_xml_for(&object).unwrap()).unwrap();
+        let xml = String::from_utf8(properties.to_xml().unwrap()).unwrap();
 
         assert!(xml.contains("<intf:abapInterface"));
         assert!(xml.contains("xmlns:intf=\"http://www.sap.com/adt/oo/interfaces\""));

@@ -4,8 +4,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use stduritemplate::Value;
 
 use super::{
-    GlobalWorkbenchType, ObjectType, PrimaryObjectType, SubObjectDescriptor, SubObjects,
-    descriptors,
+    GlobalWorkbenchType, ObjectIdentity, ObjectType, PrimaryObjectType, SubObjectDescriptor,
+    SubObjects, descriptors,
 };
 use crate::{
     CategoryId,
@@ -86,15 +86,13 @@ impl<T> ObjectRef<T> {
         }
     }
 
-    pub(crate) fn descriptor(
-        &self,
-    ) -> Option<&'static dyn descriptors::RuntimeObjectTypeDescriptor> {
+    pub(crate) fn descriptor(&self) -> Option<&'static descriptors::ObjectTypeDescriptor> {
         descriptors::object_type_descriptor(&self.object_type)
     }
 
     pub(crate) fn require_descriptor(
         &self,
-    ) -> Result<&'static dyn descriptors::RuntimeObjectTypeDescriptor, ObjectError> {
+    ) -> Result<&'static descriptors::ObjectTypeDescriptor, ObjectError> {
         self.descriptor()
             .ok_or_else(|| ObjectError::UnsupportedObjectType {
                 object_type: self.object_type().clone(),
@@ -177,6 +175,16 @@ impl<T> Clone for ObjectRef<T> {
             parent: self.parent.clone(),
             marker: PhantomData,
         }
+    }
+}
+
+impl<T> ObjectIdentity for ObjectRef<T> {
+    fn object_name(&self) -> &str {
+        self.name()
+    }
+
+    fn object_type(&self) -> &GlobalWorkbenchType {
+        self.object_type()
     }
 }
 

@@ -114,8 +114,8 @@ mod tests {
     use crate::api::run::PROFILER_ID_QUERY;
     use crate::{
         AdtRequest, AdtResponse, AdtUri, Client, CompatibilityError, EntityTag, Include,
-        IncludePropertyVersion, ObjectError, ObjectPropertiesQuery, OperationError,
-        ProgramPropertiesVersion, Ready, ResolveError, Revalidation, Transport,
+        IncludeProperties, MediaTyped, ObjectError, ObjectPropertiesQuery, OperationError,
+        ProgramProperties, Ready, ResolveError, Revalidation, Transport,
     };
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
@@ -174,12 +174,11 @@ mod tests {
         .query()
     }
 
-    fn program_properties_response(representation: ProgramPropertiesVersion) -> OperationResponse {
+    fn program_properties_response(media_type: &'static str) -> OperationResponse {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::CONTENT_TYPE,
-            HeaderValue::from_str(&format!("{}; charset=utf-8", representation.media_type()))
-                .unwrap(),
+            HeaderValue::from_str(&format!("{media_type}; charset=utf-8")).unwrap(),
         );
         headers.insert(header::ETAG, HeaderValue::from_static("program-etag"));
         operation_response(AdtResponse::new(
@@ -219,7 +218,7 @@ mod tests {
 
         assert_eq!(
             request.headers()[header::ACCEPT],
-            IncludePropertyVersion::V2.media_type()
+            IncludeProperties::MEDIA_TYPES[0]
         );
     }
 
@@ -397,19 +396,29 @@ mod tests {
     #[test]
     fn tags_a_v2_program_properties_representation() {
         let representation = program_properties_query()
-            .decode(program_properties_response(ProgramPropertiesVersion::V2))
+            .decode(program_properties_response(
+                ProgramProperties::MEDIA_TYPES[1],
+            ))
             .unwrap();
-        assert_eq!(representation.media_version(), ProgramPropertiesVersion::V2);
-        assert_eq!(representation.properties.name, "Z_TEST");
+        assert_eq!(
+            representation.media_type(),
+            ProgramProperties::MEDIA_TYPES[1]
+        );
+        assert_eq!(representation.properties().name, "Z_TEST");
     }
 
     #[test]
     fn tags_a_v3_program_properties_representation() {
         let representation = program_properties_query()
-            .decode(program_properties_response(ProgramPropertiesVersion::V3))
+            .decode(program_properties_response(
+                ProgramProperties::MEDIA_TYPES[0],
+            ))
             .unwrap();
-        assert_eq!(representation.media_version(), ProgramPropertiesVersion::V3);
-        assert_eq!(representation.properties.name, "Z_TEST");
+        assert_eq!(
+            representation.media_type(),
+            ProgramProperties::MEDIA_TYPES[0]
+        );
+        assert_eq!(representation.properties().name, "Z_TEST");
     }
 
     #[test]
@@ -452,8 +461,8 @@ mod tests {
             } if target == request_target()
                 && content_type == "application/json"
                 && supported == [
-                    ProgramPropertiesVersion::V3.media_type(),
-                    ProgramPropertiesVersion::V2.media_type(),
+                    ProgramProperties::MEDIA_TYPES[0],
+                    ProgramProperties::MEDIA_TYPES[1],
                 ]
         ));
     }
@@ -462,7 +471,9 @@ mod tests {
     fn wraps_a_modified_conditional_program_properties_query() {
         let response = program_properties_query()
             .if_none_match(EntityTag::from_static("old-etag"))
-            .decode(program_properties_response(ProgramPropertiesVersion::V3))
+            .decode(program_properties_response(
+                ProgramProperties::MEDIA_TYPES[0],
+            ))
             .unwrap();
 
         assert!(matches!(response, Revalidation::Modified(_)));
@@ -471,7 +482,9 @@ mod tests {
     #[test]
     fn loaded_program_revalidates_with_its_entity_tag() {
         let program = program_properties_query()
-            .decode(program_properties_response(ProgramPropertiesVersion::V3))
+            .decode(program_properties_response(
+                ProgramProperties::MEDIA_TYPES[0],
+            ))
             .unwrap();
         let request = program.revalidate().unwrap().encode().unwrap();
 
@@ -501,7 +514,7 @@ mod tests {
         let representation = include_properties_query()
             .decode(operation_response(response))
             .unwrap();
-        assert_eq!(representation.properties.name, "ZTEST");
+        assert_eq!(representation.properties().name, "ZTEST");
         assert_eq!(
             representation.etag.as_ref().map(EntityTag::as_str),
             Some("include-etag")

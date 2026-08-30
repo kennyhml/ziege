@@ -78,29 +78,12 @@ impl AdtUri {
         &self.0
     }
 
-    pub(crate) fn semantically_eq(&self, other: &Self) -> bool {
-        percent_encoding_eq(self.as_str().as_bytes(), other.as_str().as_bytes())
-    }
-
     pub(crate) fn is_descendant_of(&self, parent: &Self) -> bool {
         let child = self.as_str().as_bytes();
         let parent = parent.as_str().as_bytes();
         child.len() > parent.len()
             && child.get(parent.len()) == Some(&b'/')
             && percent_encoding_eq(&child[..parent.len()], parent)
-    }
-
-    pub(crate) fn last_segment_matches(&self, value: &str) -> bool {
-        let Ok(encoded) =
-            Self::parse(ADT_RESOURCE_ROOT).and_then(|uri| uri.append_segments([value]))
-        else {
-            return false;
-        };
-        self.as_str()
-            .rsplit('/')
-            .next()
-            .zip(encoded.as_str().rsplit('/').next())
-            .is_some_and(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
     }
 
     pub(crate) fn append_segments<I, S>(&self, segments: I) -> Result<Self, AdtUriError>
@@ -238,20 +221,13 @@ mod tests {
     }
 
     #[test]
-    fn compares_percent_encoding_hex_case_semantically() {
-        let upper = AdtUri::parse("/sap/bc/adt/oo/classes/%2Fdemo%2Fclass").unwrap();
+    fn descendant_comparison_ignores_percent_encoding_hex_case() {
         let lower = AdtUri::parse("/sap/bc/adt/oo/classes/%2fdemo%2fclass").unwrap();
-        let other = AdtUri::parse("/sap/bc/adt/oo/classes/%2Fdemo%2Fother").unwrap();
 
-        assert_ne!(upper, lower);
-        assert!(upper.semantically_eq(&lower));
-        assert!(!upper.semantically_eq(&other));
         assert!(
             AdtUri::parse("/sap/bc/adt/oo/classes/%2Fdemo%2Fclass/includes/test")
                 .unwrap()
                 .is_descendant_of(&lower)
         );
-        assert!(lower.last_segment_matches("/DEMO/CLASS"));
-        assert!(!lower.last_segment_matches("/DEMO/OTHER"));
     }
 }

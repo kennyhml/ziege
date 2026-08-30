@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use zadt::{
-    AbapLanguageVersion, AnyObject, DataElement, DataElementDefinition, DataElementProperties,
+    AbapLanguageVersion, DataElement, DataElementDefinition, DataElementProperties, ErasedObject,
     GlobalWorkbenchType, ObjectType,
 };
 
@@ -80,19 +80,19 @@ impl FileDescriptor for DataElementMetadata {
 }
 
 impl PropertiesCodec for DataElementMetadata {
-    fn render(&self, properties: &AnyObject) -> Result<String, ProjectionError> {
+    fn render(&self, properties: &ErasedObject) -> Result<String, ProjectionError> {
         render_data_element_properties(&decode_properties::<DataElementProperties>(
             properties, "DTEL",
         )?)
     }
 
-    fn merge(&self, original: &AnyObject, edited: &str) -> Result<AnyObject, ProjectionError> {
+    fn merge(
+        &self,
+        original: &ErasedObject,
+        edited: &str,
+    ) -> Result<serde_json::Value, ProjectionError> {
         let properties = decode_properties::<DataElementProperties>(original, "DTEL")?;
-        encode_properties(
-            original,
-            merge_data_element_properties(&properties, edited)?,
-            "DTEL",
-        )
+        encode_properties(merge_data_element_properties(&properties, edited)?, "DTEL")
     }
 }
 
@@ -819,7 +819,7 @@ fn invalid_field(field: &'static str, message: impl Into<String>) -> ProjectionE
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
-    use zadt::{DataElement, DataElementPropertiesVersion};
+    use zadt::{DataElement, DataElementProperties, MediaTyped};
 
     use super::*;
 
@@ -833,11 +833,12 @@ mod tests {
         );
         let mut properties = crate::test_support::properties(
             &reference,
-            DataElementPropertiesVersion::V2.media_type(),
+            DataElementProperties::MEDIA_TYPES[0],
             "data-element-etag",
             DATA_ELEMENT_XML,
         )
-        .properties;
+        .properties()
+        .clone();
         let properties_v2 = &mut properties;
         properties_v2.description = Some("Example data element".to_owned());
         properties_v2.master_language = Some("EN".to_owned());

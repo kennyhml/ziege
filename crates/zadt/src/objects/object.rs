@@ -1,12 +1,16 @@
+use std::{any::Any, fmt, sync::Arc};
+
 use serde::{Deserialize, Deserializer, Serialize};
 
-use super::{ObjectRef, ObjectType, PropertyModel};
-use crate::{EntityTag, ObjectError};
+use super::{MediaTyped, ObjectIdentity, ObjectRef, ObjectType};
+use crate::{EntityTag, ObjectError, compatibility::matching_media_type};
+
+pub(crate) type ErasedProperties = Arc<dyn Any + Send + Sync>;
 
 /// A loaded ADT object with its properties, media type, and entity tag.
 ///
 /// Unlike [`ObjectRef<T>`], this value includes the object properties returned
-/// by ADT. The type parameter `T` selects the property model and the operations
+/// by ADT. The type parameter `T` selects the property type and the operations
 /// available for that object family.
 ///
 /// Some operations use links advertised by the loaded properties. Operations
@@ -17,7 +21,7 @@ pub struct Object<T: ObjectType> {
     reference: ObjectRef<T>,
     media_type: String,
     pub etag: Option<EntityTag>,
-    pub properties: T::Properties,
+    properties: T::Properties,
 }
 
 impl<T: ObjectType> Object<T> {
@@ -45,8 +49,20 @@ impl<T: ObjectType> Object<T> {
         &self.media_type
     }
 
-    pub(crate) fn into_parts(self) -> (ObjectRef<T>, String, Option<EntityTag>, T::Properties) {
-        (self.reference, self.media_type, self.etag, self.properties)
+    /// Returns the immutable properties in this loaded representation.
+    pub fn properties(&self) -> &T::Properties {
+        &self.properties
+    }
+
+    /// Removes the static object family while retaining its concrete properties internally.
+    pub fn try_into_erased(self) -> Result<ErasedObject, ObjectError> {
+        validate_typed_object::<T>(&self.reference, &self.media_type, &self.properties)?;
+        Ok(ErasedObject::new(
+            self.reference.erase(),
+            self.media_type,
+            self.etag,
+            Arc::new(self.properties),
+        ))
     }
 }
 
@@ -65,14 +81,13 @@ where
     }
 }
 
-impl<T> Object<T>
-where
-    T: ObjectType,
-{
-    /// Returns the negotiated media-type version of this representation.
-    pub fn media_version(&self) -> <T::Properties as PropertyModel>::Version {
-        T::Properties::version_from_media_type(&self.media_type)
-            .expect("typed ADT objects are constructed with a supported media type")
+impl<T: ObjectType> ObjectIdentity for Object<T> {
+    fn object_name(&self) -> &str {
+        self.reference().object_name()
+    }
+
+    fn object_type(&self) -> &super::GlobalWorkbenchType {
+        self.reference().object_type()
     }
 }
 
@@ -84,22 +99,21 @@ where
 /// Supported object families are handled through an internal descriptor.
 /// Operations check this descriptor and the loaded properties at runtime.
 ///
-/// Properties are stored as JSON so callers can inspect and edit them without
-/// knowing their concrete Rust type.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct AnyObject {
+/// The concrete properties remain type-erased internally. Runtime consumers can
+/// export them as JSON and supply edited JSON to a property-update operation.
+pub struct ErasedObject {
     reference: ObjectRef<()>,
     media_type: String,
     pub etag: Option<EntityTag>,
-    pub properties: serde_json::Value,
+    properties: ErasedProperties,
 }
 
-impl AnyObject {
+impl ErasedObject {
     pub(crate) fn new(
         reference: ObjectRef<()>,
         media_type: impl Into<String>,
         etag: Option<EntityTag>,
-        properties: serde_json::Value,
+        properties: ErasedProperties,
     ) -> Self {
         Self {
             reference,
@@ -119,6 +133,13 @@ impl AnyObject {
         &self.media_type
     }
 
+    /// Exports the concrete properties through their runtime JSON representation.
+    pub fn properties(&self) -> Result<serde_json::Value, ObjectError> {
+        self.reference
+            .require_descriptor()?
+            .properties_to_json(&self.reference, &self.properties)
+    }
+
     /// Restores a concrete loaded object after validating its runtime representation.
     pub fn try_into_typed<T>(self) -> Result<Object<T>, ObjectError>
     where
@@ -131,15 +152,64 @@ impl AnyObject {
                     expected: T::WORKBENCH_TYPE,
                     actual: self.reference.object_type().clone(),
                 })?;
-        let properties: T::Properties =
-            serde_json::from_value(self.properties).map_err(ObjectError::InvalidPropertiesJson)?;
-        validate_typed_object::<T>(&reference, &self.media_type, &properties)?;
-        Ok(Object::new(
-            reference,
-            self.media_type,
-            self.etag,
-            properties,
-        ))
+        let properties = self
+            .properties
+            .downcast::<T::Properties>()
+            .expect("registered descriptor must retain its concrete property type");
+        let properties = match Arc::try_unwrap(properties) {
+            Ok(properties) => properties,
+            Err(properties) => properties.as_ref().clone(),
+        };
+        let media_type = validate_typed_object::<T>(&reference, &self.media_type, &properties)?;
+        Ok(Object::new(reference, media_type, self.etag, properties))
+    }
+
+    pub(crate) fn typed_reference<T: ObjectType>(&self) -> Result<ObjectRef<T>, ObjectError> {
+        self.reference
+            .typed::<T>()
+            .ok_or_else(|| ObjectError::UnexpectedObjectType {
+                expected: T::WORKBENCH_TYPE,
+                actual: self.reference.object_type().clone(),
+            })
+    }
+
+    pub(crate) fn typed_properties<T: ObjectType>(&self) -> &T::Properties {
+        self.properties
+            .downcast_ref::<T::Properties>()
+            .expect("registered descriptor must retain its concrete property type")
+    }
+}
+
+impl Clone for ErasedObject {
+    fn clone(&self) -> Self {
+        Self::new(
+            self.reference.clone(),
+            self.media_type.clone(),
+            self.etag.clone(),
+            self.properties.clone(),
+        )
+    }
+}
+
+impl ObjectIdentity for ErasedObject {
+    fn object_name(&self) -> &str {
+        self.reference().object_name()
+    }
+
+    fn object_type(&self) -> &super::GlobalWorkbenchType {
+        self.reference().object_type()
+    }
+}
+
+impl fmt::Debug for ErasedObject {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ErasedObject")
+            .field("reference", &self.reference)
+            .field("media_type", &self.media_type)
+            .field("etag", &self.etag)
+            .field("properties", &"<type-erased>")
+            .finish()
     }
 }
 
@@ -166,11 +236,12 @@ where
         D: Deserializer<'de>,
     {
         let object = RawObject::<T>::deserialize(deserializer)?;
-        validate_typed_object::<T>(&object.reference, &object.media_type, &object.properties)
-            .map_err(serde::de::Error::custom)?;
+        let media_type =
+            validate_typed_object::<T>(&object.reference, &object.media_type, &object.properties)
+                .map_err(serde::de::Error::custom)?;
         Ok(Self::new(
             object.reference,
-            object.media_type,
+            media_type,
             object.etag,
             object.properties,
         ))
@@ -181,33 +252,17 @@ pub(crate) fn validate_typed_object<T>(
     reference: &ObjectRef<T>,
     media_type: &str,
     properties: &T::Properties,
-) -> Result<(), ObjectError>
+) -> Result<&'static str, ObjectError>
 where
     T: ObjectType,
 {
-    if reference.object_type() != &T::WORKBENCH_TYPE {
-        return Err(ObjectError::UnexpectedObjectType {
-            expected: T::WORKBENCH_TYPE,
-            actual: reference.object_type().clone(),
-        });
-    }
-    if T::Properties::version_from_media_type(media_type).is_none() {
-        return Err(ObjectError::UnsupportedPropertiesMediaType {
-            object_type: T::WORKBENCH_TYPE,
-            media_type: media_type.to_owned(),
-        });
-    }
-    if properties.object_type() != reference.object_type() {
-        return Err(ObjectError::UnexpectedObjectType {
-            expected: reference.object_type().clone(),
-            actual: properties.object_type().clone(),
-        });
-    }
-    if !properties.belongs_to(reference) {
-        return Err(ObjectError::UnexpectedObjectReference {
-            expected: reference.to_string(),
-            actual: properties.object_description(),
-        });
-    }
-    Ok(())
+    let media_type =
+        matching_media_type(T::Properties::MEDIA_TYPES, media_type).ok_or_else(|| {
+            ObjectError::UnsupportedPropertiesMediaType {
+                object_type: T::WORKBENCH_TYPE,
+                media_type: media_type.to_owned(),
+            }
+        })?;
+    properties.validate_for(reference)?;
+    Ok(media_type)
 }

@@ -23,19 +23,18 @@ pub use api::activation::{
     ObjectCheckRun, SupportedCheckReporter, SupportedCheckReporters,
 };
 pub use api::classes::{ClassRun, ClassRunResult};
-pub use api::creation::CreateObjectRequest;
 pub use api::discovery::{
     Capabilities, Category, CategoryId, Collection, CoreDiscoveryQuery, DiscoveryQuery,
     TemplateLink, Workspace,
 };
 pub use api::locking::{AccessMode, LockRequest, ObjectLock, UnlockRequest};
+pub use api::object::{CreateObjectRequest, ObjectPropertiesQuery, ObjectPropertiesUpdate};
 pub use api::objectstructure::{ObjectStructure, ObjectStructureElement, ObjectStructureQuery};
 pub use api::packages::{
     PackageInterfaceReference, PackageReference, PackageSettings, PackageSettingsQuery,
     PackageTree, PackageTreeKind, PackageTreeNode, PackageTreeQuery,
 };
 pub use api::programs::{ProgramRun, ProgramRunResult};
-pub use api::properties::{ObjectPropertiesQuery, ObjectPropertiesUpdate};
 pub use api::repository::{
     AssignedTransport, AssignedTransportRequests, AssignedTransportsQuery, FavoriteObject,
     FavoriteObjectList, FavoriteObjectsQuery, FavoriteObjectsUpdate, RepositoryContent,
@@ -71,36 +70,31 @@ pub use error::{
 pub use objects::{
     AbapLanguageVersion, AccessControl, AccessControlCreateProperties,
     AccessControlCreatePropertiesBuilder, AccessControlCreatePropertiesBuilderError,
-    AccessControlProperties, AccessControlPropertiesVersion, AdvertisedObjectReference,
-    AnnotationDefinition, AnnotationDefinitionCreateProperties,
-    AnnotationDefinitionCreatePropertiesBuilder, AnnotationDefinitionCreatePropertiesBuilderError,
-    AnnotationDefinitionProperties, AnnotationDefinitionPropertiesVersion, AnyObject, Class,
-    ClassCategory, ClassCreateProperties, ClassCreatePropertiesBuilder,
-    ClassCreatePropertiesBuilderError, ClassProperties, ClassPropertiesVersion,
+    AccessControlProperties, AdvertisedObjectReference, AnnotationDefinition,
+    AnnotationDefinitionCreateProperties, AnnotationDefinitionCreatePropertiesBuilder,
+    AnnotationDefinitionCreatePropertiesBuilderError, AnnotationDefinitionProperties,
+    AssignObjectIdentity, Class, ClassCategory, ClassCreateProperties,
+    ClassCreatePropertiesBuilder, ClassCreatePropertiesBuilderError, ClassProperties,
     ClassSourceComponent, ClassSourceProperties, ClassTemplate, ClassTemplateProperty, Create,
-    CreationPropertyModel, DataDefinition, DataDefinitionCreateProperties,
-    DataDefinitionCreatePropertiesBuilder, DataDefinitionCreatePropertiesBuilderError,
-    DataDefinitionProperties, DataDefinitionPropertiesVersion, DataElement, DataElementDefinition,
-    DataElementProperties, DataElementPropertiesVersion, Domain, DomainContent,
-    DomainCreateProperties, DomainCreatePropertiesBuilder, DomainCreatePropertiesBuilderError,
-    DomainFixedValue, DomainFixedValues, DomainOutputInformation, DomainProperties,
-    DomainPropertiesVersion, DomainTypeInformation, DomainValueInformation, FunctionGroup,
-    FunctionGroupInclude, FunctionGroupIncludeProperties, FunctionGroupIncludePropertiesVersion,
-    FunctionGroupProperties, FunctionGroupPropertiesVersion, FunctionModule,
-    FunctionModuleProperties, FunctionModulePropertiesVersion, GlobalWorkbenchType, Include,
-    IncludeProperties, IncludePropertyVersion, Interface, InterfaceCreateProperties,
-    InterfaceCreatePropertiesBuilder, InterfaceCreatePropertiesBuilderError, InterfaceProperties,
-    InterfacePropertiesVersion, InvalidWorkbenchType, MetadataExtension,
-    MetadataExtensionCreateProperties, MetadataExtensionCreatePropertiesBuilder,
-    MetadataExtensionCreatePropertiesBuilderError, MetadataExtensionProperties,
-    MetadataExtensionPropertiesVersion, Object, ObjectRef, ObjectReferences, ObjectType,
+    DataDefinition, DataDefinitionCreateProperties, DataDefinitionCreatePropertiesBuilder,
+    DataDefinitionCreatePropertiesBuilderError, DataDefinitionProperties, DataElement,
+    DataElementDefinition, DataElementProperties, Domain, DomainContent, DomainCreateProperties,
+    DomainCreatePropertiesBuilder, DomainCreatePropertiesBuilderError, DomainFixedValue,
+    DomainFixedValues, DomainOutputInformation, DomainProperties, DomainTypeInformation,
+    DomainValueInformation, ErasedObject, FunctionGroup, FunctionGroupInclude,
+    FunctionGroupIncludeProperties, FunctionGroupProperties, FunctionModule,
+    FunctionModuleProperties, GlobalWorkbenchType, Include, IncludeProperties, Interface,
+    InterfaceCreateProperties, InterfaceCreatePropertiesBuilder,
+    InterfaceCreatePropertiesBuilderError, InterfaceProperties, InvalidWorkbenchType, Links,
+    MediaTyped, MetadataExtension, MetadataExtensionCreateProperties,
+    MetadataExtensionCreatePropertiesBuilder, MetadataExtensionCreatePropertiesBuilderError,
+    MetadataExtensionProperties, Object, ObjectIdentity, ObjectRef, ObjectReferences, ObjectType,
     ObjectVersion, Package, PackageAssignment, PackageAttributes, PackageProperties,
-    PackagePropertiesVersion, PackageTransport, PackageUseAccess, PrimaryObjectType, Program,
-    ProgramProperties, ProgramPropertiesVersion, PropertyModel, ServiceDefinition,
-    ServiceDefinitionCreateProperties, ServiceDefinitionCreatePropertiesBuilder,
-    ServiceDefinitionCreatePropertiesBuilderError, ServiceDefinitionProperties,
-    ServiceDefinitionPropertiesVersion, Source, SourceComponents, Structure, SubObjects,
-    SyntaxConfiguration, SyntaxLanguage,
+    PackageTransport, PackageUseAccess, PrimaryObjectType, Program, ProgramProperties,
+    ServiceDefinition, ServiceDefinitionCreateProperties, ServiceDefinitionCreatePropertiesBuilder,
+    ServiceDefinitionCreatePropertiesBuilderError, ServiceDefinitionProperties, Source,
+    SourceComponents, Structure, SubObjects, SyntaxConfiguration, SyntaxLanguage, ToXml,
+    XmlConversion,
 };
 pub use operation::{
     Advertised, AdvertisedCollection, AdvertisedTarget, AdvertisedTemplate, BatchError, BatchKey,

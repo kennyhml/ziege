@@ -3,7 +3,7 @@ use zadt_macros::object_type;
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    ObjectVersion, PropertyModel,
+    MediaTyped, ObjectVersion, ToXml,
 };
 
 #[object_type(
@@ -15,27 +15,8 @@ use crate::{
 /// The package (devclass) object type.
 pub struct Package;
 
-/// The SAP media-type version used to decode package properties.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum PackagePropertiesVersion {
-    /// Package properties V1.
-    V1,
-
-    /// Package properties V2.
-    V2,
-}
-
-impl PackagePropertiesVersion {
-    pub const fn media_type(self) -> &'static str {
-        match self {
-            Self::V1 => "application/vnd.sap.adt.packages.v1+xml",
-            Self::V2 => "application/vnd.sap.adt.packages.v2+xml",
-        }
-    }
-}
-
 /// The currently modeled package-properties payload.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename = "pak:package")]
 pub struct PackageProperties {
     /// The package name supplied by SAP.
@@ -103,36 +84,23 @@ pub struct PackageProperties {
     pub sub_packages: Option<PackageSubpackages>,
 }
 
-impl PropertyModel for PackageProperties {
-    type Version = PackagePropertiesVersion;
+impl MediaTyped for PackageProperties {
+    const MEDIA_TYPES: &'static [&'static str] = &[
+        "application/vnd.sap.adt.packages.v2+xml",
+        "application/vnd.sap.adt.packages.v1+xml",
+    ];
+}
 
-    const SUPPORTED_VERSIONS: &'static [Self::Version] =
-        &[PackagePropertiesVersion::V2, PackagePropertiesVersion::V1];
+impl ToXml for PackageProperties {
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
         ("pak", "http://www.sap.com/adt/packages"),
         ("adtcore", "http://www.sap.com/adt/core"),
         ("atom", "http://www.w3.org/2005/Atom"),
     ];
-
-    fn media_type(version: Self::Version) -> &'static str {
-        version.media_type()
-    }
-
-    fn object_name(&self) -> &str {
-        &self.name
-    }
-
-    fn object_type(&self) -> &GlobalWorkbenchType {
-        &self.object_type
-    }
-
-    fn links(&self) -> &[AdvertisedLink] {
-        &self.links
-    }
 }
 
 /// Package behavior and editor capability flags.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PackageAttributes {
     /// The semantic package type, such as `development`.
     #[serde(rename = "@pak:packageType")]
@@ -180,7 +148,7 @@ fn empty_language_version() -> AbapLanguageVersion {
 }
 
 /// A named package assignment with editor visibility and mutability flags.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PackageAssignment {
     /// The assigned value.
     #[serde(rename = "@pak:name", default)]
@@ -197,7 +165,7 @@ pub struct PackageAssignment {
 }
 
 /// Software-component and transport-layer assignments.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PackageTransport {
     /// The package's software component.
     #[serde(rename = "pak:softwareComponent")]
@@ -208,7 +176,7 @@ pub struct PackageTransport {
 }
 
 /// Use-access visibility and entries in a package-properties payload.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PackageUseAccesses {
     #[serde(rename = "@pak:isVisible", default)]
     pub visible: bool,
@@ -217,7 +185,7 @@ pub struct PackageUseAccesses {
 }
 
 /// A package-interface use access exactly as represented in package XML.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PackageUseAccess {
     #[serde(rename = "@pak:severity")]
     pub severity: String,
@@ -228,7 +196,7 @@ pub struct PackageUseAccess {
 }
 
 /// Package-interface visibility and references in a package-properties payload.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PackageInterfaces {
     #[serde(rename = "@pak:isVisible", default)]
     pub visible: bool,
@@ -237,7 +205,7 @@ pub struct PackageInterfaces {
 }
 
 /// Direct subpackage references in a package-properties payload.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PackageSubpackages {
     #[serde(rename = "pak:packageRef", default)]
     pub package_ref: Vec<AdvertisedObjectReference>,
@@ -246,7 +214,7 @@ pub struct PackageSubpackages {
 #[cfg(test)]
 mod property_tests {
     use super::*;
-    use crate::{AdtUri, ObjectRef, ObjectType};
+    use crate::ObjectType;
 
     const PACKAGE_XML: &[u8] =
         include_bytes!("../../../tests/fixtures/package-sadt-tools-core.xml");
@@ -328,11 +296,7 @@ mod property_tests {
     #[test]
     fn serializes_complete_properties_for_updates() {
         let properties: PackageProperties = serde_xml_rs::from_reader(PACKAGE_XML).unwrap();
-        let package = ObjectRef::<Package>::new(
-            properties.name.clone(),
-            AdtUri::parse("/sap/bc/adt/packages/sadt_tools_core").unwrap(),
-        );
-        let xml = String::from_utf8(properties.to_xml_for(&package).unwrap()).unwrap();
+        let xml = String::from_utf8(properties.to_xml().unwrap()).unwrap();
 
         assert!(xml.contains("<pak:package"));
         assert!(xml.contains("xmlns:pak=\"http://www.sap.com/adt/packages\""));

@@ -3,7 +3,7 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Client, Domain, DomainCreateProperties, DomainPropertiesVersion, EntityTag, Logon,
+    Client, Domain, DomainCreateProperties, DomainProperties, EntityTag, Logon, MediaTyped,
     ObjectVersion, Operation, Ready, ReqwestTransport,
 };
 
@@ -85,16 +85,19 @@ async fn domain_properties_preserve_the_nested_v2_contract() {
     let reference = client.object::<Domain>("TRKORR").unwrap();
     let object = reference
         .query()
-        .version(ObjectVersion::Active)
+        .workbench_version(ObjectVersion::Active)
         .execute(&client)
         .await
         .unwrap();
 
-    assert_eq!(object.media_version(), DomainPropertiesVersion::V2);
-    assert_eq!(object.properties.content.type_information.length, "000020");
+    assert_eq!(object.media_type(), DomainProperties::MEDIA_TYPES[0]);
+    assert_eq!(
+        object.properties().content.type_information.length,
+        "000020"
+    );
     assert_eq!(
         object
-            .properties
+            .properties()
             .content
             .value_information
             .as_ref()

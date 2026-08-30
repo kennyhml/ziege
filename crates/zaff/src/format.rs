@@ -2,8 +2,8 @@ use std::fmt;
 
 use serde::{Serialize, de::DeserializeOwned};
 use zadt::{
-    AnyObject, Class, DataElement, GlobalWorkbenchType, Include, Object, ObjectRef, Package,
-    Program, PropertyModel, SourceRef,
+    Class, DataElement, ErasedObject, GlobalWorkbenchType, Include, MediaTyped, Object, ObjectRef,
+    Package, Program, SourceRef,
 };
 
 use crate::{ProjectionError, registry};
@@ -207,7 +207,7 @@ impl ProjectedFile {
     }
 
     /// Renders runtime ADT properties through this file's AFF codec.
-    pub fn render_properties(&self, properties: &AnyObject) -> Result<String, ProjectionError> {
+    pub fn render_properties(&self, properties: &ErasedObject) -> Result<String, ProjectionError> {
         let FileBacking::Properties(object) = &self.backing else {
             return Err(ProjectionError::NotPropertiesFile {
                 component: self.component,
@@ -225,9 +225,9 @@ impl ProjectedFile {
     /// Merges edited AFF content into the original runtime ADT properties.
     pub fn merge_properties(
         &self,
-        original: &AnyObject,
+        original: &ErasedObject,
         edited: &str,
-    ) -> Result<AnyObject, ProjectionError> {
+    ) -> Result<serde_json::Value, ProjectionError> {
         let FileBacking::Properties(object) = &self.backing else {
             return Err(ProjectionError::NotPropertiesFile {
                 component: self.component,
@@ -245,7 +245,7 @@ impl ProjectedFile {
 
 fn ensure_properties_owner(
     expected: &ObjectRef<()>,
-    properties: &AnyObject,
+    properties: &ErasedObject,
 ) -> Result<(), ProjectionError> {
     if properties.reference().uri() != expected.uri()
         || properties.reference().name() != expected.name()
@@ -355,7 +355,7 @@ macro_rules! impl_sourceless_projection_object {
     };
 }
 
-impl ProjectionObject for AnyObject {
+impl ProjectionObject for ErasedObject {
     fn reference(&self) -> ObjectRef<()> {
         self.reference().clone()
     }
@@ -365,15 +365,27 @@ impl ProjectionObject for AnyObject {
     }
 
     fn source(&self) -> Result<Option<SourceRef>, zadt::ObjectError> {
-        match AnyObject::source(self) {
+        match ErasedObject::source(self) {
             Ok(source) => Ok(Some(source)),
-            Err(zadt::ObjectError::MissingRelation { relation: "source" }) => Ok(None),
+            Err(
+                zadt::ObjectError::MissingRelation { relation: "source" }
+                | zadt::ObjectError::UnsupportedCapability {
+                    capability: "source",
+                    ..
+                },
+            ) => Ok(None),
             Err(error) => Err(error),
         }
     }
 
     fn source_component(&self, name: &str) -> Result<Option<SourceRef>, zadt::ObjectError> {
-        AnyObject::source_component(self, name)
+        match ErasedObject::source_component(self, name) {
+            Err(zadt::ObjectError::UnsupportedCapability {
+                capability: "source components",
+                ..
+            }) => Ok(None),
+            result => result,
+        }
     }
 }
 
@@ -399,8 +411,12 @@ impl_source_projection_object!(Object<Include>, Object<Program>);
 impl_sourceless_projection_object!(Object<DataElement>, Object<Package>);
 
 pub(crate) trait PropertiesCodec: fmt::Debug + Sync {
-    fn render(&self, properties: &AnyObject) -> Result<String, ProjectionError>;
-    fn merge(&self, original: &AnyObject, edited: &str) -> Result<AnyObject, ProjectionError>;
+    fn render(&self, properties: &ErasedObject) -> Result<String, ProjectionError>;
+    fn merge(
+        &self,
+        original: &ErasedObject,
+        edited: &str,
+    ) -> Result<serde_json::Value, ProjectionError>;
 }
 
 #[derive(Debug)]
@@ -473,49 +489,36 @@ impl FileDescriptor for UnbackedFileDescriptor {
 }
 
 pub(crate) fn decode_properties<P>(
-    properties: &AnyObject,
+    properties: &ErasedObject,
     object_type: &'static str,
 ) -> Result<P, ProjectionError>
 where
-    P: PropertyModel + DeserializeOwned,
+    P: MediaTyped + DeserializeOwned,
 {
-    if P::version_from_media_type(properties.media_type()).is_none() {
+    if !P::MEDIA_TYPES.contains(&properties.media_type()) {
         return Err(ProjectionError::UnsupportedPropertiesMediaType {
             object_type,
             media_type: properties.media_type().to_owned(),
         });
     }
-    let payload: P = serde_json::from_value(properties.properties.clone()).map_err(|source| {
+    let payload: P = serde_json::from_value(properties.properties()?).map_err(|source| {
         ProjectionError::InvalidAdtProperties {
             object_type,
             source,
         }
     })?;
-    if payload.object_name() != properties.reference().name()
-        || payload.object_type() != properties.reference().object_type()
-    {
-        return Err(ProjectionError::InvalidPropertiesIdentity {
-            object_type,
-            expected: properties.reference().to_string(),
-            actual: format!("{} ({})", payload.object_name(), payload.object_type()),
-        });
-    }
     Ok(payload)
 }
 
 pub(crate) fn encode_properties<P>(
-    original: &AnyObject,
     payload: P,
     object_type: &'static str,
-) -> Result<AnyObject, ProjectionError>
+) -> Result<serde_json::Value, ProjectionError>
 where
     P: Serialize,
 {
-    let mut merged = original.clone();
-    merged.properties =
-        serde_json::to_value(payload).map_err(|source| ProjectionError::InvalidAdtProperties {
-            object_type,
-            source,
-        })?;
-    Ok(merged)
+    serde_json::to_value(payload).map_err(|source| ProjectionError::InvalidAdtProperties {
+        object_type,
+        source,
+    })
 }

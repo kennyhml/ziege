@@ -3,7 +3,7 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    ObjectVersion, PropertyModel,
+    MediaTyped, ObjectVersion, ToXml,
 };
 
 #[object_type(
@@ -14,30 +14,12 @@ use crate::{
         term = "dclsources",
     ),
     capabilities(
-        Create(
-            AccessControlCreateProperties,
-            AccessControlPropertiesVersion::V1
-        ),
+        Create(AccessControlCreateProperties),
         Source(properties.source_uri),
     )
 )]
 /// An ABAP Core Data Services Access Control (DCL source).
 pub struct AccessControl;
-
-/// The SAP media-type version used to decode Access Control properties.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum AccessControlPropertiesVersion {
-    /// The unversioned DCL Source properties representation.
-    V1,
-}
-
-impl AccessControlPropertiesVersion {
-    pub const fn media_type(self) -> &'static str {
-        match self {
-            Self::V1 => "application/vnd.sap.adt.dclSource+xml",
-        }
-    }
-}
 
 /// The complete Access Control properties payload.
 #[derive(Clone, CreateProperties, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -132,32 +114,17 @@ pub struct AccessControlProperties {
     pub package: AdvertisedObjectReference,
 }
 
-impl PropertyModel for AccessControlProperties {
-    type Version = AccessControlPropertiesVersion;
+impl MediaTyped for AccessControlProperties {
+    const MEDIA_TYPES: &'static [&'static str] = &["application/vnd.sap.adt.dclSource+xml"];
+}
 
-    const SUPPORTED_VERSIONS: &'static [Self::Version] = &[AccessControlPropertiesVersion::V1];
+impl ToXml for AccessControlProperties {
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
         ("dcl", "http://www.sap.com/adt/acm/dclsources"),
         ("abapsource", "http://www.sap.com/adt/abapsource"),
         ("adtcore", "http://www.sap.com/adt/core"),
         ("atom", "http://www.w3.org/2005/Atom"),
     ];
-
-    fn media_type(version: Self::Version) -> &'static str {
-        version.media_type()
-    }
-
-    fn object_name(&self) -> &str {
-        &self.name
-    }
-
-    fn object_type(&self) -> &GlobalWorkbenchType {
-        &self.object_type
-    }
-
-    fn links(&self) -> &[AdvertisedLink] {
-        &self.links
-    }
 }
 
 #[cfg(test)]
@@ -234,11 +201,7 @@ mod tests {
     #[test]
     fn serializes_complete_properties_for_updates() {
         let properties = properties();
-        let object = ObjectRef::<AccessControl>::new(
-            properties.name.clone(),
-            AdtUri::parse("/sap/bc/adt/acm/dcl/sources/sdsh_cds_domain_val_dcl").unwrap(),
-        );
-        let xml = String::from_utf8(properties.to_xml_for(&object).unwrap()).unwrap();
+        let xml = String::from_utf8(properties.to_xml().unwrap()).unwrap();
 
         assert!(xml.contains("<dcl:dclSource"));
         assert!(xml.contains("xmlns:dcl=\"http://www.sap.com/adt/acm/dclsources\""));

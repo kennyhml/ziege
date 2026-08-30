@@ -81,7 +81,7 @@ flowchart TB
     subgraph DEFINITION["Object declaration"]
         direction TB
         DECLARATION["<strong>Type declaration</strong><br>#[object_type(<br>properties = ClassProperties,<br>capabilities(Source, Run, ...)<br>)]<br>pub struct Class;"]
-        FAMILY["Generated Class family<br>ObjectType<br>ClassProperties + PropertyModel"]
+        FAMILY["Generated Class family<br>ObjectType<br>ClassProperties + XmlConversion / MediaTyped"]
 
         subgraph MARKERS["Marker traits"]
             direction LR
@@ -112,16 +112,16 @@ flowchart TB
 
         subgraph DYNAMIC["Dynamic dispatch"]
             direction TB
-            DESCRIPTOR["Class::DESCRIPTOR<br>ObjectTypeDescriptor&lt;Class&gt;"]
-            REGISTRY["OBJECT_TYPES registry<br>dyn RuntimeObjectTypeDescriptor"]
-            RUNTIME_CALL["ObjectRef&lt;()&gt;<br>descriptor()"]
+            DESCRIPTOR["Class::DESCRIPTOR<br>ObjectTypeDescriptor"]
+            REGISTRY["OBJECT_TYPES registry<br>concrete descriptor table"]
+            RUNTIME_CALL["ErasedObject<br>descriptor function pointers"]
         end
     end
 
     subgraph RESULTS["Type-state-specific results"]
         direction LR
         TYPED_OBJECT["Object&lt;Class&gt;<br>ClassProperties"]
-        RUNTIME_OBJECT["AnyObject<br>serde_json::Value"]
+        RUNTIME_OBJECT["ErasedObject<br>type-erased properties"]
     end
 
     subgraph EXECUTION["Shared execution layer"]
@@ -148,8 +148,8 @@ flowchart TB
     REGISTRY -->|selected by Workbench type| RUNTIME_CALL
     DESCRIPTOR -->|forwards to static trait implementations| CAPABILITIES
 
-    TYPED_CALL --> LOGIC["Shared monomorphized logic<br>operation encoding<br>XML / JSON conversion<br>response decoding"]
-    RUNTIME_CALL -->|vtable forwards with T = Class| LOGIC
+    TYPED_CALL --> LOGIC["Shared typed methods<br>operation encoding<br>relation resolution<br>response decoding"]
+    RUNTIME_CALL -->|adapter downcasts properties to ClassProperties| LOGIC
     LOGIC -->|typed caller preserves T| TYPED_OBJECT
     LOGIC -->|descriptor erases properties| RUNTIME_OBJECT
 
@@ -187,15 +187,19 @@ flowchart TB
 
 The typed path exposes only methods supported by the marker's capability traits.
 The runtime path starts from the exact Workbench type stored in `ObjectRef<()>`,
-selects a descriptor from the registry, and forwards erased JSON values through the
-same concrete marker and property model. Both paths produce the same transport-neutral
-requests and use the same executors.
+selects a descriptor from the registry, and downcasts the internally type-erased
+properties through the same concrete marker and property type. Both paths call the
+same typed methods, produce the same transport-neutral requests, and use the same
+executors.
 
 ### Runtime descriptors
 
 Runtime object types use `ObjectRef<()>`. A modeled runtime reference can load an
-`AnyObject` with JSON properties. ZADT selects a registered descriptor from the
-exact Workbench type and validates capabilities at runtime.
+`ErasedObject` with concrete type-erased properties. ZADT selects a registered
+descriptor from the exact Workbench type and validates capabilities at runtime.
+Consumers export JSON with `ErasedObject::properties` and submit edited JSON to
+`ErasedObject::update`. Loaded snapshots remain immutable, and internal capability
+dispatch does not convert properties through JSON.
 
 Typed operations dispatch through Rust traits. Runtime operations dispatch through
 descriptors and return explicit errors when an object type does not support an operation.

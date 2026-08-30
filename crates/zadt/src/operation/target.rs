@@ -8,8 +8,8 @@ use super::{
     EncodedOperation,
 };
 use crate::{
-    AdtUri, CategoryId, Client, Collection, ObjectError, Ready, ResolveError,
-    resource::AdtUriTemplate,
+    AdtUri, CategoryId, Client, Collection, CompatibilityError, ObjectError, Ready, ResolveError,
+    compatibility::select_accepted_media_type, resource::AdtUriTemplate,
 };
 
 /// A collection identified by its stable category in central discovery.
@@ -76,6 +76,7 @@ impl TemplateTarget {
 pub(crate) struct ResolvedTarget {
     pub(crate) target: AdtUri,
     pub(crate) query: Vec<(String, String)>,
+    pub(crate) content_type: Option<&'static str>,
 }
 
 pub(crate) fn resolve_advertised(
@@ -87,8 +88,28 @@ pub(crate) fn resolve_advertised(
             document,
             category,
             suffix,
+            accepted_media_types,
         }) => {
             let collection = collection(client, document, category)?;
+            let content_type = if accepted_media_types.is_empty() {
+                None
+            } else {
+                Some(
+                    select_accepted_media_type(
+                        accepted_media_types,
+                        collection.accepted_media_types(),
+                    )
+                    .ok_or_else(|| {
+                        CompatibilityError::NoCompatibleMediaType {
+                            supported: accepted_media_types
+                                .iter()
+                                .map(|media_type| (*media_type).to_owned())
+                                .collect(),
+                            accepted: collection.accepted_media_types().to_vec(),
+                        }
+                    })?,
+                )
+            };
             let mut target = collection.target().map_err(ObjectError::InvalidTarget)?;
             if !suffix.is_empty() {
                 target = target
@@ -98,6 +119,7 @@ pub(crate) fn resolve_advertised(
             Ok(ResolvedTarget {
                 target,
                 query: Vec::new(),
+                content_type,
             })
         }
         AdvertisedTarget::Template(AdvertisedTemplate {
@@ -168,7 +190,11 @@ pub(crate) fn resolve_advertised(
                     .into());
                 }
             }
-            Ok(ResolvedTarget { target, query })
+            Ok(ResolvedTarget {
+                target,
+                query,
+                content_type: None,
+            })
         }
     }
 }

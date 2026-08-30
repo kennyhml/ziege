@@ -37,6 +37,7 @@ pub struct AdvertisedCollection {
     pub(crate) document: DiscoveryDocument,
     pub(crate) category: CategoryId,
     pub(crate) suffix: Vec<String>,
+    pub(crate) accepted_media_types: &'static [&'static str],
 }
 
 impl AdvertisedCollection {
@@ -55,12 +56,17 @@ impl AdvertisedCollection {
             document,
             category,
             suffix: Vec::new(),
+            accepted_media_types: &[],
         }
     }
 
     /// Appends one safely encoded segment to a collection target.
     pub fn push_segment(&mut self, segment: impl Into<String>) {
         self.suffix.push(segment.into());
+    }
+
+    pub(crate) fn require_accepted_media_types(&mut self, media_types: &'static [&'static str]) {
+        self.accepted_media_types = media_types;
     }
 }
 

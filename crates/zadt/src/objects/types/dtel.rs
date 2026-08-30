@@ -3,7 +3,7 @@ use zadt_macros::object_type;
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    ObjectVersion, PropertyModel,
+    MediaTyped, ObjectVersion, ToXml,
 };
 
 #[object_type(
@@ -14,21 +14,6 @@ use crate::{
 )]
 /// The ABAP Dictionary Data Element object type.
 pub struct DataElement;
-
-/// The SAP media-type version used to decode Data Element properties.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum DataElementPropertiesVersion {
-    /// Data Element properties V2.
-    V2,
-}
-
-impl DataElementPropertiesVersion {
-    pub const fn media_type(self) -> &'static str {
-        match self {
-            Self::V2 => "application/vnd.sap.adt.dataelements.v2+xml",
-        }
-    }
-}
 
 /// The complete Data Element properties payload used by the V2 media type.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -99,32 +84,17 @@ pub struct DataElementProperties {
     pub definition: DataElementDefinition,
 }
 
-impl PropertyModel for DataElementProperties {
-    type Version = DataElementPropertiesVersion;
+impl MediaTyped for DataElementProperties {
+    const MEDIA_TYPES: &'static [&'static str] = &["application/vnd.sap.adt.dataelements.v2+xml"];
+}
 
-    const SUPPORTED_VERSIONS: &'static [Self::Version] = &[DataElementPropertiesVersion::V2];
+impl ToXml for DataElementProperties {
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
         ("blue", "http://www.sap.com/wbobj/dictionary/dtel"),
         ("adtcore", "http://www.sap.com/adt/core"),
         ("dtel", "http://www.sap.com/adt/dictionary/dataelements"),
         ("atom", "http://www.w3.org/2005/Atom"),
     ];
-
-    fn object_name(&self) -> &str {
-        &self.name
-    }
-
-    fn object_type(&self) -> &GlobalWorkbenchType {
-        &self.object_type
-    }
-
-    fn links(&self) -> &[AdvertisedLink] {
-        &self.links
-    }
-
-    fn media_type(version: Self::Version) -> &'static str {
-        version.media_type()
-    }
 }
 
 /// The nested Data Element definition exactly as represented by ADT.
@@ -205,16 +175,6 @@ mod tests {
         parse(DATA_ELEMENT_XML).unwrap()
     }
 
-    fn to_xml(properties: &DataElementProperties) -> Result<String, serde_xml_rs::Error> {
-        DataElementProperties::XML_NAMESPACES
-            .iter()
-            .fold(
-                serde_xml_rs::SerdeXml::new(),
-                |serializer, &(prefix, namespace)| serializer.namespace(prefix, namespace),
-            )
-            .to_string(properties)
-    }
-
     fn sparse_properties_xml(type_kind: &str, extra: &str) -> String {
         let mut xml = String::from_utf8(DATA_ELEMENT_XML.to_vec()).unwrap();
         let start = xml.find("<dtel:dataElement").unwrap();
@@ -289,7 +249,7 @@ mod tests {
     #[test]
     fn update_xml_reuses_the_complete_properties_representation() {
         let properties = properties();
-        let xml = to_xml(&properties).unwrap();
+        let xml = String::from_utf8(properties.to_xml().unwrap()).unwrap();
 
         assert!(xml.contains("<blue:wbobj"));
         assert!(xml.contains("adtcore:name=\"ZTFRWTFRT\""));
@@ -334,7 +294,7 @@ mod tests {
             assert!(definition.data_type.is_none());
             assert!(definition.short_field_label.is_none());
 
-            let xml = to_xml(&properties).unwrap();
+            let xml = String::from_utf8(properties.to_xml().unwrap()).unwrap();
             assert!(xml.contains(&format!("<dtel:typeKind>{wire_value}</dtel:typeKind>")));
             assert!(!xml.contains("dtel:dataType"));
             assert!(!xml.contains("dtel:shortFieldLabel"));
@@ -351,8 +311,8 @@ mod tests {
         assert!(properties.description.is_none());
         assert!(properties.language.is_none());
 
-        let update = to_xml(&properties).unwrap();
-        let decoded = parse(update.as_bytes()).unwrap();
+        let update = properties.to_xml().unwrap();
+        let decoded = parse(&update).unwrap();
         assert!(decoded.responsible.is_none());
         assert!(decoded.master_language.is_none());
         assert!(decoded.description.is_none());
@@ -371,11 +331,8 @@ mod tests {
             properties.definition.documentation_status.as_deref(),
             Some("required")
         );
-        assert!(
-            to_xml(&properties)
-                .unwrap()
-                .contains("<dtel:documentationStatus>required</dtel:documentationStatus>")
-        );
+        let update = String::from_utf8(properties.to_xml().unwrap()).unwrap();
+        assert!(update.contains("<dtel:documentationStatus>required</dtel:documentationStatus>"));
     }
 
     #[test]
@@ -394,7 +351,7 @@ mod tests {
 
         assert_eq!(properties.object_type.as_str(), "DOMA/DD");
         assert_eq!(properties.name, "ZOTHER");
-        let update = to_xml(&properties).unwrap();
+        let update = String::from_utf8(properties.to_xml().unwrap()).unwrap();
         assert!(update.contains("adtcore:type=\"DOMA/DD\""));
         assert!(update.contains("adtcore:name=\"ZOTHER\""));
     }

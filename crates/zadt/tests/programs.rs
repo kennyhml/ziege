@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    AccessMode, Client, EntityTag, Include, IncludePropertyVersion, Logon, ObjectVersion,
-    Operation, Program, ProgramPropertiesVersion, Ready, ReqwestTransport, Revalidation,
+    AccessMode, Client, EntityTag, Include, IncludeProperties, Logon, MediaTyped, ObjectVersion,
+    Operation, Program, ProgramProperties, Ready, ReqwestTransport, Revalidation,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -155,12 +155,12 @@ async fn include_properties_query_converts_the_live_ztest_properties() {
     let reference = client.object::<Include>("ZTEST").unwrap();
     let response = reference
         .query()
-        .version(ObjectVersion::Active)
+        .workbench_version(ObjectVersion::Active)
         .execute(&client)
         .await
         .unwrap();
-    assert_eq!(response.media_version(), IncludePropertyVersion::V2);
-    let include = &response.properties;
+    assert_eq!(response.media_type(), IncludeProperties::MEDIA_TYPES[0]);
+    let include = response.properties();
     let source = response
         .source()
         .unwrap()
@@ -236,8 +236,8 @@ async fn program_properties_query_converts_the_live_z_test_v3_properties() {
     let client = ready_client(transport).await;
     let reference = client.object::<Program>("Z_TEST").unwrap();
     let response = reference.query().execute(&client).await.unwrap();
-    assert_eq!(response.media_version(), ProgramPropertiesVersion::V3);
-    let program = &response.properties;
+    assert_eq!(response.media_type(), ProgramProperties::MEDIA_TYPES[0]);
+    let program = response.properties();
     let source = response
         .source()
         .unwrap()
@@ -344,12 +344,12 @@ async fn program_properties_query_accepts_server_selected_v2() {
         .object::<Program>("Z_TEST")
         .unwrap()
         .query()
-        .version(ObjectVersion::WorkingArea)
+        .workbench_version(ObjectVersion::WorkingArea)
         .execute(&client)
         .await
         .unwrap();
-    assert_eq!(response.media_version(), ProgramPropertiesVersion::V2);
-    let program = &response.properties;
+    assert_eq!(response.media_type(), ProgramProperties::MEDIA_TYPES[1]);
+    let program = response.properties();
 
     assert_eq!(program.name, "Z_TEST");
     assert_eq!(program.version, ObjectVersion::Inactive);
@@ -393,7 +393,7 @@ async fn program_properties_query_returns_not_modified_for_a_current_etag() {
         .object::<Program>("Z_TEST")
         .unwrap()
         .query()
-        .version(ObjectVersion::Inactive)
+        .workbench_version(ObjectVersion::Inactive)
         .if_none_match(EntityTag::from_static("202607251959580008"))
         .execute(&client)
         .await

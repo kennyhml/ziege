@@ -1,6 +1,6 @@
 use std::future::Future;
 
-use http::{HeaderMap, StatusCode, header};
+use http::{HeaderMap, HeaderValue, StatusCode, header};
 
 use crate::{
     AdtRequest, AdtResponse, AdtUri, Client, ClientState, EncodeError, EntityTag, OperationError,
@@ -366,12 +366,16 @@ impl Resolve<Advertised> for Client<Ready> {
         let resolved = resolve_advertised(self, target)?;
         let mut query = resolved.query;
         query.extend(operation.query);
+        let mut headers = operation.headers;
+        if let Some(content_type) = resolved.content_type {
+            headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+        }
         let context = OperationContext::new(resolved.target.clone());
         let request = AdtRequest::from_parts(
             operation.method,
             resolved.target,
             query,
-            operation.headers,
+            headers,
             operation.body,
         );
         Ok(ResolvedOperation {

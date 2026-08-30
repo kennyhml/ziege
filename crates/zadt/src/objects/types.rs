@@ -13,57 +13,48 @@ mod srvd;
 
 pub use clas::{
     Class, ClassCategory, ClassCreateProperties, ClassCreatePropertiesBuilder,
-    ClassCreatePropertiesBuilderError, ClassProperties, ClassPropertiesVersion,
-    ClassSourceComponent, ClassSourceProperties, ClassTemplate, ClassTemplateProperty,
+    ClassCreatePropertiesBuilderError, ClassProperties, ClassSourceComponent,
+    ClassSourceProperties, ClassTemplate, ClassTemplateProperty,
 };
 pub use dcls::{
     AccessControl, AccessControlCreateProperties, AccessControlCreatePropertiesBuilder,
     AccessControlCreatePropertiesBuilderError, AccessControlProperties,
-    AccessControlPropertiesVersion,
 };
 pub use ddla::{
     AnnotationDefinition, AnnotationDefinitionCreateProperties,
     AnnotationDefinitionCreatePropertiesBuilder, AnnotationDefinitionCreatePropertiesBuilderError,
-    AnnotationDefinitionProperties, AnnotationDefinitionPropertiesVersion,
+    AnnotationDefinitionProperties,
 };
 pub use ddls::{
     DataDefinition, DataDefinitionCreateProperties, DataDefinitionCreatePropertiesBuilder,
     DataDefinitionCreatePropertiesBuilderError, DataDefinitionProperties,
-    DataDefinitionPropertiesVersion,
 };
 pub use ddlx::{
     MetadataExtension, MetadataExtensionCreateProperties, MetadataExtensionCreatePropertiesBuilder,
     MetadataExtensionCreatePropertiesBuilderError, MetadataExtensionProperties,
-    MetadataExtensionPropertiesVersion,
 };
 pub use devc::{
-    Package, PackageAssignment, PackageAttributes, PackageProperties, PackagePropertiesVersion,
-    PackageTransport, PackageUseAccess,
+    Package, PackageAssignment, PackageAttributes, PackageProperties, PackageTransport,
+    PackageUseAccess,
 };
 pub use doma::{
     Domain, DomainContent, DomainCreateProperties, DomainCreatePropertiesBuilder,
     DomainCreatePropertiesBuilderError, DomainFixedValue, DomainFixedValues,
-    DomainOutputInformation, DomainProperties, DomainPropertiesVersion, DomainTypeInformation,
-    DomainValueInformation,
+    DomainOutputInformation, DomainProperties, DomainTypeInformation, DomainValueInformation,
 };
-pub use dtel::{
-    DataElement, DataElementDefinition, DataElementProperties, DataElementPropertiesVersion,
-};
+pub use dtel::{DataElement, DataElementDefinition, DataElementProperties};
 pub use fugr::{
-    FunctionGroup, FunctionGroupInclude, FunctionGroupIncludeProperties,
-    FunctionGroupIncludePropertiesVersion, FunctionGroupProperties, FunctionGroupPropertiesVersion,
-    FunctionModule, FunctionModuleProperties, FunctionModulePropertiesVersion,
+    FunctionGroup, FunctionGroupInclude, FunctionGroupIncludeProperties, FunctionGroupProperties,
+    FunctionModule, FunctionModuleProperties,
 };
 pub use intf::{
     Interface, InterfaceCreateProperties, InterfaceCreatePropertiesBuilder,
-    InterfaceCreatePropertiesBuilderError, InterfaceProperties, InterfacePropertiesVersion,
+    InterfaceCreatePropertiesBuilderError, InterfaceProperties,
 };
 pub use prog::{
-    Include, IncludeProperties, IncludePropertyVersion, Program, ProgramProperties,
-    ProgramPropertiesVersion, SyntaxConfiguration, SyntaxLanguage,
+    Include, IncludeProperties, Program, ProgramProperties, SyntaxConfiguration, SyntaxLanguage,
 };
 pub use srvd::{
     ServiceDefinition, ServiceDefinitionCreateProperties, ServiceDefinitionCreatePropertiesBuilder,
     ServiceDefinitionCreatePropertiesBuilderError, ServiceDefinitionProperties,
-    ServiceDefinitionPropertiesVersion,
 };

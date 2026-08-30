@@ -9,7 +9,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .sap_client(required_env("SAP_CLIENT")?)
         .language(env::var("SAP_LANGUAGE").unwrap_or_else(|_| "EN".to_owned()))
         .basic_auth(required_env("SAP_USERNAME")?, required_env("SAP_PASSWORD")?)
+        .danger_accept_invalid_certs(env_flag("SAP_DANGER_ACCEPT_INVALID_CERTS"))
+        .danger_accept_invalid_hostnames(env_flag("SAP_DANGER_ACCEPT_INVALID_HOSTNAMES"))
         .build()?;
+
     let client = Client::new(transport).discover().await?;
 
     let mut arguments = env::args().skip(1);
@@ -41,6 +44,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("{result:#?}");
 
     Ok(())
+}
+
+fn env_flag(name: &str) -> bool {
+    env::var(name).is_ok_and(|value| value == "1" || value.eq_ignore_ascii_case("true"))
 }
 
 fn required_env(name: &str) -> Result<String, io::Error> {

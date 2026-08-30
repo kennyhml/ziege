@@ -1,6 +1,6 @@
 use super::super::{
-    AbapLanguageVersion, AdvertisedObjectReference, GlobalWorkbenchType, ObjectRef, ObjectType,
-    ObjectVersion, PropertyModel, Source, SourceComponents, Structure,
+    AbapLanguageVersion, AdvertisedObjectReference, GlobalWorkbenchType, MediaTyped, ObjectRef,
+    ObjectType, ObjectVersion, Source, SourceComponents, ToXml,
 };
 use crate::resource::AdvertisedLink;
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ use zadt_macros::{CreateProperties, object_type};
     workbench_type = "CLAS/OC",
     collection(scheme = "http://www.sap.com/adt/categories/oo", term = "classes",),
     capabilities(
-        Create(ClassCreateProperties, ClassPropertiesVersion::V4),
+        Create(ClassCreateProperties),
         Source,
         SourceComponents,
         Structure,
@@ -30,24 +30,6 @@ use zadt_macros::{CreateProperties, object_type};
     )
 )]
 pub struct Class;
-
-/// The media-type version used to decode class properties.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum ClassPropertiesVersion {
-    V2,
-    V3,
-    V4,
-}
-
-impl ClassPropertiesVersion {
-    pub const fn media_type(self) -> &'static str {
-        match self {
-            Self::V2 => "application/vnd.sap.adt.oo.classes.v2+xml",
-            Self::V3 => "application/vnd.sap.adt.oo.classes.v3+xml",
-            Self::V4 => "application/vnd.sap.adt.oo.classes.v4+xml",
-        }
-    }
-}
 
 /// The properties describing a class. Contains editable information, such
 /// as `description` and `shared-memory-enabled`.
@@ -204,14 +186,15 @@ pub struct ClassProperties {
     pub root_entity: Option<AdvertisedObjectReference>,
 }
 
-impl PropertyModel for ClassProperties {
-    type Version = ClassPropertiesVersion;
-
-    const SUPPORTED_VERSIONS: &'static [Self::Version] = &[
-        ClassPropertiesVersion::V4,
-        ClassPropertiesVersion::V3,
-        ClassPropertiesVersion::V2,
+impl MediaTyped for ClassProperties {
+    const MEDIA_TYPES: &'static [&'static str] = &[
+        "application/vnd.sap.adt.oo.classes.v4+xml",
+        "application/vnd.sap.adt.oo.classes.v3+xml",
+        "application/vnd.sap.adt.oo.classes.v2+xml",
     ];
+}
+
+impl ToXml for ClassProperties {
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
         ("class", "http://www.sap.com/adt/oo/classes"),
         ("abapoo", "http://www.sap.com/adt/oo"),
@@ -219,22 +202,6 @@ impl PropertyModel for ClassProperties {
         ("adtcore", "http://www.sap.com/adt/core"),
         ("atom", "http://www.w3.org/2005/Atom"),
     ];
-
-    fn media_type(version: Self::Version) -> &'static str {
-        version.media_type()
-    }
-
-    fn object_name(&self) -> &str {
-        &self.name
-    }
-
-    fn object_type(&self) -> &GlobalWorkbenchType {
-        &self.object_type
-    }
-
-    fn links(&self) -> &[AdvertisedLink] {
-        &self.links
-    }
 }
 
 /// Semantic category assigned to an ABAP class.
@@ -375,8 +342,6 @@ impl SourceComponents for Class {
             .map(|source| source.source_uri.as_str())
     }
 }
-
-impl Structure for Class {}
 
 /// The syntax configuration embedded in a class-properties payload.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -696,7 +661,7 @@ mod tests {
 
     #[test]
     fn parses_the_live_local_types_payload() {
-        let class: ClassProperties = serde_xml_rs::from_str(LOCAL_TYPES_XML).unwrap();
+        let class = parse(LOCAL_TYPES_XML).unwrap();
 
         assert!(class.is_abstract);
         assert!(class.constructor_generated);
@@ -713,7 +678,7 @@ mod tests {
     #[test]
     fn parses_v2_without_the_v4_language_version() {
         let body = CLASS_XML.replace(" adtcore:abapLanguageVersion=\"X\"", "");
-        let class: ClassProperties = serde_xml_rs::from_str(&body).unwrap();
+        let class = parse(&body).unwrap();
 
         assert_eq!(class.abap_language_version, None);
     }
@@ -755,7 +720,7 @@ mod tests {
 
     #[test]
     fn wire_json_round_trips_the_full_payload() {
-        let class: ClassProperties = serde_xml_rs::from_str(LOCAL_TYPES_XML).unwrap();
+        let class = parse(LOCAL_TYPES_XML).unwrap();
         let json = serde_json::to_value(&class).unwrap();
         assert_eq!(json["@adtcore:name"], "CX_ROOT");
         assert_eq!(json["@adtcore:type"], "CLAS/OC");
@@ -791,14 +756,17 @@ mod tests {
     #[test]
     fn serializes_class_properties_as_a_complete_update_payload() {
         let class = parse(CLASS_XML).unwrap();
-        let object = crate::ObjectRef::erased(
+        let reference = ObjectRef::<Class>::new(
             class.name.clone(),
             crate::AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
-            Class::WORKBENCH_TYPE,
-        );
+        )
+        .erase();
+        let properties = Class::DESCRIPTOR
+            .properties_from_json(&reference, serde_json::to_value(&class).unwrap())
+            .unwrap();
         let xml = String::from_utf8(
             Class::DESCRIPTOR
-                .properties_to_xml(&object, serde_json::to_value(&class).unwrap())
+                .properties_to_xml(&reference, &properties)
                 .unwrap(),
         )
         .unwrap();

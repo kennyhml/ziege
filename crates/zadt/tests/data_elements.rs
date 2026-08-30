@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    AccessMode, Client, DataElement, DataElementPropertiesVersion, Logon, ObjectError,
-    ObjectVersion, Operation, Ready, ReqwestTransport,
+    AccessMode, Client, DataElement, DataElementProperties, Logon, MediaTyped, ObjectVersion,
+    Operation, Ready, ReqwestTransport,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -86,18 +86,18 @@ async fn data_element_properties_use_one_read_write_representation() {
     let reference = client.object::<DataElement>("ZTFRWTFRT").unwrap();
     let response = reference
         .query()
-        .version(ObjectVersion::WorkingArea)
+        .workbench_version(ObjectVersion::WorkingArea)
         .execute(&client)
         .await
         .unwrap();
 
-    assert_eq!(response.media_version(), DataElementPropertiesVersion::V2);
+    assert_eq!(response.media_type(), DataElementProperties::MEDIA_TYPES[0]);
     assert_eq!(
         response.etag.as_ref().map(|etag| etag.as_str()),
         Some("data-element-etag")
     );
     assert_eq!(
-        response.properties.definition.type_name.as_deref(),
+        response.properties().definition.type_name.as_deref(),
         Some("CHAR0008")
     );
 
@@ -107,7 +107,7 @@ async fn data_element_properties_use_one_read_write_representation() {
 }
 
 #[tokio::test]
-async fn runtime_data_element_update_reuses_json_properties_in_the_lock_session() {
+async fn erased_data_element_update_uses_the_json_consumer_boundary() {
     let server = MockServer::start_async().await;
     let logon = mock_logon(&server).await;
     let discovery = mock_discovery(&server).await;
@@ -203,22 +203,18 @@ async fn runtime_data_element_update_reuses_json_properties_in_the_lock_session(
     let client = ready_client(&server).await;
     let reference = client.object::<DataElement>("ZTFRWTFRT").unwrap();
     let object = reference.erase();
-    let mut properties = object.query().unwrap().execute(&client).await.unwrap();
+    let properties = object.query().unwrap().execute(&client).await.unwrap();
     assert_eq!(&properties.reference().erase(), &object);
-    properties.properties["@adtcore:description"] = "Updated description".into();
+    let mut edited_properties = properties.properties().unwrap();
+    edited_properties["@adtcore:description"] = "Updated description".into();
     let session = client.create_user_session();
     let object_lock = object
         .lock(AccessMode::Modify)
         .execute(&session)
         .await
         .unwrap();
-    let other = client.object::<DataElement>("ZOTHER").unwrap().erase();
-    assert!(matches!(
-        other.update(&object_lock, properties.clone()),
-        Err(ObjectError::UnexpectedObjectReference { .. })
-    ));
-    let result = object
-        .update(&object_lock, properties)
+    let result = properties
+        .update(&object_lock, edited_properties)
         .unwrap()
         .execute(&session)
         .await
@@ -231,13 +227,15 @@ async fn runtime_data_element_update_reuses_json_properties_in_the_lock_session(
         .unwrap();
     session.close().await.unwrap();
 
-    let canonical = result.unwrap();
-    assert_eq!(canonical.media_type(), DATA_ELEMENT_MEDIA_TYPE);
+    assert_eq!(result.media_type(), DATA_ELEMENT_MEDIA_TYPE);
     assert_eq!(
-        canonical.etag.as_ref().map(|etag| etag.as_str()),
+        result.etag.as_ref().map(|etag| etag.as_str()),
         Some("data-element-etag-2")
     );
-    assert_eq!(canonical.properties["@adtcore:description"], "tfarFAR");
+    assert_eq!(
+        result.properties().unwrap()["@adtcore:description"],
+        "tfarFAR"
+    );
     logon.assert_async().await;
     discovery.assert_async().await;
     csrf.assert_async().await;

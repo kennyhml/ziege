@@ -3,7 +3,7 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    ObjectVersion, PropertyModel,
+    MediaTyped, ObjectVersion, ToXml,
 };
 
 #[object_type(
@@ -14,30 +14,12 @@ use crate::{
         term = "srvdsrv",
     ),
     capabilities(
-        Create(
-            ServiceDefinitionCreateProperties,
-            ServiceDefinitionPropertiesVersion::V1
-        ),
+        Create(ServiceDefinitionCreateProperties),
         Source(properties.source_uri),
     )
 )]
 /// An ABAP Core Data Services Service Definition.
 pub struct ServiceDefinition;
-
-/// The SAP media-type version used to decode Service Definition properties.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum ServiceDefinitionPropertiesVersion {
-    /// Service Definition properties V1.
-    V1,
-}
-
-impl ServiceDefinitionPropertiesVersion {
-    pub const fn media_type(self) -> &'static str {
-        match self {
-            Self::V1 => "application/vnd.sap.adt.ddic.srvd.v1+xml",
-        }
-    }
-}
 
 /// The complete Service Definition properties payload.
 #[derive(Clone, CreateProperties, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -152,32 +134,17 @@ pub struct ServiceDefinitionProperties {
     pub package: AdvertisedObjectReference,
 }
 
-impl PropertyModel for ServiceDefinitionProperties {
-    type Version = ServiceDefinitionPropertiesVersion;
+impl MediaTyped for ServiceDefinitionProperties {
+    const MEDIA_TYPES: &'static [&'static str] = &["application/vnd.sap.adt.ddic.srvd.v1+xml"];
+}
 
-    const SUPPORTED_VERSIONS: &'static [Self::Version] = &[ServiceDefinitionPropertiesVersion::V1];
+impl ToXml for ServiceDefinitionProperties {
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
         ("srvd", "http://www.sap.com/adt/ddic/srvdsources"),
         ("abapsource", "http://www.sap.com/adt/abapsource"),
         ("adtcore", "http://www.sap.com/adt/core"),
         ("atom", "http://www.w3.org/2005/Atom"),
     ];
-
-    fn media_type(version: Self::Version) -> &'static str {
-        version.media_type()
-    }
-
-    fn object_name(&self) -> &str {
-        &self.name
-    }
-
-    fn object_type(&self) -> &GlobalWorkbenchType {
-        &self.object_type
-    }
-
-    fn links(&self) -> &[AdvertisedLink] {
-        &self.links
-    }
 }
 
 #[cfg(test)]
@@ -251,7 +218,7 @@ mod tests {
                 properties.name.clone(),
                 AdtUri::parse("/sap/bc/adt/ddic/srvd/sources/managedistributions").unwrap(),
             ),
-            ServiceDefinitionPropertiesVersion::V1.media_type(),
+            ServiceDefinitionProperties::MEDIA_TYPES[0],
             None,
             properties,
         );
@@ -283,11 +250,7 @@ mod tests {
     #[test]
     fn serializes_complete_properties_for_updates() {
         let properties = properties();
-        let object = ObjectRef::<ServiceDefinition>::new(
-            properties.name.clone(),
-            AdtUri::parse("/sap/bc/adt/ddic/srvd/sources/managedistributions").unwrap(),
-        );
-        let xml = String::from_utf8(properties.to_xml_for(&object).unwrap()).unwrap();
+        let xml = String::from_utf8(properties.to_xml().unwrap()).unwrap();
 
         assert!(xml.contains("<srvd:srvdSource"));
         assert!(xml.contains("xmlns:srvd=\"http://www.sap.com/adt/ddic/srvdsources\""));

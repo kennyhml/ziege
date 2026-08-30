@@ -2,7 +2,8 @@ use serde::{Deserialize, Serialize};
 use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
-    AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType, ObjectVersion, PropertyModel,
+    AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType, MediaTyped, ObjectVersion,
+    ToXml,
 };
 
 #[object_type(
@@ -13,30 +14,12 @@ use crate::{
         term = "ddlaadf",
     ),
     capabilities(
-        Create(
-            AnnotationDefinitionCreateProperties,
-            AnnotationDefinitionPropertiesVersion::V1
-        ),
+        Create(AnnotationDefinitionCreateProperties),
         Source(properties.source_uri),
     )
 )]
 /// An ABAP Core Data Services Annotation Definition.
 pub struct AnnotationDefinition;
-
-/// The SAP media-type version used to decode Annotation Definition properties.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum AnnotationDefinitionPropertiesVersion {
-    /// Annotation Definition properties V1.
-    V1,
-}
-
-impl AnnotationDefinitionPropertiesVersion {
-    pub const fn media_type(self) -> &'static str {
-        match self {
-            Self::V1 => "application/vnd.sap.adt.ddic.ddla.v1+xml",
-        }
-    }
-}
 
 /// The complete Annotation Definition properties payload.
 #[derive(Clone, CreateProperties, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -123,33 +106,17 @@ pub struct AnnotationDefinitionProperties {
     pub package: AdvertisedObjectReference,
 }
 
-impl PropertyModel for AnnotationDefinitionProperties {
-    type Version = AnnotationDefinitionPropertiesVersion;
+impl MediaTyped for AnnotationDefinitionProperties {
+    const MEDIA_TYPES: &'static [&'static str] = &["application/vnd.sap.adt.ddic.ddla.v1+xml"];
+}
 
-    const SUPPORTED_VERSIONS: &'static [Self::Version] =
-        &[AnnotationDefinitionPropertiesVersion::V1];
+impl ToXml for AnnotationDefinitionProperties {
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
         ("ddla", "http://www.sap.com/adt/ddic/ddlasources"),
         ("abapsource", "http://www.sap.com/adt/abapsource"),
         ("adtcore", "http://www.sap.com/adt/core"),
         ("atom", "http://www.w3.org/2005/Atom"),
     ];
-
-    fn media_type(version: Self::Version) -> &'static str {
-        version.media_type()
-    }
-
-    fn object_name(&self) -> &str {
-        &self.name
-    }
-
-    fn object_type(&self) -> &GlobalWorkbenchType {
-        &self.object_type
-    }
-
-    fn links(&self) -> &[AdvertisedLink] {
-        &self.links
-    }
 }
 
 #[cfg(test)]
@@ -218,7 +185,7 @@ mod tests {
                 properties.name.clone(),
                 AdtUri::parse("/sap/bc/adt/ddic/ddla/sources/ui").unwrap(),
             ),
-            AnnotationDefinitionPropertiesVersion::V1.media_type(),
+            AnnotationDefinitionProperties::MEDIA_TYPES[0],
             None,
             properties,
         );
@@ -250,11 +217,7 @@ mod tests {
     #[test]
     fn serializes_complete_properties_for_updates() {
         let properties = properties();
-        let object = ObjectRef::<AnnotationDefinition>::new(
-            properties.name.clone(),
-            AdtUri::parse("/sap/bc/adt/ddic/ddla/sources/ui").unwrap(),
-        );
-        let xml = String::from_utf8(properties.to_xml_for(&object).unwrap()).unwrap();
+        let xml = String::from_utf8(properties.to_xml().unwrap()).unwrap();
 
         assert!(xml.contains("<ddla:ddlaSource"));
         assert!(xml.contains("xmlns:ddla=\"http://www.sap.com/adt/ddic/ddlasources\""));

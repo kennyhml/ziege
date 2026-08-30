@@ -2,9 +2,9 @@ use http::{Method, StatusCode};
 use serde::Deserialize;
 
 use crate::{
-    AdtUri, AdvertisedLink, AnyObject, EncodeError, EncodedOperation, Object, ObjectError,
-    ObjectStructureRef, ObjectVersion, Operation, OperationResponse, Owned, PropertyModel,
-    Relations, ResponseError, Stateless, Structure, resource::resolve_href,
+    AdtUri, AdvertisedLink, EncodeError, EncodedOperation, ErasedObject, Links, Object,
+    ObjectError, ObjectStructureRef, ObjectVersion, Operation, OperationResponse, Owned, Relations,
+    ResponseError, Stateless, Structure, resource::resolve_href,
 };
 
 const INHERITED_MEMBERS_QUERY: &str = "inheritedMembers";
@@ -28,7 +28,7 @@ pub struct ObjectStructureQuery {
     /// The advertised resource
     pub resource: ObjectStructureRef,
     /// The version of the object (active, inactive..)
-    version: Option<ObjectVersion>,
+    workbench_version: Option<ObjectVersion>,
     /// Whether class parents or implemented interfaces should be expanded
     inherited_members: Option<bool>,
     /// Whether short descriptions should be included in the response.
@@ -39,7 +39,7 @@ impl ObjectStructureQuery {
     fn new(structure: ObjectStructureRef) -> Self {
         Self {
             resource: structure,
-            version: None,
+            workbench_version: None,
             inherited_members: None,
             with_short_descriptions: None,
         }
@@ -47,8 +47,8 @@ impl ObjectStructureQuery {
 
     /// Selects the object version used to generate the structure.
     #[must_use]
-    pub fn version(mut self, version: ObjectVersion) -> Self {
-        self.version = Some(version);
+    pub fn workbench_version(mut self, version: ObjectVersion) -> Self {
+        self.workbench_version = Some(version);
         self
     }
 
@@ -75,7 +75,7 @@ impl Operation for ObjectStructureQuery {
     fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
         let mut request = EncodedOperation::owned(Method::GET, self.resource.uri.clone());
         for (name, value) in &self.resource.query {
-            if self.version.is_some() && name == ObjectVersion::QUERY_PARAMETER {
+            if self.workbench_version.is_some() && name == ObjectVersion::QUERY_PARAMETER {
                 continue;
             }
             if self.inherited_members.is_some() && name == INHERITED_MEMBERS_QUERY {
@@ -86,7 +86,7 @@ impl Operation for ObjectStructureQuery {
             }
             request.push_query(name, value);
         }
-        if let Some(version) = self.version {
+        if let Some(version) = self.workbench_version {
             request.push_query(ObjectVersion::QUERY_PARAMETER, version.as_str());
         }
         if self.with_short_descriptions == Some(true) {
@@ -123,28 +123,29 @@ impl ObjectStructureRef {
 }
 
 impl<T: Structure> Object<T> {
-    /// Creates a query for the object-structure relation advertised by this object.
-    pub fn object_structure(&self) -> Result<ObjectStructureQuery, ObjectError> {
-        ObjectStructureRef::from_relations(self.reference().erase(), self.properties.links())?
+    pub(crate) fn object_structure_from_parts(
+        reference: &crate::ObjectRef<T>,
+        properties: &T::Properties,
+    ) -> Result<ObjectStructureQuery, ObjectError> {
+        ObjectStructureRef::from_relations(reference.erase(), properties.links())?
             .map(|reference| reference.query())
             .ok_or(ObjectError::MissingRelation {
                 relation: ObjectStructureRef::RELATION,
             })
     }
+
+    /// Creates a query for the object-structure relation advertised by this object.
+    pub fn object_structure(&self) -> Result<ObjectStructureQuery, ObjectError> {
+        Self::object_structure_from_parts(self.reference(), self.properties())
+    }
 }
 
-impl AnyObject {
+impl ErasedObject {
     /// Creates an object-structure query through the runtime descriptor.
     pub fn object_structure(&self) -> Result<ObjectStructureQuery, ObjectError> {
-        let Some(descriptor) = self.reference().descriptor() else {
-            return Err(self.reference().unsupported_capability("object structure"));
-        };
-        descriptor
-            .object_structure(self.reference(), &self.properties)?
-            .map(|reference| reference.query())
-            .ok_or(ObjectError::MissingRelation {
-                relation: ObjectStructureRef::RELATION,
-            })
+        self.reference()
+            .require_descriptor()?
+            .object_structure(self)
     }
 }
 
@@ -302,9 +303,7 @@ mod tests {
     use super::*;
     use http::{HeaderMap, HeaderValue, StatusCode, header};
 
-    use crate::{
-        AdtResponse, Class, ClassProperties, ObjectRef, Program, ProgramProperties, PropertyModel,
-    };
+    use crate::{AdtResponse, Class, ClassProperties, ObjectRef, Program, ProgramProperties};
 
     const STRUCTURE_XML: &[u8] = include_bytes!("../../tests/fixtures/object-structure-class.xml");
     const CLASS_XML: &[u8] = include_bytes!("../../tests/fixtures/class-cl-adt-uri-mapper-v4.xml");
@@ -327,9 +326,7 @@ mod tests {
             "CL_ADT_URI_MAPPER",
             AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
         );
-        let properties = ClassProperties::from_xml_for(CLASS_XML, &reference).unwrap();
-        let runtime_properties = serde_json::to_value(&properties).unwrap();
-        let runtime_reference = reference.erase();
+        let properties: ClassProperties = serde_xml_rs::from_reader(CLASS_XML).unwrap();
         let object = Object::new(
             reference,
             "application/vnd.sap.adt.oo.classes.v4+xml",
@@ -345,12 +342,7 @@ mod tests {
         );
         assert!(query.resource.query.is_empty());
 
-        let runtime_object = AnyObject::new(
-            runtime_reference,
-            "application/vnd.sap.adt.oo.classes.v4+xml",
-            None,
-            runtime_properties,
-        );
+        let runtime_object = object.clone().try_into_erased().unwrap();
         assert_eq!(
             runtime_object.object_structure().unwrap().resource,
             query.resource
@@ -363,7 +355,7 @@ mod tests {
             "Z_TEST",
             AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
         );
-        let properties = ProgramProperties::from_xml_for(PROGRAM_XML, &reference).unwrap();
+        let properties: ProgramProperties = serde_xml_rs::from_reader(PROGRAM_XML).unwrap();
         let object = Object::new(
             reference,
             "application/vnd.sap.adt.programs.programs.v3+xml",
@@ -391,7 +383,7 @@ mod tests {
             .push((INHERITED_MEMBERS_QUERY.to_owned(), "legacy".to_owned()));
         let query = structure
             .query()
-            .version(ObjectVersion::Inactive)
+            .workbench_version(ObjectVersion::Inactive)
             .inherited_members(true);
 
         let request = query.encode().unwrap();

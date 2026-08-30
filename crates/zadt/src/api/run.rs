@@ -3,7 +3,7 @@ use http::{Method, StatusCode};
 use crate::{
     Advertised, EncodeError, EncodedOperation,
     error::{ObjectError, ResponseError},
-    objects::{AnyObject, GlobalWorkbenchType, ImmediateRun, ObjectRef, RunCapability},
+    objects::{ErasedObject, GlobalWorkbenchType, ImmediateRun, ObjectRef, RunCapability},
     operation::{Operation, OperationResponse, Stateless},
     protocol::TEXT_PLAIN_MEDIA_TYPE,
 };
@@ -114,7 +114,7 @@ impl ObjectRef<()> {
     }
 }
 
-impl AnyObject {
+impl ErasedObject {
     /// Creates an immediate run operation when this object family supports it.
     pub fn run(&self) -> Result<ObjectRun, ObjectError> {
         self.reference().run()

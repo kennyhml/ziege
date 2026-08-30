@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use zadt::{
-    AnyObject, GlobalWorkbenchType, Include, IncludeProperties, ObjectType, Program,
-    ProgramProperties, PropertyModel,
+    ErasedObject, GlobalWorkbenchType, Include, IncludeProperties, MediaTyped, ObjectType, Program,
+    ProgramProperties,
 };
 
 use crate::{
@@ -113,8 +113,8 @@ impl FileDescriptor for ProgramMetadata {
 }
 
 impl PropertiesCodec for ProgramMetadata {
-    fn render(&self, properties: &AnyObject) -> Result<String, ProjectionError> {
-        if ProgramProperties::version_from_media_type(properties.media_type()).is_some() {
+    fn render(&self, properties: &ErasedObject) -> Result<String, ProjectionError> {
+        if ProgramProperties::MEDIA_TYPES.contains(&properties.media_type()) {
             return render_program_properties(&decode_properties::<ProgramProperties>(
                 properties, "PROG",
             )?);
@@ -122,21 +122,17 @@ impl PropertiesCodec for ProgramMetadata {
         render_include_properties(&decode_properties::<IncludeProperties>(properties, "PROG")?)
     }
 
-    fn merge(&self, original: &AnyObject, edited: &str) -> Result<AnyObject, ProjectionError> {
-        if ProgramProperties::version_from_media_type(original.media_type()).is_some() {
+    fn merge(
+        &self,
+        original: &ErasedObject,
+        edited: &str,
+    ) -> Result<serde_json::Value, ProjectionError> {
+        if ProgramProperties::MEDIA_TYPES.contains(&original.media_type()) {
             let properties = decode_properties::<ProgramProperties>(original, "PROG")?;
-            return encode_properties(
-                original,
-                merge_program_properties(&properties, edited)?,
-                "PROG",
-            );
+            return encode_properties(merge_program_properties(&properties, edited)?, "PROG");
         }
         let properties = decode_properties::<IncludeProperties>(original, "PROG")?;
-        encode_properties(
-            original,
-            merge_include_properties(&properties, edited)?,
-            "PROG",
-        )
+        encode_properties(merge_include_properties(&properties, edited)?, "PROG")
     }
 }
 
@@ -510,7 +506,7 @@ fn is_false(value: &bool) -> bool {
 #[cfg(test)]
 mod tests {
     use serde_json::Value;
-    use zadt::{Include, IncludePropertyVersion, Program, ProgramPropertiesVersion};
+    use zadt::{Include, IncludeProperties, MediaTyped, Program, ProgramProperties};
 
     use super::*;
 
@@ -524,11 +520,12 @@ mod tests {
         );
         crate::test_support::properties(
             &reference,
-            ProgramPropertiesVersion::V3.media_type(),
+            ProgramProperties::MEDIA_TYPES[0],
             "program-etag",
             PROGRAM_XML,
         )
-        .properties
+        .properties()
+        .clone()
     }
 
     fn include() -> IncludeProperties {
@@ -538,11 +535,12 @@ mod tests {
         );
         crate::test_support::properties(
             &reference,
-            IncludePropertyVersion::V2.media_type(),
+            IncludeProperties::MEDIA_TYPES[0],
             "include-etag",
             INCLUDE_XML,
         )
-        .properties
+        .properties()
+        .clone()
     }
 
     #[test]

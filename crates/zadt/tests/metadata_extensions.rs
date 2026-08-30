@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Client, EntityTag, Logon, MetadataExtension, MetadataExtensionCreateProperties,
-    MetadataExtensionPropertiesVersion, ObjectVersion, Operation, Ready, ReqwestTransport,
+    Client, EntityTag, Logon, MediaTyped, MetadataExtension, MetadataExtensionCreateProperties,
+    MetadataExtensionProperties, ObjectVersion, Operation, Ready, ReqwestTransport,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -99,7 +99,7 @@ async fn metadata_extension_properties_advertise_the_primary_source() {
         .unwrap();
     let object = reference
         .query()
-        .version(ObjectVersion::Active)
+        .workbench_version(ObjectVersion::Active)
         .execute(&client)
         .await
         .unwrap();
@@ -112,11 +112,11 @@ async fn metadata_extension_properties_advertise_the_primary_source() {
         .unwrap();
 
     assert_eq!(
-        object.media_version(),
-        MetadataExtensionPropertiesVersion::V1
+        object.media_type(),
+        MetadataExtensionProperties::MEDIA_TYPES[0]
     );
     assert_eq!(
-        object.properties.source_uri,
+        object.properties().source_uri,
         "./c_mdoapplicationscope/source/main"
     );
     assert_eq!(

@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Client, DataDefinition, DataDefinitionCreateProperties, DataDefinitionPropertiesVersion,
-    EntityTag, Logon, ObjectVersion, Operation, Ready, ReqwestTransport,
+    Client, DataDefinition, DataDefinitionCreateProperties, DataDefinitionProperties, EntityTag,
+    Logon, MediaTyped, ObjectVersion, Operation, Ready, ReqwestTransport,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -98,7 +98,7 @@ async fn data_definition_properties_advertise_the_primary_source() {
         .unwrap();
     let object = reference
         .query()
-        .version(ObjectVersion::Active)
+        .workbench_version(ObjectVersion::Active)
         .execute(&client)
         .await
         .unwrap();
@@ -110,9 +110,12 @@ async fn data_definition_properties_advertise_the_primary_source() {
         .await
         .unwrap();
 
-    assert_eq!(object.media_version(), DataDefinitionPropertiesVersion::V1);
-    assert_eq!(object.properties.source_type.as_deref(), Some("view"));
-    assert_eq!(object.properties.source_uri, "source/main");
+    assert_eq!(
+        object.media_type(),
+        DataDefinitionProperties::MEDIA_TYPES[0]
+    );
+    assert_eq!(object.properties().source_type.as_deref(), Some("view"));
+    assert_eq!(object.properties().source_uri, "source/main");
     assert_eq!(
         object.etag.as_ref().map(EntityTag::as_str),
         Some("data-definition-etag")

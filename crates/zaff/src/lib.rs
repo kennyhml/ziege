@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use thiserror::Error;
-use zadt::{AnyObject, GlobalWorkbenchType, Object, ObjectType, SourceRef};
+use zadt::{ErasedObject, GlobalWorkbenchType, Object, ObjectType, SourceRef};
 
 mod format;
 mod formats;
@@ -42,10 +42,10 @@ impl<T: ObjectType> TryFrom<&Object<T>> for ObjectFormat {
     }
 }
 
-impl TryFrom<&AnyObject> for ObjectFormat {
+impl TryFrom<&ErasedObject> for ObjectFormat {
     type Error = ProjectionError;
 
-    fn try_from(object: &AnyObject) -> Result<Self, Self::Error> {
+    fn try_from(object: &ErasedObject) -> Result<Self, Self::Error> {
         Self::for_workbench_type(object.reference().object_type())
     }
 }
@@ -398,22 +398,13 @@ pub enum ProjectionError {
         #[source]
         source: serde_json::Error,
     },
-
-    #[error(
-        "ADT properties for AFF object type `{object_type}` identify `{actual}`, expected `{expected}`"
-    )]
-    InvalidPropertiesIdentity {
-        object_type: &'static str,
-        expected: String,
-        actual: String,
-    },
 }
 
 #[cfg(test)]
 mod test_support {
     use http::{HeaderMap, StatusCode};
     use zadt::{
-        AdtResponse, AdtUri, AnyObject, Object, ObjectPropertiesQuery, ObjectRef, ObjectType,
+        AdtResponse, AdtUri, ErasedObject, Object, ObjectPropertiesQuery, ObjectRef, ObjectType,
         Operation, OperationResponse, RepositoryContentQuery, RepositoryObjectEntry,
     };
 
@@ -464,12 +455,12 @@ mod test_support {
         .unwrap()
     }
 
-    pub fn json_properties<T>(
+    pub fn erased_properties<T>(
         reference: &ObjectRef<T>,
         media_type: &'static str,
         etag: &'static str,
         body: &[u8],
-    ) -> AnyObject
+    ) -> ErasedObject
     where
         T: ObjectType,
     {
@@ -491,8 +482,8 @@ mod test_support {
 #[cfg(test)]
 mod tests {
     use zadt::{
-        Class, ClassPropertiesVersion, DataElement, EntityTag, Include, ObjectType, Program,
-        ProgramPropertiesVersion,
+        Class, ClassProperties, DataElement, Include, MediaTyped, ObjectType, Program,
+        ProgramProperties,
     };
 
     use super::*;
@@ -609,7 +600,7 @@ mod tests {
         );
         let object = test_support::properties(
             &reference,
-            ClassPropertiesVersion::V4.media_type(),
+            ClassProperties::MEDIA_TYPES[0],
             "class-etag",
             CLASS_XML,
         );
@@ -648,7 +639,7 @@ mod tests {
         );
         let object = test_support::properties(
             &reference,
-            ClassPropertiesVersion::V4.media_type(),
+            ClassProperties::MEDIA_TYPES[0],
             "class-etag",
             CLASS_XML,
         );
@@ -668,7 +659,7 @@ mod tests {
         );
         let class = test_support::properties(
             &class_reference,
-            ClassPropertiesVersion::V4.media_type(),
+            ClassProperties::MEDIA_TYPES[0],
             "class-etag",
             CLASS_XML,
         );
@@ -676,7 +667,7 @@ mod tests {
             test_support::reference::<Program>("Z_TEST", "/sap/bc/adt/programs/programs/z_test");
         let program = test_support::properties(
             &program_reference,
-            ProgramPropertiesVersion::V3.media_type(),
+            ProgramProperties::MEDIA_TYPES[0],
             "program-etag",
             PROGRAM_XML,
         );
@@ -715,9 +706,9 @@ mod tests {
             "CL_ADT_URI_MAPPER",
             "/sap/bc/adt/oo/classes/cl_adt_uri_mapper",
         );
-        let properties = test_support::json_properties(
+        let properties = test_support::erased_properties(
             &reference,
-            ClassPropertiesVersion::V4.media_type(),
+            ClassProperties::MEDIA_TYPES[0],
             "class-etag",
             CLASS_XML,
         );
@@ -735,16 +726,13 @@ mod tests {
         let edited = rendered.replacen("URI Mapper", "Updated class", 1);
         let merged = metadata.merge_properties(&properties, &edited).unwrap();
 
-        assert_eq!(merged.media_type(), properties.media_type());
+        let original_properties = properties.properties().unwrap();
+        assert_eq!(merged["@adtcore:description"], "Updated class");
         assert_eq!(
-            merged.etag.as_ref().map(EntityTag::as_str),
-            Some("class-etag")
+            merged["adtcore:packageRef"],
+            original_properties["adtcore:packageRef"]
         );
-        assert_eq!(merged.properties["@adtcore:description"], "Updated class");
-        assert_eq!(
-            merged.properties["adtcore:packageRef"],
-            properties.properties["adtcore:packageRef"]
-        );
+        assert_eq!(original_properties["@adtcore:description"], "URI Mapper");
 
         let other = test_support::reference::<Class>("CL_OTHER", "/sap/bc/adt/oo/classes/cl_other");
         let other_xml = String::from_utf8_lossy(CLASS_XML).replacen(
@@ -752,9 +740,9 @@ mod tests {
             "adtcore:name=\"CL_OTHER\"",
             1,
         );
-        let other_properties = test_support::json_properties(
+        let other_properties = test_support::erased_properties(
             &other,
-            ClassPropertiesVersion::V4.media_type(),
+            ClassProperties::MEDIA_TYPES[0],
             "other-etag",
             other_xml.as_bytes(),
         );

@@ -3,7 +3,7 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Class, ClassPropertiesVersion, Client, EntityTag, Logon, Object, ObjectVersion, Operation,
+    Class, ClassProperties, Client, EntityTag, Logon, MediaTyped, Object, ObjectVersion, Operation,
     Ready, ReqwestTransport, Revalidation,
 };
 
@@ -101,7 +101,7 @@ async fn repository_object_properties_forward_through_the_typed_query() {
     let properties = object
         .query()
         .unwrap()
-        .version(ObjectVersion::Active)
+        .workbench_version(ObjectVersion::Active)
         .execute(&client)
         .await
         .unwrap();
@@ -110,13 +110,14 @@ async fn repository_object_properties_forward_through_the_typed_query() {
         properties.media_type(),
         "application/vnd.sap.adt.oo.classes.v4+xml"
     );
-    assert_eq!(properties.properties["@adtcore:name"], "CL_ADT_URI_MAPPER");
+    let properties_json = properties.properties().unwrap();
+    assert_eq!(properties_json["@adtcore:name"], "CL_ADT_URI_MAPPER");
     assert_eq!(
         properties.etag.as_ref().map(EntityTag::as_str),
         Some("class-etag")
     );
     let class: Object<Class> = properties.clone().try_into_typed::<Class>().unwrap();
-    assert_eq!(class.properties.name, "CL_ADT_URI_MAPPER");
+    assert_eq!(class.properties().name, "CL_ADT_URI_MAPPER");
     assert_eq!(class.reference().uri(), object.uri());
     logon.assert_async().await;
     discovery.assert_async().await;
@@ -196,11 +197,11 @@ async fn class_properties_query_converts_the_live_v4_manifest() {
     let reference = client.object::<Class>("CL_ADT_URI_MAPPER").unwrap();
     let response = reference
         .query()
-        .version(ObjectVersion::Active)
+        .workbench_version(ObjectVersion::Active)
         .execute(&client)
         .await
         .unwrap();
-    assert_eq!(response.media_version(), ClassPropertiesVersion::V4);
+    assert_eq!(response.media_type(), ClassProperties::MEDIA_TYPES[0]);
     let cached = serde_json::to_value(&response).unwrap();
     assert!(cached.get("marker").is_none());
 
@@ -217,7 +218,7 @@ async fn class_properties_query_converts_the_live_v4_manifest() {
     assert!(serde_json::from_value::<Object<Class>>(wrong_name).is_err());
 
     let response: Object<Class> = serde_json::from_value(cached).unwrap();
-    let class = &response.properties;
+    let class = response.properties();
     let source_ref = response.source().unwrap();
     let source = source_ref.query().execute(&client).await.unwrap();
 
@@ -276,18 +277,18 @@ async fn class_properties_query_accepts_server_selected_v2_and_v3() {
     let reference = client.object::<Class>("CL_ADT_URI_MAPPER").unwrap();
     let response = reference
         .query()
-        .version(ObjectVersion::Active)
+        .workbench_version(ObjectVersion::Active)
         .execute(&client)
         .await
         .unwrap();
-    assert_eq!(response.media_version(), ClassPropertiesVersion::V2);
+    assert_eq!(response.media_type(), ClassProperties::MEDIA_TYPES[2]);
     let response = reference
         .query()
-        .version(ObjectVersion::Inactive)
+        .workbench_version(ObjectVersion::Inactive)
         .execute(&client)
         .await
         .unwrap();
-    assert_eq!(response.media_version(), ClassPropertiesVersion::V3);
+    assert_eq!(response.media_type(), ClassProperties::MEDIA_TYPES[1]);
 
     logon.assert_async().await;
     discovery.assert_async().await;
@@ -316,7 +317,7 @@ async fn class_properties_query_returns_not_modified_for_a_current_etag() {
     let reference = client.object::<Class>("CX_ROOT").unwrap();
     let response = reference
         .query()
-        .version(ObjectVersion::Active)
+        .workbench_version(ObjectVersion::Active)
         .if_none_match(EntityTag::from_static("20180326130103001000061"))
         .execute(&client)
         .await

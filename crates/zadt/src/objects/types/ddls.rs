@@ -3,7 +3,7 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    ObjectVersion, PropertyModel,
+    MediaTyped, ObjectVersion, ToXml,
 };
 
 #[object_type(
@@ -14,30 +14,12 @@ use crate::{
         term = "ddlsources",
     ),
     capabilities(
-        Create(
-            DataDefinitionCreateProperties,
-            DataDefinitionPropertiesVersion::V1
-        ),
+        Create(DataDefinitionCreateProperties),
         Source(properties.source_uri),
     )
 )]
 /// An ABAP Core Data Services Data Definition.
 pub struct DataDefinition;
-
-/// The SAP media-type version used to decode Data Definition properties.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum DataDefinitionPropertiesVersion {
-    /// The unversioned DDL Source properties representation.
-    V1,
-}
-
-impl DataDefinitionPropertiesVersion {
-    pub const fn media_type(self) -> &'static str {
-        match self {
-            Self::V1 => "application/vnd.sap.adt.ddlSource+xml",
-        }
-    }
-}
 
 /// The complete Data Definition properties payload.
 #[derive(Clone, CreateProperties, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -148,32 +130,17 @@ pub struct DataDefinitionProperties {
     pub package: AdvertisedObjectReference,
 }
 
-impl PropertyModel for DataDefinitionProperties {
-    type Version = DataDefinitionPropertiesVersion;
+impl MediaTyped for DataDefinitionProperties {
+    const MEDIA_TYPES: &'static [&'static str] = &["application/vnd.sap.adt.ddlSource+xml"];
+}
 
-    const SUPPORTED_VERSIONS: &'static [Self::Version] = &[DataDefinitionPropertiesVersion::V1];
+impl ToXml for DataDefinitionProperties {
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
         ("ddl", "http://www.sap.com/adt/ddic/ddlsources"),
         ("abapsource", "http://www.sap.com/adt/abapsource"),
         ("adtcore", "http://www.sap.com/adt/core"),
         ("atom", "http://www.w3.org/2005/Atom"),
     ];
-
-    fn media_type(version: Self::Version) -> &'static str {
-        version.media_type()
-    }
-
-    fn object_name(&self) -> &str {
-        &self.name
-    }
-
-    fn object_type(&self) -> &GlobalWorkbenchType {
-        &self.object_type
-    }
-
-    fn links(&self) -> &[AdvertisedLink] {
-        &self.links
-    }
 }
 
 #[cfg(test)]
@@ -261,11 +228,7 @@ mod tests {
     #[test]
     fn serializes_complete_properties_for_updates() {
         let properties = properties();
-        let object = ObjectRef::<DataDefinition>::new(
-            properties.name.clone(),
-            AdtUri::parse("/sap/bc/adt/ddic/ddl/sources/i_businesspartner").unwrap(),
-        );
-        let xml = String::from_utf8(properties.to_xml_for(&object).unwrap()).unwrap();
+        let xml = String::from_utf8(properties.to_xml().unwrap()).unwrap();
 
         assert!(xml.contains("<ddl:ddlSource"));
         assert!(xml.contains("xmlns:ddl=\"http://www.sap.com/adt/ddic/ddlsources\""));
@@ -285,11 +248,7 @@ mod tests {
 
         assert!(properties.source_type.is_none());
         assert!(properties.source_type_description.is_none());
-        let object = ObjectRef::<DataDefinition>::new(
-            properties.name.clone(),
-            AdtUri::parse("/sap/bc/adt/ddic/ddl/sources/i_businesspartner").unwrap(),
-        );
-        let xml = String::from_utf8(properties.to_xml_for(&object).unwrap()).unwrap();
+        let xml = String::from_utf8(properties.to_xml().unwrap()).unwrap();
         assert!(!xml.contains("ddl:source_type="));
         assert!(!xml.contains("ddl:source_type_description="));
     }

@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    AccessControl, AccessControlCreateProperties, AccessControlPropertiesVersion, Client,
-    EntityTag, Logon, ObjectVersion, Operation, Ready, ReqwestTransport,
+    AccessControl, AccessControlCreateProperties, AccessControlProperties, Client, EntityTag,
+    Logon, MediaTyped, ObjectVersion, Operation, Ready, ReqwestTransport,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -100,7 +100,7 @@ async fn access_control_properties_advertise_the_primary_source() {
         .unwrap();
     let object = reference
         .query()
-        .version(ObjectVersion::Active)
+        .workbench_version(ObjectVersion::Active)
         .execute(&client)
         .await
         .unwrap();
@@ -112,8 +112,8 @@ async fn access_control_properties_advertise_the_primary_source() {
         .await
         .unwrap();
 
-    assert_eq!(object.media_version(), AccessControlPropertiesVersion::V1);
-    assert_eq!(object.properties.source_uri, "source/main");
+    assert_eq!(object.media_type(), AccessControlProperties::MEDIA_TYPES[0]);
+    assert_eq!(object.properties().source_uri, "source/main");
     assert_eq!(
         object.etag.as_ref().map(EntityTag::as_str),
         Some("access-control-etag")

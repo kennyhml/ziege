@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Client, FunctionGroup, FunctionGroupInclude, FunctionGroupIncludePropertiesVersion,
-    FunctionGroupPropertiesVersion, FunctionModule, FunctionModulePropertiesVersion, Logon,
+    Client, FunctionGroup, FunctionGroupInclude, FunctionGroupIncludeProperties,
+    FunctionGroupProperties, FunctionModule, FunctionModuleProperties, Logon, MediaTyped,
     Operation, Ready, ReqwestTransport,
 };
 
@@ -145,18 +145,21 @@ async fn function_group_family_uses_discovered_subobject_targets() {
         .await
         .unwrap();
 
-    assert_eq!(group.media_version(), FunctionGroupPropertiesVersion::V3);
-    assert_eq!(module.media_version(), FunctionModulePropertiesVersion::V3);
+    assert_eq!(group.media_type(), FunctionGroupProperties::MEDIA_TYPES[0]);
     assert_eq!(
-        include.media_version(),
-        FunctionGroupIncludePropertiesVersion::V2
+        module.media_type(),
+        FunctionModuleProperties::MEDIA_TYPES[0]
     );
     assert_eq!(
-        module.properties.container.name.as_deref(),
+        include.media_type(),
+        FunctionGroupIncludeProperties::MEDIA_TYPES[0]
+    );
+    assert_eq!(
+        module.properties().container.name.as_deref(),
         Some("Z_TEST_GROUP")
     );
     assert_eq!(
-        include.properties.container.name.as_deref(),
+        include.properties().container.name.as_deref(),
         Some("Z_TEST_GROUP")
     );
     assert_eq!(source.content, MODULE_SOURCE);

@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Client, EntityTag, Logon, ObjectVersion, Operation, Ready, ReqwestTransport, ServiceDefinition,
-    ServiceDefinitionCreateProperties, ServiceDefinitionPropertiesVersion,
+    Client, EntityTag, Logon, MediaTyped, ObjectVersion, Operation, Ready, ReqwestTransport,
+    ServiceDefinition, ServiceDefinitionCreateProperties, ServiceDefinitionProperties,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -99,7 +99,7 @@ async fn service_definition_properties_advertise_the_primary_source() {
         .unwrap();
     let object = reference
         .query()
-        .version(ObjectVersion::Active)
+        .workbench_version(ObjectVersion::Active)
         .execute(&client)
         .await
         .unwrap();
@@ -112,11 +112,11 @@ async fn service_definition_properties_advertise_the_primary_source() {
         .unwrap();
 
     assert_eq!(
-        object.media_version(),
-        ServiceDefinitionPropertiesVersion::V1
+        object.media_type(),
+        ServiceDefinitionProperties::MEDIA_TYPES[0]
     );
     assert_eq!(
-        object.properties.source_uri,
+        object.properties().source_uri,
         "./managedistributions/source/main"
     );
     assert_eq!(

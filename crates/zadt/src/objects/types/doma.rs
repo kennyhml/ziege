@@ -3,7 +3,7 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    ObjectVersion, PropertyModel,
+    MediaTyped, ObjectVersion, ToXml,
 };
 
 #[object_type(
@@ -13,27 +13,10 @@ use crate::{
         scheme = "http://www.sap.com/wbobj/dictionary",
         term = "domadd",
     ),
-    capabilities(
-        Create(DomainCreateProperties, DomainPropertiesVersion::V2),
-    )
+    capabilities(Create(DomainCreateProperties))
 )]
 /// An ABAP Dictionary Domain.
 pub struct Domain;
-
-/// The SAP media-type version used to decode Domain properties.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum DomainPropertiesVersion {
-    /// Domain properties V2.
-    V2,
-}
-
-impl DomainPropertiesVersion {
-    pub const fn media_type(self) -> &'static str {
-        match self {
-            Self::V2 => "application/vnd.sap.adt.domains.v2+xml",
-        }
-    }
-}
 
 /// The complete Domain properties payload.
 #[derive(Clone, CreateProperties, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -120,31 +103,16 @@ pub struct DomainProperties {
     pub content: DomainContent,
 }
 
-impl PropertyModel for DomainProperties {
-    type Version = DomainPropertiesVersion;
+impl MediaTyped for DomainProperties {
+    const MEDIA_TYPES: &'static [&'static str] = &["application/vnd.sap.adt.domains.v2+xml"];
+}
 
-    const SUPPORTED_VERSIONS: &'static [Self::Version] = &[DomainPropertiesVersion::V2];
+impl ToXml for DomainProperties {
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
         ("doma", "http://www.sap.com/dictionary/domain"),
         ("adtcore", "http://www.sap.com/adt/core"),
         ("atom", "http://www.w3.org/2005/Atom"),
     ];
-
-    fn media_type(version: Self::Version) -> &'static str {
-        version.media_type()
-    }
-
-    fn object_name(&self) -> &str {
-        &self.name
-    }
-
-    fn object_type(&self) -> &GlobalWorkbenchType {
-        &self.object_type
-    }
-
-    fn links(&self) -> &[AdvertisedLink] {
-        &self.links
-    }
 }
 
 /// The nested Domain definition exactly as represented by ADT.
@@ -355,11 +323,7 @@ mod tests {
     #[test]
     fn serializes_complete_properties_without_losing_wire_widths() {
         let properties = trkorr();
-        let object = ObjectRef::<Domain>::new(
-            properties.name.clone(),
-            AdtUri::parse("/sap/bc/adt/ddic/domains/trkorr").unwrap(),
-        );
-        let xml = String::from_utf8(properties.to_xml_for(&object).unwrap()).unwrap();
+        let xml = String::from_utf8(properties.to_xml().unwrap()).unwrap();
 
         assert!(xml.contains("<doma:domain"));
         assert!(xml.contains("xmlns:doma=\"http://www.sap.com/dictionary/domain\""));
