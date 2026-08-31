@@ -112,10 +112,7 @@ async fn repository_object_properties_forward_through_the_typed_query() {
     );
     let properties_json = properties.properties().unwrap();
     assert_eq!(properties_json["@adtcore:name"], "CL_ADT_URI_MAPPER");
-    assert_eq!(
-        properties.etag.as_ref().map(EntityTag::as_str),
-        Some("class-etag")
-    );
+    assert_eq!(properties.etag().map(EntityTag::as_str), Some("class-etag"));
     let class: Object<Class> = properties.clone().try_into_typed::<Class>().unwrap();
     assert_eq!(class.properties().name, "CL_ADT_URI_MAPPER");
     assert_eq!(class.reference().uri(), object.uri());
@@ -227,7 +224,7 @@ async fn class_properties_query_converts_the_live_v4_manifest() {
     assert_eq!(class.package.name.as_deref(), Some("SADT_TOOLS_CORE"));
     assert_eq!(class.sources.len(), 5);
     assert_eq!(
-        response.etag.as_ref().map(EntityTag::as_str),
+        response.etag().map(EntityTag::as_str),
         Some("20210406145501001000181")
     );
     assert_eq!(source.content, SOURCE);

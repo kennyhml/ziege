@@ -120,7 +120,7 @@ async fn metadata_extension_properties_advertise_the_primary_source() {
         "./c_mdoapplicationscope/source/main"
     );
     assert_eq!(
-        object.etag.as_ref().map(EntityTag::as_str),
+        object.etag().map(EntityTag::as_str),
         Some("metadata-extension-etag")
     );
     assert_eq!(source_code.content, SOURCE);

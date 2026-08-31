@@ -516,7 +516,7 @@ mod tests {
             .unwrap();
         assert_eq!(representation.properties().name, "ZTEST");
         assert_eq!(
-            representation.etag.as_ref().map(EntityTag::as_str),
+            representation.etag().map(EntityTag::as_str),
             Some("include-etag")
         );
     }

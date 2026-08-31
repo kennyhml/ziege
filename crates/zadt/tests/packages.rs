@@ -93,7 +93,7 @@ async fn package_properties_advertise_all_supported_contracts() {
 
     assert_eq!(package.name, "SADT_TOOLS_CORE");
     assert_eq!(
-        response.etag.as_ref().map(zadt::EntityTag::as_str),
+        response.etag().map(zadt::EntityTag::as_str),
         Some("package-etag")
     );
     assert_eq!(
@@ -225,7 +225,7 @@ async fn package_properties_update_returns_a_new_snapshot_for_an_empty_response(
         result.properties().description,
         "Updated package description"
     );
-    assert!(result.etag.is_none());
+    assert!(result.etag().is_none());
     logon.assert_async().await;
     discovery.assert_async().await;
     csrf.assert_async().await;

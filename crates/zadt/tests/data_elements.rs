@@ -93,7 +93,7 @@ async fn data_element_properties_use_one_read_write_representation() {
 
     assert_eq!(response.media_type(), DataElementProperties::MEDIA_TYPES[0]);
     assert_eq!(
-        response.etag.as_ref().map(|etag| etag.as_str()),
+        response.etag().map(|etag| etag.as_str()),
         Some("data-element-etag")
     );
     assert_eq!(
@@ -229,7 +229,7 @@ async fn erased_data_element_update_uses_the_json_consumer_boundary() {
 
     assert_eq!(result.media_type(), DATA_ELEMENT_MEDIA_TYPE);
     assert_eq!(
-        result.etag.as_ref().map(|etag| etag.as_str()),
+        result.etag().map(|etag| etag.as_str()),
         Some("data-element-etag-2")
     );
     assert_eq!(

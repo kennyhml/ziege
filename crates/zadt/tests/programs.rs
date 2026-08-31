@@ -176,7 +176,7 @@ async fn include_properties_query_converts_the_live_ztest_properties() {
     assert_eq!(include.package.name.as_deref(), Some("$TMP"));
     assert_eq!(include.links.len(), 7);
     assert_eq!(
-        response.etag.as_ref().map(EntityTag::as_str),
+        response.etag().map(EntityTag::as_str),
         Some("2026012416174900180")
     );
     assert_eq!(source.content, SOURCE);
@@ -294,7 +294,7 @@ async fn program_properties_query_converts_the_live_z_test_v3_properties() {
     assert_eq!(program.source_uri, "source/main");
     assert_eq!(program.links[0].href, "source/main/versions");
     assert_eq!(
-        response.etag.as_ref().map(EntityTag::as_str),
+        response.etag().map(EntityTag::as_str),
         Some("202607251959580008")
     );
     assert_eq!(source.content, SOURCE);

@@ -104,10 +104,7 @@ async fn domain_properties_preserve_the_nested_v2_contract() {
             .and_then(|values| values.value_table.name.as_deref()),
         Some("E070")
     );
-    assert_eq!(
-        object.etag.as_ref().map(EntityTag::as_str),
-        Some("domain-etag")
-    );
+    assert_eq!(object.etag().map(EntityTag::as_str), Some("domain-etag"));
 
     logon.assert_async().await;
     discovery.assert_async().await;

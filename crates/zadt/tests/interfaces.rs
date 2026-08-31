@@ -119,10 +119,7 @@ async fn interface_properties_advertise_source_and_structure() {
         structure.resource.uri.as_str(),
         "/sap/bc/adt/oo/interfaces/if_adt_uri_mapper/objectstructure"
     );
-    assert_eq!(
-        object.etag.as_ref().map(EntityTag::as_str),
-        Some("interface-etag")
-    );
+    assert_eq!(object.etag().map(EntityTag::as_str), Some("interface-etag"));
     assert_eq!(source_code.content, SOURCE);
 
     logon.assert_async().await;

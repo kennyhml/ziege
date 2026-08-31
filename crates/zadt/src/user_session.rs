@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use async_lock::Mutex;
-use http::{HeaderMap, HeaderValue, StatusCode, header};
+use http::{HeaderValue, StatusCode, header};
 use secrecy::{ExposeSecret, SecretString};
 use uuid::Uuid;
 
@@ -137,10 +137,9 @@ impl UserSessionState {
             .transpose()
     }
 
-    // Updates the session id based on the response. This may mean discarding the session
-    // if it has expired, or setting / renewing it.
-    pub(crate) fn update(&mut self, headers: &HeaderMap) {
-        for header in headers.get_all(header::SET_COOKIE) {
+    // Updates the session id and expiration state based on the response.
+    pub(crate) fn update(&mut self, response: &AdtResponse) {
+        for header in response.headers().get_all(header::SET_COOKIE) {
             let Some(cookie) = header
                 .to_str()
                 .ok()
@@ -168,6 +167,10 @@ impl UserSessionState {
                     .and_then(|lifetime| Instant::now().checked_add(lifetime));
             }
         }
+
+        if is_expired_response(response) {
+            self.expire();
+        }
     }
 
     pub(crate) fn expire(&mut self) {
@@ -177,16 +180,13 @@ impl UserSessionState {
     }
 
     pub(crate) fn expire_if_elapsed(&mut self) {
-        if self
-            .expires_at
-            .is_some_and(|expires_at| Instant::now() >= expires_at)
-        {
+        if self.expires_at.is_some_and(|at| Instant::now() >= at) {
             self.expire();
         }
     }
 }
 
-pub(crate) fn is_expired_response(response: &AdtResponse) -> bool {
+fn is_expired_response(response: &AdtResponse) -> bool {
     response.status() == StatusCode::BAD_REQUEST
         && (ICM_ERROR_HEADERS.iter().any(|name| {
             response
@@ -214,6 +214,7 @@ fn context_cookie_lifetime(cookie: &cookie::Cookie<'_>) -> Option<Duration> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use http::HeaderMap;
 
     #[test]
     fn user_session_context_expires_locally() {
@@ -223,7 +224,8 @@ mod tests {
             HeaderValue::from_static("sap-contextid=context-1; Max-Age=60; Path=/sap/bc/adt"),
         );
         let mut state = UserSessionState::default();
-        state.update(&headers);
+        let response = AdtResponse::new(StatusCode::OK, headers, Vec::new());
+        state.update(&response);
         state.expires_at = Some(Instant::now());
 
         assert!(state.cookie_header().unwrap().is_none());

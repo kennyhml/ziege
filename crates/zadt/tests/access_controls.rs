@@ -115,7 +115,7 @@ async fn access_control_properties_advertise_the_primary_source() {
     assert_eq!(object.media_type(), AccessControlProperties::MEDIA_TYPES[0]);
     assert_eq!(object.properties().source_uri, "source/main");
     assert_eq!(
-        object.etag.as_ref().map(EntityTag::as_str),
+        object.etag().map(EntityTag::as_str),
         Some("access-control-etag")
     );
     assert_eq!(source_code.content, SOURCE);

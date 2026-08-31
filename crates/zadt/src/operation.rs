@@ -6,7 +6,7 @@ use crate::{
     AdtRequest, AdtResponse, AdtUri, Client, ClientState, EncodeError, EntityTag, OperationError,
     Ready, ResolveError, ResponseError,
     compatibility::media_types_match,
-    user_session::{UserSession, UserSessionId, is_expired_response},
+    user_session::{UserSession, UserSessionId},
 };
 
 mod batch;
@@ -21,7 +21,6 @@ pub use encoded::{
     EncodedOperation, OperationTarget, Owned,
 };
 pub use revalidation::{IfNoneMatch, Revalidation};
-use target::resolve_advertised;
 pub(crate) use target::{CollectionTarget, TemplateTarget};
 
 mod private {
@@ -30,10 +29,9 @@ mod private {
 
 /// Identifies whether an ADT operation is [`Stateless`] or [`Stateful`].
 ///
-/// Stateless operations do not require a persistent ABAP user session. They may
-/// still use authentication and an HTTP security session.
+/// Stateless operations do not require a persistent user session. Stateful
+/// operations execute within a [`UserSession`] retained across requests.
 ///
-/// Stateful operations execute within a [`UserSession`] retained across requests.
 /// For example, updating a program requires a lock acquired and used within the
 /// same user session. The session keeps the lock alive until it is released,
 /// closed, or expires.
@@ -58,9 +56,7 @@ impl OperationKind for Stateful {}
 /// and `PUT`, resource URIs, headers, and representation bodies.
 ///
 /// [`EncodedOperation`] represents those semantics before an owned or advertised
-/// target is resolved into an [`AdtRequest`]. An HTTP transport sends the resolved
-/// request as HTTP, while an RFC transport can map the same fields into SAP's
-/// `SADT_REST_REQUEST` structure. It does not tunnel a serialized raw HTTP message.
+/// target is resolved into an [`AdtRequest`].
 ///
 /// The operation's [`OperationKind`] and [`Operation::Target`] determine which
 /// [`Execute`] can run it.
@@ -104,6 +100,10 @@ pub trait Operation: Send + Sync {
 /// discovery, i.e. that is not [`Owned`], can only be executed by objects
 /// that implement [`Resolve<Advertised>`], which only [`Client<Ready>`] does.
 pub trait Resolve<T: OperationTarget> {
+    /// Resolves the encoded operation. While the request body is already
+    /// ready for dispatch, the operation target may be a set of template
+    /// arguments to be resolved against an advertised template or the target
+    /// is simply an uri of an advertised object collection.
     fn resolve(&self, operation: EncodedOperation<T>) -> Result<ResolvedOperation, ResolveError>;
 }
 
@@ -178,16 +178,6 @@ impl ResolvedOperation {
         &self.request
     }
 
-    /// Returns the local context to retain while the request is in flight.
-    pub fn context(&self) -> &OperationContext {
-        &self.context
-    }
-
-    /// Returns the user-session identity to which this operation is bound, if any.
-    pub fn bound_user_session(&self) -> Option<UserSessionId> {
-        self.bound_user_session
-    }
-
     /// Separates the transport request, response context, and session binding.
     pub fn into_parts(self) -> (AdtRequest, OperationContext, Option<UserSessionId>) {
         (self.request, self.context, self.bound_user_session)
@@ -195,6 +185,13 @@ impl ResolvedOperation {
 }
 
 impl EncodedOperation<Owned> {
+    /// Because the operation target is owned (we directly supplied a URI,
+    /// the resolution is infallible.
+    ///
+    /// Having this helper method allows us to fully bypass any client
+    /// involvement in executing owned, stateless requests which makes
+    /// them usable at the transport level without entering a recursive
+    /// chain of calls into that same layer.
     pub(crate) fn resolve(self) -> ResolvedOperation {
         let (operation, bound_user_session) = self.into_parts();
         let EncodedTarget::Owned(target) = operation.target else {
@@ -260,16 +257,6 @@ impl OperationResponse {
         self.context.request_target()
     }
 
-    /// Returns the local context captured from the originating request.
-    pub fn context(&self) -> &OperationContext {
-        &self.context
-    }
-
-    /// Returns the raw transport response.
-    pub fn response(&self) -> &AdtResponse {
-        &self.response
-    }
-
     /// Returns the HTTP-like response status.
     pub fn status(&self) -> StatusCode {
         self.response.status()
@@ -280,7 +267,7 @@ impl OperationResponse {
         if self.status() == expected {
             Ok(())
         } else {
-            Err(ResponseError::unexpected_status(self.response()))
+            Err(ResponseError::unexpected_status(&self.response))
         }
     }
 
@@ -289,7 +276,7 @@ impl OperationResponse {
         if self.status().is_success() {
             Ok(())
         } else {
-            Err(ResponseError::unexpected_status(self.response()))
+            Err(ResponseError::unexpected_status(&self.response))
         }
     }
 
@@ -363,7 +350,7 @@ impl Resolve<Advertised> for Client<Ready> {
         let EncodedTarget::Advertised(target) = operation.target else {
             unreachable!("an advertised encoded operation must contain an advertised target");
         };
-        let resolved = resolve_advertised(self, target)?;
+        let resolved = target.resolve(self)?;
         let mut query = resolved.query;
         query.extend(operation.query);
         let mut headers = operation.headers;
@@ -400,8 +387,7 @@ where
     }
 }
 
-// Execution within a retained user session. Stateless operations can opt into
-// the session when they need affinity with an existing stateful workflow.
+// Execution of a stateful request
 impl<S, O> Execute<O> for UserSession<S>
 where
     S: ClientState,
@@ -419,6 +405,10 @@ impl<S> Client<S>
 where
     S: ClientState,
 {
+    /// Passes the fully resolved request onto the transport dispatcher for execution.
+    ///
+    /// Because this only handles stateless requests, the presence of a user session
+    /// is considered an error as it can cause unexpected behavior on the backend.
     pub(crate) async fn execute_resolved(
         &self,
         resolved: ResolvedOperation,
@@ -426,6 +416,7 @@ where
         if resolved.bound_user_session.is_some() {
             return Err(ResolveError::UserSessionMismatch.into());
         }
+
         let response = self.transport().send(resolved.request).await?;
         Ok(OperationResponse::with_context(response, resolved.context))
     }
@@ -435,27 +426,36 @@ impl<S> UserSession<S>
 where
     S: ClientState,
 {
+    /// Passes the fully resolved request onto the transport dispatcher for execution.
+    ///
+    /// Because this handles stateful requests, additonal precautions surrounding
+    /// the related user sessions must be taken, such as checking for session
+    /// expiry, mismatched session ids and expiration responses.
     pub(crate) async fn execute_resolved(
         &self,
         mut resolved: ResolvedOperation,
     ) -> Result<OperationResponse, OperationError> {
+        if resolved.bound_user_session.is_some_and(|s| s != self.id()) {
+            return Err(ResolveError::UserSessionMismatch.into());
+        }
+
         let target = resolved.context.request_target().clone();
         let mut session = self.state().lock().await;
+
+        // We might be able to infer expiration based on what the server told us
+        // about the max session timeout
         session.expire_if_elapsed();
         if session.is_expired() {
             return Err(ResponseError::UserSessionExpired { target }.into());
         }
-        if resolved
-            .bound_user_session
-            .is_some_and(|bound| bound != self.id())
-        {
-            return Err(ResolveError::UserSessionMismatch.into());
-        }
+
+        // Mount the user session context on the request and update it based
+        // on the response. This may expire the user session after the call.
         session.decorate(&mut resolved.request)?;
         let response = self.client().transport().send(resolved.request).await?;
-        session.update(response.headers());
-        if is_expired_response(&response) {
-            session.expire();
+        session.update(&response);
+
+        if session.is_expired() {
             return Err(ResponseError::UserSessionExpired { target }.into());
         }
         Ok(OperationResponse::with_context(response, resolved.context).in_user_session(self.id()))

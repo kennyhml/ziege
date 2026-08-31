@@ -114,7 +114,7 @@ async fn annotation_definition_properties_advertise_the_primary_source() {
     );
     assert_eq!(object.properties().source_uri, "./ui/source/main");
     assert_eq!(
-        object.etag.as_ref().map(EntityTag::as_str),
+        object.etag().map(EntityTag::as_str),
         Some("annotation-definition-etag")
     );
     assert_eq!(source_code.content, SOURCE);

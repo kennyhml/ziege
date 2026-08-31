@@ -20,7 +20,7 @@ pub(crate) type ErasedProperties = Arc<dyn Any + Send + Sync>;
 pub struct Object<T: ObjectType> {
     reference: ObjectRef<T>,
     media_type: String,
-    pub etag: Option<EntityTag>,
+    etag: Option<EntityTag>,
     properties: T::Properties,
 }
 
@@ -47,6 +47,11 @@ impl<T: ObjectType> Object<T> {
     /// Returns the media type of this representation.
     pub fn media_type(&self) -> &str {
         &self.media_type
+    }
+
+    /// Returns the entity tag associated with this representation.
+    pub fn etag(&self) -> Option<&EntityTag> {
+        self.etag.as_ref()
     }
 
     /// Returns the immutable properties in this loaded representation.
@@ -104,7 +109,7 @@ impl<T: ObjectType> ObjectIdentity for Object<T> {
 pub struct ErasedObject {
     reference: ObjectRef<()>,
     media_type: String,
-    pub etag: Option<EntityTag>,
+    etag: Option<EntityTag>,
     properties: ErasedProperties,
 }
 
@@ -131,6 +136,11 @@ impl ErasedObject {
     /// Returns the media type of this representation.
     pub fn media_type(&self) -> &str {
         &self.media_type
+    }
+
+    /// Returns the entity tag associated with this representation.
+    pub fn etag(&self) -> Option<&EntityTag> {
+        self.etag.as_ref()
     }
 
     /// Exports the concrete properties through their runtime JSON representation.

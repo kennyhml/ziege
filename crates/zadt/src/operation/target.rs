@@ -79,123 +79,128 @@ pub(crate) struct ResolvedTarget {
     pub(crate) content_type: Option<&'static str>,
 }
 
-pub(crate) fn resolve_advertised(
-    client: &Client<Ready>,
-    target: AdvertisedTarget,
-) -> Result<ResolvedTarget, ResolveError> {
-    match target {
-        AdvertisedTarget::Collection(AdvertisedCollection {
-            document,
-            category,
-            suffix,
-            accepted_media_types,
-        }) => {
-            let collection = collection(client, document, category)?;
-            let content_type = if accepted_media_types.is_empty() {
-                None
-            } else {
-                Some(
-                    select_accepted_media_type(
-                        accepted_media_types,
-                        collection.accepted_media_types(),
-                    )
-                    .ok_or_else(|| {
-                        CompatibilityError::NoCompatibleMediaType {
-                            supported: accepted_media_types
-                                .iter()
-                                .map(|media_type| (*media_type).to_owned())
-                                .collect(),
-                            accepted: collection.accepted_media_types().to_vec(),
-                        }
-                    })?,
-                )
-            };
-            let mut target = collection.target().map_err(ObjectError::InvalidTarget)?;
-            if !suffix.is_empty() {
-                target = target
-                    .append_segments(suffix.iter().map(String::as_str))
-                    .map_err(ObjectError::InvalidTarget)?;
-            }
-            Ok(ResolvedTarget {
-                target,
-                query: Vec::new(),
-                content_type,
-            })
+impl AdvertisedTarget {
+    pub(crate) fn resolve(self, client: &Client<Ready>) -> Result<ResolvedTarget, ResolveError> {
+        match self {
+            AdvertisedTarget::Collection(target) => target.resolve(client),
+            AdvertisedTarget::Template(target) => target.resolve(client),
         }
-        AdvertisedTarget::Template(AdvertisedTemplate {
-            document,
-            category,
-            relation,
-            variables,
-            required_variables,
-            supported_variables,
-            required_query_parameters,
-        }) => {
-            let collection = collection(client, document, category)?;
-            let variables = variables
-                .into_iter()
-                .map(|(name, value)| (name, Value::String(value)))
-                .collect::<HashMap<_, _>>();
-            let matching_link = collection
+    }
+}
+
+impl AdvertisedCollection {
+    fn resolve(self, client: &Client<Ready>) -> Result<ResolvedTarget, ResolveError> {
+        let collection = collection(client, self.document, self.category)?;
+        let content_type = if self.accepted_media_types.is_empty() {
+            None
+        } else {
+            Some(
+                select_accepted_media_type(
+                    self.accepted_media_types,
+                    collection.accepted_media_types(),
+                )
+                .ok_or_else(|| CompatibilityError::NoCompatibleMediaType {
+                    supported: self
+                        .accepted_media_types
+                        .iter()
+                        .map(|media_type| (*media_type).to_owned())
+                        .collect(),
+                    accepted: collection.accepted_media_types().to_vec(),
+                })?,
+            )
+        };
+        let mut target = collection.target().map_err(ObjectError::InvalidTarget)?;
+        if !self.suffix.is_empty() {
+            target = target
+                .append_segments(self.suffix.iter().map(String::as_str))
+                .map_err(ObjectError::InvalidTarget)?;
+        }
+        Ok(ResolvedTarget {
+            target,
+            query: Vec::new(),
+            content_type,
+        })
+    }
+}
+
+impl AdvertisedTemplate {
+    fn resolve(self, client: &Client<Ready>) -> Result<ResolvedTarget, ResolveError> {
+        let collection = collection(client, self.document, self.category)?;
+        let variables = self
+            .variables
+            .into_iter()
+            .map(|(name, value)| (name, Value::String(value)))
+            .collect::<HashMap<_, _>>();
+        let matching_template = collection
+            .template_links()
+            .iter()
+            .filter(|link| link.relation() == self.relation)
+            .find_map(|link| {
+                let template = AdtUriTemplate::new(link.template());
+                if !self
+                    .required_variables
+                    .iter()
+                    .chain(self.supported_variables.iter())
+                    .all(|variable| template.has_variable(variable))
+                {
+                    return None;
+                }
+                let expanded = template.expand(&variables).ok()?;
+                self.required_query_parameters
+                    .iter()
+                    .all(|parameter| expanded.1.iter().any(|(name, _)| name == parameter))
+                    .then_some((template, expanded))
+            });
+        let (template, expanded) = if let Some((template, expanded)) = matching_template {
+            (template, Some(expanded))
+        } else {
+            let template = collection
                 .template_links()
                 .iter()
-                .filter(|link| link.relation() == relation)
-                .find(|link| {
-                    let template = AdtUriTemplate::new(link.template());
-                    required_variables
-                        .iter()
-                        .chain(supported_variables.iter())
-                        .all(|variable| template.has_variable(variable))
-                        && template.expand(&variables).is_ok_and(|(_, query)| {
-                            required_query_parameters
-                                .iter()
-                                .all(|parameter| query.iter().any(|(name, _)| name == parameter))
-                        })
-                });
-            let template = matching_link
-                .or_else(|| {
-                    collection
-                        .template_links()
-                        .iter()
-                        .find(|link| link.relation() == relation)
-                })
+                .find(|link| link.relation() == self.relation)
                 .map(|link| AdtUriTemplate::new(link.template()))
-                .ok_or(ObjectError::MissingTemplate { relation })?;
+                .ok_or(ObjectError::MissingTemplate {
+                    relation: self.relation,
+                })?;
+            (template, None)
+        };
 
-            for variable in required_variables {
-                if !template.has_variable(variable) {
-                    return Err(ObjectError::InvalidTemplate {
-                        template: template.as_str().to_owned(),
-                        reason: format!("missing `{variable}` variable"),
-                    }
-                    .into());
+        for variable in self.required_variables {
+            if !template.has_variable(variable) {
+                return Err(ObjectError::InvalidTemplate {
+                    template: template.as_str().to_owned(),
+                    reason: format!("missing `{variable}` variable"),
                 }
+                .into());
             }
-            for variable in supported_variables {
-                if !template.has_variable(variable) {
-                    return Err(ObjectError::UnsupportedTemplateParameter {
-                        parameter: variable,
-                    }
-                    .into());
-                }
-            }
-
-            let (target, query) = template.expand(&variables)?;
-            for parameter in required_query_parameters {
-                if !query.iter().any(|(name, _)| name == parameter) {
-                    return Err(ObjectError::InvalidTemplate {
-                        template: template.as_str().to_owned(),
-                        reason: format!("missing `{parameter}` query variable"),
-                    }
-                    .into());
-                }
-            }
-            Ok(ResolvedTarget {
-                target,
-                query,
-                content_type: None,
-            })
         }
+        for variable in self.supported_variables {
+            if !template.has_variable(variable) {
+                return Err(ObjectError::UnsupportedTemplateParameter {
+                    parameter: variable,
+                }
+                .into());
+            }
+        }
+
+        let (target, query) = match expanded {
+            Some(expanded) => expanded,
+            None => template.expand(&variables)?,
+        };
+        for parameter in self.required_query_parameters {
+            if !query.iter().any(|(name, _)| name == parameter) {
+                return Err(ObjectError::InvalidTemplate {
+                    template: template.as_str().to_owned(),
+                    reason: format!("missing `{parameter}` query variable"),
+                }
+                .into());
+            }
+        }
+        Ok(ResolvedTarget {
+            target,
+            query,
+            content_type: None,
+        })
     }
 }
 

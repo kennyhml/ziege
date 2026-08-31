@@ -221,8 +221,8 @@ where
 impl<T: ObjectType> Object<T> {
     /// Creates a conditional query using this representation's entity tag.
     pub fn revalidate(&self) -> Option<IfNoneMatch<ObjectPropertiesQuery<T>>> {
-        self.etag
-            .clone()
+        self.etag()
+            .cloned()
             .map(|etag| self.reference().query().if_none_match(etag))
     }
 
