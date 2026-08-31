@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Class, ClassProperties, Client, EntityTag, Logon, MediaTyped, ObjectSnapshot, ObjectVersion,
-    Operation, Ready, ReqwestTransport, Revalidation,
+    Class, ClassProperties, Client, EntityTag, Logon, MediaTyped, ObjectSnapshot, Operation, Ready,
+    ReqwestTransport, Revalidation, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -101,7 +101,7 @@ async fn repository_object_properties_forward_through_the_typed_query() {
     let properties = object
         .query()
         .unwrap()
-        .workbench_version(ObjectVersion::Active)
+        .workbench_version(WorkbenchVersion::Active)
         .execute(&client)
         .await
         .unwrap();
@@ -194,7 +194,7 @@ async fn class_properties_query_converts_the_live_v4_manifest() {
     let reference = client.object::<Class>("CL_ADT_URI_MAPPER").unwrap();
     let response = reference
         .query()
-        .workbench_version(ObjectVersion::Active)
+        .workbench_version(WorkbenchVersion::Active)
         .execute(&client)
         .await
         .unwrap();
@@ -220,7 +220,7 @@ async fn class_properties_query_converts_the_live_v4_manifest() {
     let source = source_ref.query().execute(&client).await.unwrap();
 
     assert_eq!(class.name, "CL_ADT_URI_MAPPER");
-    assert_eq!(class.version, ObjectVersion::Active);
+    assert_eq!(class.version, WorkbenchVersion::Active);
     assert_eq!(class.package.name.as_deref(), Some("SADT_TOOLS_CORE"));
     assert_eq!(class.sources.len(), 5);
     assert_eq!(
@@ -274,14 +274,14 @@ async fn class_properties_query_accepts_server_selected_v2_and_v3() {
     let reference = client.object::<Class>("CL_ADT_URI_MAPPER").unwrap();
     let response = reference
         .query()
-        .workbench_version(ObjectVersion::Active)
+        .workbench_version(WorkbenchVersion::Active)
         .execute(&client)
         .await
         .unwrap();
     assert_eq!(response.media_type(), ClassProperties::MEDIA_TYPES[2]);
     let response = reference
         .query()
-        .workbench_version(ObjectVersion::Inactive)
+        .workbench_version(WorkbenchVersion::Inactive)
         .execute(&client)
         .await
         .unwrap();
@@ -314,7 +314,7 @@ async fn class_properties_query_returns_not_modified_for_a_current_etag() {
     let reference = client.object::<Class>("CX_ROOT").unwrap();
     let response = reference
         .query()
-        .workbench_version(ObjectVersion::Active)
+        .workbench_version(WorkbenchVersion::Active)
         .if_none_match(EntityTag::from_static("20180326130103001000061"))
         .execute(&client)
         .await

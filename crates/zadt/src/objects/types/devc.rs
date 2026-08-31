@@ -3,7 +3,7 @@ use zadt_macros::object_type;
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTyped, ObjectVersion, ToXml,
+    MediaTyped, ToXml, WorkbenchVersion,
 };
 
 #[object_type(
@@ -30,7 +30,7 @@ pub struct PackageProperties {
     pub last_changed: String,
     /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: ObjectVersion,
+    pub version: WorkbenchVersion,
     /// The timestamp at which the package was created.
     #[serde(rename = "@adtcore:createdAt")]
     pub created_at: String,
@@ -225,7 +225,7 @@ mod property_tests {
 
         assert_eq!(properties.name, "SADT_TOOLS_CORE");
         assert_eq!(properties.object_type, Package::WORKBENCH_TYPE);
-        assert_eq!(properties.version, ObjectVersion::Active);
+        assert_eq!(properties.version, WorkbenchVersion::Active);
         assert_eq!(properties.attributes.language_version.as_str(), "");
         assert_eq!(properties.links.len(), 1);
         assert_eq!(properties.links[0].href, "versions");
@@ -278,7 +278,7 @@ mod property_tests {
             .replacen("adtcore:type=\"PINF/KI\"", "adtcore:type=\"FUTURE/I\"", 1);
         let properties: PackageProperties = serde_xml_rs::from_str(&xml).unwrap();
 
-        assert_eq!(properties.version, ObjectVersion::Active);
+        assert_eq!(properties.version, WorkbenchVersion::Active);
         assert_eq!(
             properties.super_package.unwrap().uri.as_deref(),
             Some("https://example.test/package")

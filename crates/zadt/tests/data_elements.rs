@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    AccessMode, Client, DataElement, DataElementProperties, Logon, MediaTyped, ObjectVersion,
-    Operation, Ready, ReqwestTransport,
+    AccessMode, Client, DataElement, DataElementProperties, Logon, MediaTyped, Operation, Ready,
+    ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -86,7 +86,7 @@ async fn data_element_properties_use_one_read_write_representation() {
     let reference = client.object::<DataElement>("ZTFRWTFRT").unwrap();
     let response = reference
         .query()
-        .workbench_version(ObjectVersion::WorkingArea)
+        .workbench_version(WorkbenchVersion::WorkingArea)
         .execute(&client)
         .await
         .unwrap();

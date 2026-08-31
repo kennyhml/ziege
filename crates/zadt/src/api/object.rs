@@ -6,7 +6,7 @@ use crate::{
     error::{EncodeError, ResponseError},
     objects::{
         AssignObjectIdentity, Create, ErasedProperties, MediaTyped, ObjectIdentity, ObjectRef,
-        ObjectType, ObjectVersion, ToXml, XmlConversion,
+        ObjectType, ToXml, WorkbenchVersion, XmlConversion,
     },
     operation::{
         CollectionLocator, EncodedOperation, IfNoneMatch, Operation, OperationResponse, Owned,
@@ -156,21 +156,21 @@ impl ObjectRef<()> {
 #[derive(Debug)]
 pub struct ObjectPropertiesQuery<T> {
     pub resource: ObjectRef<T>,
-    pub workbench_version: Option<ObjectVersion>,
+    pub workbench_version: Option<WorkbenchVersion>,
 }
 
 impl<T> ObjectPropertiesQuery<T> {
     fn build_request(&self, media_types: &'static [&'static str]) -> EncodedOperation<Owned> {
         let mut request = EncodedOperation::owned(Method::GET, self.resource.uri().clone());
         if let Some(version) = self.workbench_version {
-            request.push_query(ObjectVersion::QUERY_PARAMETER, version.as_str());
+            request.push_query(WorkbenchVersion::QUERY_PARAMETER, version.as_str());
         }
         request.set_accepts(media_types);
         request.set_cache_revalidation(None);
         request
     }
 
-    pub fn workbench_version(mut self, version: ObjectVersion) -> Self {
+    pub fn workbench_version(mut self, version: WorkbenchVersion) -> Self {
         self.workbench_version = Some(version);
         self
     }

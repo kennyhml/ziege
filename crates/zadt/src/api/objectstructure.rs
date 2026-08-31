@@ -3,8 +3,8 @@ use serde::Deserialize;
 
 use crate::{
     AdtUri, AdvertisedLink, EncodeError, EncodedOperation, ErasedObject, Links, ObjectError,
-    ObjectSnapshot, ObjectStructureRef, ObjectVersion, Operation, OperationResponse, Owned,
-    Relations, ResponseError, Stateless, Structure, resource::resolve_href,
+    ObjectSnapshot, ObjectStructureRef, Operation, OperationResponse, Owned, Relations,
+    ResponseError, Stateless, Structure, WorkbenchVersion, resource::resolve_href,
 };
 
 const INHERITED_MEMBERS_QUERY: &str = "inheritedMembers";
@@ -28,7 +28,7 @@ pub struct ObjectStructureQuery {
     /// The advertised resource
     pub resource: ObjectStructureRef,
     /// The version of the object (active, inactive..)
-    workbench_version: Option<ObjectVersion>,
+    workbench_version: Option<WorkbenchVersion>,
     /// Whether class parents or implemented interfaces should be expanded
     inherited_members: Option<bool>,
     /// Whether short descriptions should be included in the response.
@@ -47,7 +47,7 @@ impl ObjectStructureQuery {
 
     /// Selects the object version used to generate the structure.
     #[must_use]
-    pub fn workbench_version(mut self, version: ObjectVersion) -> Self {
+    pub fn workbench_version(mut self, version: WorkbenchVersion) -> Self {
         self.workbench_version = Some(version);
         self
     }
@@ -75,7 +75,7 @@ impl Operation for ObjectStructureQuery {
     fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
         let mut request = EncodedOperation::owned(Method::GET, self.resource.uri.clone());
         for (name, value) in &self.resource.query {
-            if self.workbench_version.is_some() && name == ObjectVersion::QUERY_PARAMETER {
+            if self.workbench_version.is_some() && name == WorkbenchVersion::QUERY_PARAMETER {
                 continue;
             }
             if self.inherited_members.is_some() && name == INHERITED_MEMBERS_QUERY {
@@ -87,7 +87,7 @@ impl Operation for ObjectStructureQuery {
             request.push_query(name, value);
         }
         if let Some(version) = self.workbench_version {
-            request.push_query(ObjectVersion::QUERY_PARAMETER, version.as_str());
+            request.push_query(WorkbenchVersion::QUERY_PARAMETER, version.as_str());
         }
         if self.with_short_descriptions == Some(true) {
             request.push_query(WITH_SHORT_DESCRIPTIONS_QUERY, "true");
@@ -375,7 +375,7 @@ mod tests {
     fn query_uses_v2_and_overrides_advertised_options() {
         let mut structure = structure_reference();
         structure.query.push((
-            ObjectVersion::QUERY_PARAMETER.to_owned(),
+            WorkbenchVersion::QUERY_PARAMETER.to_owned(),
             "active".to_owned(),
         ));
         structure
@@ -383,7 +383,7 @@ mod tests {
             .push((INHERITED_MEMBERS_QUERY.to_owned(), "legacy".to_owned()));
         let query = structure
             .query()
-            .workbench_version(ObjectVersion::Inactive)
+            .workbench_version(WorkbenchVersion::Inactive)
             .inherited_members(true);
 
         let request = query.encode().unwrap();

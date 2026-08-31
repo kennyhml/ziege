@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    AccessMode, Client, EntityTag, Include, IncludeProperties, Logon, MediaTyped, ObjectVersion,
-    Operation, Program, ProgramProperties, Ready, ReqwestTransport, Revalidation,
+    AccessMode, Client, EntityTag, Include, IncludeProperties, Logon, MediaTyped, Operation,
+    Program, ProgramProperties, Ready, ReqwestTransport, Revalidation, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -155,7 +155,7 @@ async fn include_properties_query_converts_the_live_ztest_properties() {
     let reference = client.object::<Include>("ZTEST").unwrap();
     let response = reference
         .query()
-        .workbench_version(ObjectVersion::Active)
+        .workbench_version(WorkbenchVersion::Active)
         .execute(&client)
         .await
         .unwrap();
@@ -171,7 +171,7 @@ async fn include_properties_query_converts_the_live_ztest_properties() {
 
     assert_eq!(include.name, "ZTEST");
     assert_eq!(include.object_type.to_string(), "PROG/I");
-    assert_eq!(include.version, ObjectVersion::Active);
+    assert_eq!(include.version, WorkbenchVersion::Active);
     assert_eq!(include.context_ref_count, 0);
     assert_eq!(include.package.name.as_deref(), Some("$TMP"));
     assert_eq!(include.links.len(), 7);
@@ -248,7 +248,7 @@ async fn program_properties_query_converts_the_live_z_test_v3_properties() {
 
     assert_eq!(program.name, "Z_TEST");
     assert_eq!(program.object_type.to_string(), "PROG/P");
-    assert_eq!(program.version, ObjectVersion::Inactive);
+    assert_eq!(program.version, WorkbenchVersion::Inactive);
     assert_eq!(program.program_type, "executableProgram");
     assert!(program.fix_point_arithmetic);
     assert!(program.unicode_check_active);
@@ -344,7 +344,7 @@ async fn program_properties_query_accepts_server_selected_v2() {
         .object::<Program>("Z_TEST")
         .unwrap()
         .query()
-        .workbench_version(ObjectVersion::WorkingArea)
+        .workbench_version(WorkbenchVersion::WorkingArea)
         .execute(&client)
         .await
         .unwrap();
@@ -352,7 +352,7 @@ async fn program_properties_query_accepts_server_selected_v2() {
     let program = response.properties();
 
     assert_eq!(program.name, "Z_TEST");
-    assert_eq!(program.version, ObjectVersion::Inactive);
+    assert_eq!(program.version, WorkbenchVersion::Inactive);
     assert_eq!(program.source_uri, "source/main");
     logon.assert_async().await;
     discovery.assert_async().await;
@@ -393,7 +393,7 @@ async fn program_properties_query_returns_not_modified_for_a_current_etag() {
         .object::<Program>("Z_TEST")
         .unwrap()
         .query()
-        .workbench_version(ObjectVersion::Inactive)
+        .workbench_version(WorkbenchVersion::Inactive)
         .if_none_match(EntityTag::from_static("202607251959580008"))
         .execute(&client)
         .await

@@ -3,7 +3,7 @@ use zadt_macros::object_type;
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTyped, ObjectVersion, ToXml,
+    MediaTyped, ToXml, WorkbenchVersion,
 };
 
 #[object_type(
@@ -49,7 +49,7 @@ pub struct DataElementProperties {
 
     /// The object version, when advertised.
     #[serde(rename = "@adtcore:version")]
-    pub version: Option<ObjectVersion>,
+    pub version: Option<WorkbenchVersion>,
 
     /// The timestamp at which the object was created.
     #[serde(rename = "@adtcore:createdAt")]
@@ -205,7 +205,7 @@ mod tests {
     fn parses_live_data_element_properties_as_one_representation() {
         let properties = properties();
 
-        assert_eq!(properties.version, Some(ObjectVersion::New));
+        assert_eq!(properties.version, Some(WorkbenchVersion::New));
         assert_eq!(
             properties
                 .abap_language_version

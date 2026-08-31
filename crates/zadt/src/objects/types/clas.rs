@@ -1,6 +1,6 @@
 use super::super::{
     AbapLanguageVersion, AdvertisedObjectReference, GlobalWorkbenchType, MediaTyped, ObjectRef,
-    ObjectType, ObjectVersion, Source, SourceComponents, ToXml,
+    ObjectType, Source, SourceComponents, ToXml, WorkbenchVersion,
 };
 use crate::resource::AdvertisedLink;
 use serde::{Deserialize, Serialize};
@@ -63,7 +63,7 @@ pub struct ClassProperties {
     pub last_changed: String,
     /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: ObjectVersion,
+    pub version: WorkbenchVersion,
     /// The timestamp at which the class was created.
     #[serde(rename = "@adtcore:createdAt")]
     pub created_at: String,
@@ -388,7 +388,7 @@ pub struct ClassSourceProperties {
     pub last_changed: String,
     /// The source version.
     #[serde(rename = "@adtcore:version")]
-    pub version: ObjectVersion,
+    pub version: WorkbenchVersion,
     /// The timestamp at which this source was created.
     #[serde(rename = "@adtcore:createdAt")]
     pub created_at: String,
@@ -416,7 +416,7 @@ impl ClassSourceProperties {
             name: name.into(),
             object_type,
             last_changed: String::new(),
-            version: ObjectVersion::New,
+            version: WorkbenchVersion::New,
             created_at: String::new(),
             changed_by: String::new(),
             created_by: String::new(),
@@ -628,7 +628,7 @@ mod tests {
 
         assert_eq!(class.name, "CL_ADT_URI_MAPPER");
         assert_eq!(class.object_type, Class::WORKBENCH_TYPE);
-        assert_eq!(class.version, ObjectVersion::Active);
+        assert_eq!(class.version, WorkbenchVersion::Active);
         assert_eq!(
             class.abap_language_version,
             Some(AbapLanguageVersion::StandardX)
@@ -654,7 +654,7 @@ mod tests {
             .find(|source| source.include_type == "main")
             .unwrap();
         assert_eq!(main.source_uri, "source/main");
-        assert_eq!(main.version, ObjectVersion::Active);
+        assert_eq!(main.version, WorkbenchVersion::Active);
         assert_eq!(main.links.len(), 4);
         assert_eq!(main.links[0].href, "includes/main/versions");
     }
@@ -815,7 +815,7 @@ mod tests {
         let class = parse(&wire_values).unwrap();
         assert_eq!(class.object_type.as_str(), "PROG/P");
         assert_eq!(class.name, "OTHER_CLASS");
-        assert_eq!(class.version, ObjectVersion::Active);
+        assert_eq!(class.version, WorkbenchVersion::Active);
         assert_eq!(
             class.package.object_type.as_ref().unwrap().as_str(),
             "FUTURE/PACKAGE"

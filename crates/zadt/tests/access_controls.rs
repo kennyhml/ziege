@@ -4,7 +4,7 @@ use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
     AccessControl, AccessControlCreateProperties, AccessControlProperties, Client, EntityTag,
-    Logon, MediaTyped, ObjectVersion, Operation, Ready, ReqwestTransport,
+    Logon, MediaTyped, Operation, Ready, ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -100,7 +100,7 @@ async fn access_control_properties_advertise_the_primary_source() {
         .unwrap();
     let object = reference
         .query()
-        .workbench_version(ObjectVersion::Active)
+        .workbench_version(WorkbenchVersion::Active)
         .execute(&client)
         .await
         .unwrap();

@@ -4,7 +4,7 @@ use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
     Client, Domain, DomainCreateProperties, DomainProperties, EntityTag, Logon, MediaTyped,
-    ObjectVersion, Operation, Ready, ReqwestTransport,
+    Operation, Ready, ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -85,7 +85,7 @@ async fn domain_properties_preserve_the_nested_v2_contract() {
     let reference = client.object::<Domain>("TRKORR").unwrap();
     let object = reference
         .query()
-        .workbench_version(ObjectVersion::Active)
+        .workbench_version(WorkbenchVersion::Active)
         .execute(&client)
         .await
         .unwrap();

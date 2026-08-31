@@ -99,7 +99,7 @@ impl TryFrom<String> for GlobalWorkbenchType {
 /// - `IF_ADT_URI_QUERY_PARAMETERS` defines `CO_VERSION` and its external values
 /// - `CL_ADT_UTILITY->GET_WB_VERSION` maps it to Workbench `R3STATE` values
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum ObjectVersion {
+pub enum WorkbenchVersion {
     /// The persistent active object (R3STATE `A`).
     Active,
 
@@ -116,7 +116,7 @@ pub enum ObjectVersion {
     PartlyActive,
 }
 
-impl ObjectVersion {
+impl WorkbenchVersion {
     pub(crate) const QUERY_PARAMETER: &'static str = "version";
 
     /// Returns the exact value used by ADT URI query parameters.
@@ -142,13 +142,13 @@ impl ObjectVersion {
     }
 }
 
-impl fmt::Display for ObjectVersion {
+impl fmt::Display for WorkbenchVersion {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.as_str())
     }
 }
 
-impl Serialize for ObjectVersion {
+impl Serialize for WorkbenchVersion {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -157,7 +157,7 @@ impl Serialize for ObjectVersion {
     }
 }
 
-impl<'de> Deserialize<'de> for ObjectVersion {
+impl<'de> Deserialize<'de> for WorkbenchVersion {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -292,20 +292,20 @@ mod tests {
     #[test]
     fn uses_the_adt_query_parameter_vocabulary() {
         for (version, value) in [
-            (ObjectVersion::Active, "active"),
-            (ObjectVersion::Inactive, "inactive"),
-            (ObjectVersion::WorkingArea, "workingArea"),
-            (ObjectVersion::New, "new"),
-            (ObjectVersion::PartlyActive, "partlyActive"),
+            (WorkbenchVersion::Active, "active"),
+            (WorkbenchVersion::Inactive, "inactive"),
+            (WorkbenchVersion::WorkingArea, "workingArea"),
+            (WorkbenchVersion::New, "new"),
+            (WorkbenchVersion::PartlyActive, "partlyActive"),
         ] {
             assert_eq!(version.as_str(), value);
-            assert_eq!(ObjectVersion::parse(value), Some(version));
+            assert_eq!(WorkbenchVersion::parse(value), Some(version));
             assert_eq!(
-                serde_json::from_value::<ObjectVersion>(value.into()).unwrap(),
+                serde_json::from_value::<WorkbenchVersion>(value.into()).unwrap(),
                 version
             );
         }
-        assert!(serde_json::from_str::<ObjectVersion>("\"future\"").is_err());
+        assert!(serde_json::from_str::<WorkbenchVersion>("\"future\"").is_err());
     }
 
     #[test]

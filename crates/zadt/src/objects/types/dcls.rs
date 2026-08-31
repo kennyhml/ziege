@@ -3,7 +3,7 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTyped, ObjectVersion, ToXml,
+    MediaTyped, ToXml, WorkbenchVersion,
 };
 
 #[object_type(
@@ -81,7 +81,7 @@ pub struct AccessControlProperties {
 
     /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: ObjectVersion,
+    pub version: WorkbenchVersion,
 
     /// The timestamp at which the object was created.
     #[serde(rename = "@adtcore:createdAt")]
@@ -177,7 +177,7 @@ mod tests {
 
         assert_eq!(properties.name, "SDSH_CDS_DOMAIN_VAL_DCL");
         assert_eq!(properties.object_type, AccessControl::WORKBENCH_TYPE);
-        assert_eq!(properties.version, ObjectVersion::Active);
+        assert_eq!(properties.version, WorkbenchVersion::Active);
         assert_eq!(properties.source_uri, "source/main");
         assert_eq!(properties.package.name.as_deref(), Some("SDSH"));
         assert_eq!(properties.links.len(), 4);

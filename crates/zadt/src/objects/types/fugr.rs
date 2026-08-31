@@ -3,7 +3,7 @@ use zadt_macros::object_type;
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTyped, ObjectVersion, SyntaxConfiguration, ToXml,
+    MediaTyped, SyntaxConfiguration, ToXml, WorkbenchVersion,
 };
 
 #[object_type(
@@ -73,7 +73,7 @@ pub struct FunctionGroupProperties {
     #[serde(rename = "@adtcore:changedAt")]
     pub last_changed: String,
     #[serde(rename = "@adtcore:version")]
-    pub version: ObjectVersion,
+    pub version: WorkbenchVersion,
     #[serde(rename = "@adtcore:createdAt")]
     pub created_at: String,
     #[serde(rename = "@adtcore:changedBy")]
@@ -127,7 +127,7 @@ pub struct FunctionModuleProperties {
     #[serde(rename = "@adtcore:changedAt")]
     pub last_changed: String,
     #[serde(rename = "@adtcore:version")]
-    pub version: ObjectVersion,
+    pub version: WorkbenchVersion,
     #[serde(rename = "@adtcore:createdAt")]
     pub created_at: String,
     #[serde(rename = "@adtcore:changedBy")]
@@ -171,7 +171,7 @@ pub struct FunctionGroupIncludeProperties {
     #[serde(rename = "@adtcore:changedAt")]
     pub last_changed: String,
     #[serde(rename = "@adtcore:version")]
-    pub version: ObjectVersion,
+    pub version: WorkbenchVersion,
     #[serde(rename = "@adtcore:createdAt")]
     pub created_at: String,
     #[serde(rename = "@adtcore:changedBy")]

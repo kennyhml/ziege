@@ -3,7 +3,7 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTyped, ObjectVersion, ToXml,
+    MediaTyped, ToXml, WorkbenchVersion,
 };
 
 #[object_type(
@@ -66,7 +66,7 @@ pub struct DomainProperties {
 
     /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: ObjectVersion,
+    pub version: WorkbenchVersion,
 
     /// The timestamp at which the object was created, when advertised.
     #[serde(rename = "@adtcore:createdAt")]
@@ -276,7 +276,7 @@ mod tests {
 
         assert_eq!(properties.name, "TRKORR");
         assert_eq!(properties.object_type, Domain::WORKBENCH_TYPE);
-        assert_eq!(properties.version, ObjectVersion::Active);
+        assert_eq!(properties.version, WorkbenchVersion::Active);
         assert_eq!(properties.created_at, None);
         assert_eq!(properties.content.type_information.datatype, "CHAR");
         assert_eq!(properties.content.type_information.length, "000020");

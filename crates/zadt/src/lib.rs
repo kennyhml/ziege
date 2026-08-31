@@ -89,12 +89,12 @@ pub use objects::{
     MediaTyped, MetadataExtension, MetadataExtensionCreateProperties,
     MetadataExtensionCreatePropertiesBuilder, MetadataExtensionCreatePropertiesBuilderError,
     MetadataExtensionProperties, ObjectIdentity, ObjectRef, ObjectReferences, ObjectSnapshot,
-    ObjectType, ObjectVersion, Package, PackageAssignment, PackageAttributes, PackageProperties,
-    PackageTransport, PackageUseAccess, PrimaryObjectType, Program, ProgramProperties,
-    ServiceDefinition, ServiceDefinitionCreateProperties, ServiceDefinitionCreatePropertiesBuilder,
+    ObjectType, Package, PackageAssignment, PackageAttributes, PackageProperties, PackageTransport,
+    PackageUseAccess, PrimaryObjectType, Program, ProgramProperties, ServiceDefinition,
+    ServiceDefinitionCreateProperties, ServiceDefinitionCreatePropertiesBuilder,
     ServiceDefinitionCreatePropertiesBuilderError, ServiceDefinitionProperties, Source,
     SourceComponents, Structure, SubObjects, SyntaxConfiguration, SyntaxLanguage, ToXml,
-    XmlConversion,
+    WorkbenchVersion, XmlConversion,
 };
 pub use operation::{
     Advertised, AdvertisedCollection, AdvertisedTarget, AdvertisedTemplate, BatchError, BatchKey,

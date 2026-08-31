@@ -4,7 +4,7 @@ use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
     Client, EntityTag, Logon, MediaTyped, MetadataExtension, MetadataExtensionCreateProperties,
-    MetadataExtensionProperties, ObjectVersion, Operation, Ready, ReqwestTransport,
+    MetadataExtensionProperties, Operation, Ready, ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -99,7 +99,7 @@ async fn metadata_extension_properties_advertise_the_primary_source() {
         .unwrap();
     let object = reference
         .query()
-        .workbench_version(ObjectVersion::Active)
+        .workbench_version(WorkbenchVersion::Active)
         .execute(&client)
         .await
         .unwrap();

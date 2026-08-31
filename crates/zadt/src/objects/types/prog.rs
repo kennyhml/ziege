@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use zadt_macros::object_type;
 
 use super::super::{
-    AbapLanguageVersion, GlobalWorkbenchType, MediaTyped, ObjectRef, ObjectVersion, ToXml,
+    AbapLanguageVersion, GlobalWorkbenchType, MediaTyped, ObjectRef, ToXml, WorkbenchVersion,
 };
 use crate::{AdvertisedLink, AdvertisedObjectReference};
 
@@ -88,7 +88,7 @@ pub struct ProgramProperties {
 
     /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: ObjectVersion,
+    pub version: WorkbenchVersion,
 
     /// The timestamp at which the program was created.
     #[serde(rename = "@adtcore:createdAt")]
@@ -193,7 +193,7 @@ pub struct IncludeProperties {
 
     /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: ObjectVersion,
+    pub version: WorkbenchVersion,
 
     /// The timestamp at which the include was created.
     #[serde(rename = "@adtcore:createdAt")]
@@ -291,7 +291,7 @@ mod tests {
         let program = parse_program(PROGRAM_XML).unwrap();
 
         assert_eq!(program.name, "Z_TEST");
-        assert_eq!(program.version, ObjectVersion::Inactive);
+        assert_eq!(program.version, WorkbenchVersion::Inactive);
         assert_eq!(
             program.abap_language_version,
             AbapLanguageVersion::StandardX
@@ -313,7 +313,7 @@ mod tests {
         let include = parse_include(INCLUDE_XML).unwrap();
 
         assert_eq!(include.name, "ZTEST");
-        assert_eq!(include.version, ObjectVersion::Active);
+        assert_eq!(include.version, WorkbenchVersion::Active);
         assert_eq!(include.source_uri, "source/main");
         assert_eq!(include.context_ref_count, 0);
         assert!(include.context_ref.is_none());
@@ -444,7 +444,7 @@ mod tests {
             .replace("source/main/versions", invalid_href);
         let program = parse_program(&body).unwrap();
 
-        assert_eq!(program.version, ObjectVersion::Inactive);
+        assert_eq!(program.version, WorkbenchVersion::Inactive);
         assert_eq!(
             program.package.object_type.unwrap().as_str(),
             "FUTURE/PACKAGE"

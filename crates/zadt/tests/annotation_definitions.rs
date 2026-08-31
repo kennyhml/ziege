@@ -4,7 +4,7 @@ use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
     AnnotationDefinition, AnnotationDefinitionCreateProperties, AnnotationDefinitionProperties,
-    Client, EntityTag, Logon, MediaTyped, ObjectVersion, Operation, Ready, ReqwestTransport,
+    Client, EntityTag, Logon, MediaTyped, Operation, Ready, ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -96,7 +96,7 @@ async fn annotation_definition_properties_advertise_the_primary_source() {
     let reference = client.object::<AnnotationDefinition>("UI").unwrap();
     let object = reference
         .query()
-        .workbench_version(ObjectVersion::Active)
+        .workbench_version(WorkbenchVersion::Active)
         .execute(&client)
         .await
         .unwrap();

@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize, Serializer};
 
 use crate::{
     AdtUri, Advertised, AdvertisedLink, CategoryId, Client, EncodeError, EncodedOperation,
-    ObjectError, ObjectRef, ObjectVersion, Operation, OperationResponse, Ready, ResponseError,
-    Stateless, operation::CollectionLocator,
+    ObjectError, ObjectRef, Operation, OperationResponse, Ready, ResponseError, Stateless,
+    WorkbenchVersion, operation::CollectionLocator,
 };
 
 const CHECK_RUN_CATEGORY: CategoryId = CategoryId {
@@ -220,7 +220,7 @@ pub struct CheckRunObject {
     uri: AdtUri,
 
     #[serde(rename = "@chkrun:version")]
-    version: ObjectVersion,
+    version: WorkbenchVersion,
 
     #[serde(
         rename = "chkrun:artifacts",
@@ -230,7 +230,7 @@ pub struct CheckRunObject {
 }
 
 impl CheckRunObject {
-    pub fn new<T>(object: &ObjectRef<T>, version: ObjectVersion) -> Self {
+    pub fn new<T>(object: &ObjectRef<T>, version: WorkbenchVersion) -> Self {
         Self {
             uri: object.uri().clone(),
             version,
@@ -413,9 +413,9 @@ mod tests {
         );
         let source_uri = AdtUri::parse("/sap/bc/adt/programs/programs/z_test/source/main").unwrap();
         let mut run = ObjectCheckRun::new();
-        run.push_object(CheckRunObject::new(&object, ObjectVersion::Active))
+        run.push_object(CheckRunObject::new(&object, WorkbenchVersion::Active))
             .push_object(
-                CheckRunObject::new(&object, ObjectVersion::WorkingArea).artifact(
+                CheckRunObject::new(&object, WorkbenchVersion::WorkingArea).artifact(
                     CheckRunArtifact::new(source_uri, "text/plain; charset=utf-8", b"hello"),
                 ),
             )
@@ -438,7 +438,7 @@ mod tests {
             AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
         );
         let mut run = ObjectCheckRun::new();
-        run.push_object(CheckRunObject::new(&object, ObjectVersion::Active))
+        run.push_object(CheckRunObject::new(&object, WorkbenchVersion::Active))
             .push_reporter(CheckRunReporter::SYNTAX_CHECK_RUNNER);
 
         let request = run.encode().unwrap();

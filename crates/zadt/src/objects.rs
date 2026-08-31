@@ -18,7 +18,7 @@ pub use object::{ErasedObject, ObjectSnapshot};
 pub use reference::{AdvertisedObjectReference, ObjectRef, ObjectReferences};
 pub use types::*;
 pub use workbench::{
-    AbapLanguageVersion, GlobalWorkbenchType, InvalidWorkbenchType, ObjectVersion,
+    AbapLanguageVersion, GlobalWorkbenchType, InvalidWorkbenchType, WorkbenchVersion,
 };
 
 /// Statically identified ADT object type.

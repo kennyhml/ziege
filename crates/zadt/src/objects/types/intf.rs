@@ -3,7 +3,7 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTyped, ObjectVersion, Source, SyntaxConfiguration, ToXml,
+    MediaTyped, Source, SyntaxConfiguration, ToXml, WorkbenchVersion,
 };
 
 #[object_type(
@@ -86,7 +86,7 @@ pub struct InterfaceProperties {
 
     /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: ObjectVersion,
+    pub version: WorkbenchVersion,
 
     /// The timestamp at which the interface was created.
     #[serde(rename = "@adtcore:createdAt")]
@@ -200,7 +200,7 @@ mod tests {
 
         assert_eq!(properties.name, "IF_ADT_URI_MAPPER");
         assert_eq!(properties.object_type, Interface::WORKBENCH_TYPE);
-        assert_eq!(properties.version, ObjectVersion::Active);
+        assert_eq!(properties.version, WorkbenchVersion::Active);
         assert_eq!(properties.source_uri, "source/main");
         assert_eq!(
             properties

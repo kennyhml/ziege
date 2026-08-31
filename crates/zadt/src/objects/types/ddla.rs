@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
-    AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType, MediaTyped, ObjectVersion,
-    ToXml,
+    AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType, MediaTyped, ToXml,
+    WorkbenchVersion,
 };
 
 #[object_type(
@@ -73,7 +73,7 @@ pub struct AnnotationDefinitionProperties {
 
     /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: ObjectVersion,
+    pub version: WorkbenchVersion,
 
     /// The timestamp at which the object was created.
     #[serde(rename = "@adtcore:createdAt")]
@@ -168,7 +168,7 @@ mod tests {
 
         assert_eq!(properties.name, "UI");
         assert_eq!(properties.object_type, AnnotationDefinition::WORKBENCH_TYPE);
-        assert_eq!(properties.version, ObjectVersion::Active);
+        assert_eq!(properties.version, WorkbenchVersion::Active);
         assert_eq!(properties.source_uri, "./ui/source/main");
         assert_eq!(
             properties.package.name.as_deref(),
