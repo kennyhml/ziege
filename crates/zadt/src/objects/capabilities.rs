@@ -1,7 +1,7 @@
 use serde::{Serialize, de::DeserializeOwned};
 
 use super::{GlobalWorkbenchType, ObjectType, PrimaryObjectType};
-use crate::{CategoryId, ObjectError, operation::TemplateTarget, resource::AdvertisedLink};
+use crate::{CategoryId, ObjectError, operation::TemplateLocator, resource::AdvertisedLink};
 
 /// Marks an object capable of being executed immediately (not a job).
 ///
@@ -19,7 +19,7 @@ pub(crate) trait ImmediateRun: ObjectType {
 /// Discovery metadata for one immediate plain-text object-run operation.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RunCapability {
-    pub(crate) target: TemplateTarget,
+    pub(crate) target: TemplateLocator,
     pub(crate) name_variable: &'static str,
 }
 
@@ -30,7 +30,7 @@ impl RunCapability {
         name_variable: &'static str,
     ) -> Self {
         Self {
-            target: TemplateTarget::new(category, relation),
+            target: TemplateLocator::new(category, relation),
             name_variable,
         }
     }

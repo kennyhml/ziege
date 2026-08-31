@@ -16,12 +16,10 @@ mod target;
 
 pub use batch::{BatchError, BatchKey, BatchOperation, BatchResponses, Batched};
 use encoded::EncodedTarget;
-pub use encoded::{
-    Advertised, AdvertisedCollection, AdvertisedTarget, AdvertisedTemplate, DiscoveryDocument,
-    EncodedOperation, OperationTarget, Owned,
-};
+pub use encoded::{Advertised, EncodedOperation, OperationTarget, Owned};
 pub use revalidation::{IfNoneMatch, Revalidation};
-pub(crate) use target::{CollectionTarget, TemplateTarget};
+pub use target::{AdvertisedCollection, AdvertisedTarget, AdvertisedTemplate, DiscoveryDocument};
+pub(crate) use target::{CollectionLocator, TemplateLocator};
 
 mod private {
     pub trait Sealed {}

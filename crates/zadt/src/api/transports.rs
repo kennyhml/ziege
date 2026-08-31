@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AdtUri, Advertised, CategoryId, CtsError, EncodeError, EncodedOperation, Operation,
-    OperationResponse, PostAction, ResponseError, Stateless, User, operation::CollectionTarget,
+    OperationResponse, PostAction, ResponseError, Stateless, User, operation::CollectionLocator,
     protocol::TEXT_PLAIN_MEDIA_TYPE,
 };
 
@@ -67,7 +67,7 @@ pub struct TransportCheck {
 }
 
 impl TransportCheck {
-    const TARGET: CollectionTarget = CollectionTarget::new(TRANSPORT_CHECKS_CATEGORY);
+    const TARGET: CollectionLocator = CollectionLocator::new(TRANSPORT_CHECKS_CATEGORY);
 
     /// Creates a transport check for one repository operation.
     pub fn new(uri: AdtUri, operation: TransportCheckOperation) -> Self {
@@ -153,7 +153,7 @@ impl Default for TransportsQuery {
 }
 
 impl TransportsQuery {
-    const TARGET: CollectionTarget = CollectionTarget::new(TRANSPORTS_CATEGORY);
+    const TARGET: CollectionLocator = CollectionLocator::new(TRANSPORTS_CATEGORY);
 
     /// Creates a query for the current user's Workbench transports.
     pub fn new() -> Self {
@@ -217,7 +217,7 @@ pub struct TransportPropertiesQuery {
 }
 
 impl TransportPropertiesQuery {
-    const TARGET: CollectionTarget = CollectionTarget::new(TRANSPORTS_CATEGORY);
+    const TARGET: CollectionLocator = CollectionLocator::new(TRANSPORTS_CATEGORY);
 
     /// Creates a query for one transport request.
     pub fn new(transport_number: impl Into<TransportNumber>) -> Self {
@@ -296,7 +296,7 @@ pub struct TransportCreate {
 }
 
 impl TransportCreate {
-    const TARGET: CollectionTarget = CollectionTarget::new(TRANSPORTS_CATEGORY);
+    const TARGET: CollectionLocator = CollectionLocator::new(TRANSPORTS_CATEGORY);
 
     /// Creates a configurable transport request builder.
     pub fn builder() -> TransportCreateBuilder {

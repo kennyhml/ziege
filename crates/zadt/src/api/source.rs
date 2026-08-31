@@ -2,7 +2,7 @@ use http::{Method, StatusCode};
 
 use crate::{
     error::{EncodeError, ObjectError, ResponseError},
-    objects::{ErasedObject, Object, Source, SourceComponents},
+    objects::{ErasedObject, ObjectSnapshot, Source, SourceComponents},
     operation::{EncodedOperation, Operation, OperationResponse, Owned, Stateful, Stateless},
     protocol::{EntityTag, TEXT_PLAIN_MEDIA_TYPE},
     resource::{SourceRef, refs::source_from_href},
@@ -96,7 +96,7 @@ impl Operation for ObjectSourceQuery {
     }
 }
 
-impl<T: Source> Object<T> {
+impl<T: Source> ObjectSnapshot<T> {
     pub(crate) fn source_from_parts(
         reference: &crate::ObjectRef<T>,
         properties: &T::Properties,
@@ -112,7 +112,7 @@ impl<T: Source> Object<T> {
     }
 }
 
-impl<T: SourceComponents> Object<T> {
+impl<T: SourceComponents> ObjectSnapshot<T> {
     pub(crate) fn source_component_from_parts(
         reference: &crate::ObjectRef<T>,
         properties: &T::Properties,

@@ -2,7 +2,7 @@ use super::run::ObjectRun;
 use crate::{
     Advertised, CategoryId, EncodeError, EncodedOperation, Operation, OperationResponse,
     ResponseError, Stateless,
-    objects::{Class, ImmediateRun, Object, ObjectRef, RunCapability},
+    objects::{Class, ImmediateRun, ObjectRef, ObjectSnapshot, RunCapability},
 };
 
 const CLASS_NAME_VARIABLE: &str = "classname";
@@ -76,7 +76,7 @@ impl ObjectRef<Class> {
     }
 }
 
-impl Object<Class> {
+impl ObjectSnapshot<Class> {
     /// Creates an operation that runs this loaded class.
     pub fn run(&self) -> ClassRun {
         self.reference().run()

@@ -3,9 +3,9 @@ use serde::Deserialize;
 
 use crate::{
     Advertised, AdvertisedLink, AdvertisedObjectReference, CategoryId, EncodeError,
-    EncodedOperation, ErasedObject, Object, ObjectError, ObjectRef, ObjectType, Operation,
+    EncodedOperation, ErasedObject, ObjectError, ObjectRef, ObjectSnapshot, ObjectType, Operation,
     OperationResponse, ResponseError, Stateless, objects::ObjectReferences,
-    operation::CollectionTarget,
+    operation::CollectionLocator,
 };
 
 const ACTIVATE_OBJECTS: CategoryId = CategoryId {
@@ -114,7 +114,7 @@ impl Operation for ActivationRun {
             .namespace("adtcore", "http://www.sap.com/adt/core")
             .to_string(&self.objects)
             .map_err(ObjectError::InvalidRequest)?;
-        let mut request = CollectionTarget::new(ACTIVATE_OBJECTS).operation(Method::POST);
+        let mut request = CollectionLocator::new(ACTIVATE_OBJECTS).operation(Method::POST);
         request.push_query("method", self.mode.as_str());
         request.push_query("preaudit", self.preaudit.to_string());
         if let Some(forced) = self.forced {
@@ -154,7 +154,7 @@ where
     }
 }
 
-impl<T: ObjectType> Object<T> {
+impl<T: ObjectType> ObjectSnapshot<T> {
     /// Creates an activation run for this loaded object.
     pub fn activation(&self) -> ActivationRun {
         self.reference().activation()

@@ -17,7 +17,7 @@ use crate::{
 
 /// A reference to an ADT object with its name, URI, and Workbench type.
 ///
-/// Unlike [`crate::Object<T>`], this value does not include loaded properties.
+/// Unlike [`crate::ObjectSnapshot<T>`], this value does not include loaded properties.
 /// The type parameter `T` selects the operations available for that object
 /// family.
 ///
@@ -382,32 +382,20 @@ impl Client<Ready> {
                 subobject.parent_variable().to_owned(),
                 Value::String(uri_name.clone()),
             )]);
-            let mut target = None;
-            let mut expansion_error = None;
-            for link in collection
+            let Some(link) = collection
                 .template_links()
                 .iter()
-                .filter(|link| link.relation() == subobject.relation())
-            {
-                let template = AdtUriTemplate::new(link.template());
-                if template.variable_names() != [subobject.parent_variable()] {
-                    continue;
-                }
-                match template.expand(&variables) {
-                    Ok((expanded, query)) if query.is_empty() => {
-                        target = Some(expanded);
-                        break;
-                    }
-                    Ok(_) => {}
-                    Err(error) => {
-                        expansion_error.get_or_insert(error);
-                    }
-                }
+                .find(|link| link.relation() == subobject.relation())
+            else {
+                continue;
+            };
+            let template = AdtUriTemplate::new(link.template());
+            if template.variable_names() != [subobject.parent_variable()] {
+                continue;
             }
-            if let Some(target) = target {
+            let (target, query) = template.expand(&variables)?;
+            if query.is_empty() {
                 resolved_subobjects.insert(subobject.object_type().clone(), target);
-            } else if let Some(error) = expansion_error {
-                return Err(error);
             }
         }
         Ok((name, uri, resolved_subobjects))

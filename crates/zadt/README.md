@@ -45,11 +45,11 @@ ADT identities are represented as resource handles. Handles expose operations
 naturally associated with their context, while operation values remain independently
 composable and executable.
 
-`Class` is a nominal object-family marker. Loaded classes use `Object<Class>`, which
-contains `ClassProperties` and the response metadata. Static capabilities come from
-traits such as `Source` implemented by the marker. Loaded properties determine which
-concrete source resources are available, letting ZAFF project modern and legacy class
-layouts without guessing paths.
+`Class` is a nominal object-family marker. Loaded classes use
+`ObjectSnapshot<Class>`, which contains `ClassProperties` and the response metadata.
+Static capabilities come from traits such as `Source` implemented by the marker.
+Loaded properties determine which concrete source resources are available, letting
+ZAFF project modern and legacy class layouts without guessing paths.
 
 `ObjectType` contains the common property and Workbench-type contract used by
 all exact object references. `PrimaryObjectType` adds top-level collection
@@ -120,7 +120,7 @@ flowchart TB
 
     subgraph RESULTS["Type-state-specific results"]
         direction LR
-        TYPED_OBJECT["Object&lt;Class&gt;<br>ClassProperties"]
+        TYPED_OBJECT["ObjectSnapshot&lt;Class&gt;<br>ClassProperties"]
         RUNTIME_OBJECT["ErasedObject<br>type-erased properties"]
     end
 

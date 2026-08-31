@@ -4,7 +4,7 @@ use serde::Deserialize;
 use super::common::RepositoryFacet;
 use crate::{
     Advertised, CategoryId, Client, EncodeError, EncodedOperation, Operation, OperationResponse,
-    Ready, RepositoryError, ResponseError, Stateless, operation::CollectionTarget,
+    Ready, RepositoryError, ResponseError, Stateless, operation::CollectionLocator,
 };
 
 /// Fetches the facets supported by the repository information system.
@@ -19,7 +19,7 @@ use crate::{
 pub struct RepositoryFacetsQuery;
 
 impl RepositoryFacetsQuery {
-    const TARGET: CollectionTarget = CollectionTarget::new(CategoryId {
+    const TARGET: CollectionLocator = CollectionLocator::new(CategoryId {
         scheme: "http://www.sap.com/adt/categories/repository/virtualfolders",
         term: "facets",
     });

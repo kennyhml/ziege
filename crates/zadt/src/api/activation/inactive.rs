@@ -5,7 +5,7 @@ use crate::{
     Advertised, AdvertisedObjectReference, CategoryId, EncodeError, EncodedOperation, ObjectError,
     Operation, OperationResponse, ResponseError, Stateless, User,
     objects::ObjectReferences,
-    operation::{CollectionTarget, TemplateTarget},
+    operation::{CollectionLocator, TemplateLocator},
 };
 
 const INACTIVE_OBJECTS: CategoryId = CategoryId {
@@ -58,12 +58,11 @@ impl Operation for InactiveObjectsQuery {
         // Might as well use the template if we got the username even though it
         // does not provide much benefit over just using a query parameter
         let mut request = if let Some(username) = &self.username {
-            let mut target = TemplateTarget::new(INACTIVE_OBJECTS, QUERY_RELATION).target();
-            target.require_variable("USERNAME");
+            let mut target = TemplateLocator::new(INACTIVE_OBJECTS, QUERY_RELATION).target();
             target.push_variable("USERNAME", username.as_str());
             EncodedOperation::advertised(Method::GET, target)
         } else {
-            CollectionTarget::new(INACTIVE_OBJECTS).operation(Method::GET)
+            CollectionLocator::new(INACTIVE_OBJECTS).operation(Method::GET)
         };
         request.set_accept(Self::MEDIA_TYPE);
         Ok(request)

@@ -5,7 +5,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use super::{
-    Advertised, CollectionTarget, EncodedOperation, Operation, OperationContext, OperationKind,
+    Advertised, CollectionLocator, EncodedOperation, Operation, OperationContext, OperationKind,
     Resolve, Stateful, Stateless,
 };
 use crate::{
@@ -13,22 +13,19 @@ use crate::{
     Ready, ResolveError, ResponseError, UserSession, UserSessionId,
 };
 
-const BATCH_CATEGORY: CategoryId = CategoryId {
-    scheme: "http://www.sap.com/adt/categories/system/communication/services",
-    term: "batch",
-};
 const BATCH_MEDIA_TYPE: &str = "multipart/mixed";
 const APPLICATION_HTTP: &str = "application/http";
 
 /// To be able to have a [`BatchOperation`] stick a bunch of operations
 /// into a collection, we must be able to reference them by some common trait.
+///
 /// While they all implement [`Operation`], the associated response makes them
 /// incompatible. So the response type must also be erased!
 type ErasedResponse = Box<dyn Any + Send>;
 
 /// An operation that has both its own type and its associated response erased.
 ///
-/// The response becomes a `void*`-like structure that the rust runtime lets us
+/// The response becomes a void-pointer-like structure that the rust runtime lets us
 /// cast safely by inserting type id checks. This relies on the fact that operations
 /// come out in the same order they go in - which the ADT backend guarantees.
 trait ErasedOperation: Send + Sync {
@@ -46,33 +43,33 @@ where
     }
 }
 
+/// A batched request to be executed.
 struct BatchEntry {
+    /// The operation that created the request and later decodes it.
     operation: Box<dyn ErasedOperation>,
+    /// The resolved ADT request to be included in the batch request.
     request: AdtRequest,
+    /// Operation context to be reattached to the response later.
     context: OperationContext,
 }
 
+/// An executor bound to the execution of the batch request.
+///
+/// This is needed because operations must be resolved  at the
+/// time they are pushed into the batch request stack so that
+/// they can the normalized [`AdtRequest`] is available. This
+/// requires access to resolver such as a user session or client.
 enum BoundExecutor<'a> {
     Client(&'a Client<Ready>),
     UserSession(&'a UserSession<Ready>),
 }
 
 impl BoundExecutor<'_> {
+    /// Normalizes access to the underlying client
     fn client(&self) -> &Client<Ready> {
         match self {
             Self::Client(client) => client,
             Self::UserSession(session) => session.client(),
-        }
-    }
-
-    fn validate_user_session(
-        &self,
-        bound_user_session: Option<UserSessionId>,
-    ) -> Result<(), ResolveError> {
-        match (self, bound_user_session) {
-            (_, None) => Ok(()),
-            (Self::UserSession(session), Some(bound)) if bound == session.id() => Ok(()),
-            _ => Err(ResolveError::UserSessionMismatch),
         }
     }
 }
@@ -81,13 +78,16 @@ impl BoundExecutor<'_> {
 ///
 /// The batch borrows the [`Ready`] client or user session that created it. Each
 /// operation is encoded and resolved when passed to [`BatchOperation::push`].
+///
 /// Individual response types remain available through the returned [`BatchKey`].
 ///
 /// Create a batch operation through [`Client::batch`] or [`UserSession::batch`]
 /// which binds it to an operation kind `K` and the originating executor.
 ///
 /// ADT executes its subrequests and returns their responses in request order.
-/// Batch operations cannot be nested.
+/// Notice that, while it would qualify, the batch operation does not itself
+/// implement [`Operation`] such that it cannot be nested. Execution thus happens
+/// through the internally bound execuctor.
 ///
 /// If you have a collection of operations of the same type, in other words,
 /// they all share the same response, you may also use the [`Batched`] trait.
@@ -118,6 +118,11 @@ impl<'a, K> BatchOperation<'a, K>
 where
     K: OperationKind,
 {
+    const CATEGORY: CategoryId = CategoryId {
+        scheme: "http://www.sap.com/adt/categories/system/communication/services",
+        term: "batch",
+    };
+
     fn new(executor: BoundExecutor<'a>) -> Self {
         Self {
             executor,
@@ -151,16 +156,26 @@ where
         Client<Ready>: Resolve<O::Target>,
     {
         let resolved = self.executor.client().resolve(operation.encode()?)?;
-        self.executor
-            .validate_user_session(resolved.bound_user_session)?;
+
+        // Stateful requests must belong to the same user session. Type-state
+        // guarantees that they cannot be mixed.
+        if let Some(session_id) = resolved.bound_user_session
+            && let BoundExecutor::UserSession(session) = self.executor
+            && session_id != session.id()
+        {
+            Err(ResolveError::UserSessionMismatch)?;
+        }
+
         let key = BatchKey {
             identity: Arc::clone(&self.identity),
             index: self.entries.len(),
             response: PhantomData::<fn() -> O::Response>,
         };
+
         if let Some(bound) = resolved.bound_user_session {
             self.bound_user_session = Some(bound);
         }
+
         self.entries.push(BatchEntry {
             operation: Box::new(operation),
             request: resolved.request,
@@ -176,12 +191,14 @@ where
 
         let (content_type, body) =
             encode_batch_body(self.entries.iter().map(|entry| &entry.request));
-        let mut request = CollectionTarget::core(BATCH_CATEGORY).operation(Method::POST);
+
+        let mut request = CollectionLocator::core(Self::CATEGORY).operation(Method::POST);
         request.set_accept(BATCH_MEDIA_TYPE);
         request
             .headers_mut()
             .insert(header::CONTENT_TYPE, content_type);
         request.set_body(body);
+
         if let Some(bound) = self.bound_user_session {
             request.bind_user_session(bound);
         }
@@ -195,6 +212,8 @@ where
 
         let boundary = response_boundary(response.headers())?;
         let responses = decode_batch(response.body(), &boundary)?;
+
+        // There MUST be as many responses as we sent requests!
         if responses.len() != self.entries.len() {
             return Err(BatchError::ResponseCount {
                 expected: self.entries.len(),
@@ -229,8 +248,7 @@ where
     /// The outer batch endpoint is resolved for each execution. This permits a
     /// prepared batch to be reused while retaining stateful session cookies.
     pub async fn execute(&self) -> Result<BatchResponses, OperationError> {
-        let encoded = self.encode()?;
-        let resolved = self.executor.client().resolve(encoded)?;
+        let resolved = self.executor.client().resolve(self.encode()?)?;
         let response = match &self.executor {
             BoundExecutor::Client(client) => client.execute_resolved(resolved).await?,
             BoundExecutor::UserSession(session) => session.execute_resolved(resolved).await?,
@@ -701,7 +719,7 @@ mod tests {
         type Target = Advertised;
 
         fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-            Ok(CollectionTarget::new(CategoryId {
+            Ok(CollectionLocator::new(CategoryId {
                 scheme: "https://example.test/categories",
                 term: "missing",
             })

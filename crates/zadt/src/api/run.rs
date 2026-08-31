@@ -73,13 +73,11 @@ impl Operation for ObjectRun {
 
     fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
         let mut target = self.run.target.target();
-        target.require_variable(self.run.name_variable);
         target.push_variable(
             self.run.name_variable,
             self.reference.name().to_ascii_lowercase(),
         );
         if let Some(profiler_id) = &self.profiler_id {
-            target.require_supported_variable(PROFILER_ID_QUERY);
             target.push_variable(PROFILER_ID_QUERY, profiler_id.as_str());
         }
         let mut request = EncodedOperation::advertised(Method::POST, target);

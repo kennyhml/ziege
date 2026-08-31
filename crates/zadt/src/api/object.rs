@@ -1,7 +1,7 @@
 use http::{Method, StatusCode};
 
 use crate::{
-    Advertised, CategoryId, ErasedObject, Object, ObjectError, ObjectLock, TransportNumber,
+    Advertised, CategoryId, ErasedObject, ObjectError, ObjectLock, ObjectSnapshot, TransportNumber,
     compatibility::matching_media_type,
     error::{EncodeError, ResponseError},
     objects::{
@@ -9,7 +9,7 @@ use crate::{
         ObjectType, ObjectVersion, ToXml, XmlConversion,
     },
     operation::{
-        CollectionTarget, EncodedOperation, IfNoneMatch, Operation, OperationResponse, Owned,
+        CollectionLocator, EncodedOperation, IfNoneMatch, Operation, OperationResponse, Owned,
         Stateful, Stateless,
     },
     protocol::EntityTag,
@@ -46,7 +46,7 @@ impl<T, P> CreateObjectRequest<T, P> {
         object_category: CategoryId,
         body: Vec<u8>,
     ) -> Result<EncodedOperation<Advertised>, EncodeError> {
-        let mut target = CollectionTarget::new(object_category).target();
+        let mut target = CollectionLocator::new(object_category).target();
         target.require_accepted_media_types(self.create_media_types);
         let mut request = EncodedOperation::advertised(Method::POST, target);
         request.set_accepts(self.response_media_types);
@@ -64,7 +64,7 @@ where
     P: ToXml + Send + Sync,
 {
     type Kind = Stateless;
-    type Response = Option<Object<T>>;
+    type Response = Option<ObjectSnapshot<T>>;
     type Target = Advertised;
 
     fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
@@ -76,7 +76,7 @@ where
         if response.body().is_empty() {
             return Ok(None);
         }
-        Object::decode_properties(&self.reference, response).map(Some)
+        ObjectSnapshot::decode_properties(&self.reference, response).map(Some)
     }
 }
 
@@ -196,7 +196,7 @@ impl<T> Operation for ObjectPropertiesQuery<T>
 where
     T: ObjectType,
 {
-    type Response = Object<T>;
+    type Response = ObjectSnapshot<T>;
     type Kind = Stateless;
     type Target = Owned;
 
@@ -205,7 +205,7 @@ where
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        Object::decode_properties(&self.resource, response)
+        ObjectSnapshot::decode_properties(&self.resource, response)
     }
 }
 
@@ -218,7 +218,7 @@ where
     }
 }
 
-impl<T: ObjectType> Object<T> {
+impl<T: ObjectType> ObjectSnapshot<T> {
     /// Creates a conditional query using this representation's entity tag.
     pub fn revalidate(&self) -> Option<IfNoneMatch<ObjectPropertiesQuery<T>>> {
         self.etag()
@@ -316,7 +316,7 @@ impl<T> Operation for ObjectPropertiesUpdate<T>
 where
     T: ObjectType,
 {
-    type Response = Object<T>;
+    type Response = ObjectSnapshot<T>;
     type Kind = Stateful;
     type Target = Owned;
 
@@ -332,18 +332,18 @@ where
                 .downcast_ref::<T::Properties>()
                 .expect("typed property updates retain their concrete property type")
                 .clone();
-            return Ok(Object::new(
+            return Ok(ObjectSnapshot::new(
                 self.resource.clone(),
                 self.media_type,
                 response.entity_tag(),
                 properties,
             ));
         }
-        Object::decode_properties(&self.resource, response)
+        ObjectSnapshot::decode_properties(&self.resource, response)
     }
 }
 
-impl<T: ObjectType> Object<T> {
+impl<T: ObjectType> ObjectSnapshot<T> {
     /// Creates an update that replaces this loaded representation's properties.
     pub fn update(
         &self,

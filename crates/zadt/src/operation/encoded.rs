@@ -2,13 +2,14 @@ use std::marker::PhantomData;
 
 use http::{HeaderMap, HeaderValue, Method, header};
 
-use crate::{AdtUri, CategoryId, EntityTag, user_session::UserSessionId};
+use super::target::AdvertisedTarget;
+use crate::{AdtUri, EntityTag, user_session::UserSessionId};
 
 mod private {
     pub trait Sealed {}
 }
 
-/// Identifies how an encoded operation obtains its request target.
+/// Marker type for a valid target of an [`Operation`].
 pub trait OperationTarget: private::Sealed + Send + Sync + 'static {}
 
 /// An operation target already owned by the operation.
@@ -24,123 +25,21 @@ impl private::Sealed for Advertised {}
 impl OperationTarget for Owned {}
 impl OperationTarget for Advertised {}
 
-/// Selects the discovery document containing an advertised resource.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DiscoveryDocument {
-    Central,
-    Core,
-}
-
-/// A collection locator resolved from an ADT discovery document during execution.
-#[derive(Debug)]
-pub struct AdvertisedCollection {
-    pub(crate) document: DiscoveryDocument,
-    pub(crate) category: CategoryId,
-    pub(crate) suffix: Vec<String>,
-    pub(crate) accepted_media_types: &'static [&'static str],
-}
-
-impl AdvertisedCollection {
-    /// Selects a collection from central ADT discovery.
-    pub fn new(category: CategoryId) -> Self {
-        Self::in_document(DiscoveryDocument::Central, category)
-    }
-
-    /// Selects a collection from core ADT discovery.
-    pub fn core(category: CategoryId) -> Self {
-        Self::in_document(DiscoveryDocument::Core, category)
-    }
-
-    fn in_document(document: DiscoveryDocument, category: CategoryId) -> Self {
-        Self {
-            document,
-            category,
-            suffix: Vec::new(),
-            accepted_media_types: &[],
-        }
-    }
-
-    /// Appends one safely encoded segment to a collection target.
-    pub fn push_segment(&mut self, segment: impl Into<String>) {
-        self.suffix.push(segment.into());
-    }
-
-    pub(crate) fn require_accepted_media_types(&mut self, media_types: &'static [&'static str]) {
-        self.accepted_media_types = media_types;
-    }
-}
-
-/// A URI-template locator resolved from an ADT discovery document during execution.
-#[derive(Debug)]
-pub struct AdvertisedTemplate {
-    pub(crate) document: DiscoveryDocument,
-    pub(crate) category: CategoryId,
-    pub(crate) relation: &'static str,
-    pub(crate) variables: Vec<(String, String)>,
-    pub(crate) required_variables: Vec<&'static str>,
-    pub(crate) supported_variables: Vec<&'static str>,
-    pub(crate) required_query_parameters: Vec<&'static str>,
-}
-
-impl AdvertisedTemplate {
-    /// Selects a URI template from a central-discovery collection.
-    pub fn new(category: CategoryId, relation: &'static str) -> Self {
-        Self {
-            document: DiscoveryDocument::Central,
-            category,
-            relation,
-            variables: Vec::new(),
-            required_variables: Vec::new(),
-            supported_variables: Vec::new(),
-            required_query_parameters: Vec::new(),
-        }
-    }
-
-    /// Supplies one string variable for URI-template expansion.
-    pub fn push_variable(&mut self, name: impl Into<String>, value: impl Into<String>) {
-        self.variables.push((name.into(), value.into()));
-    }
-
-    /// Requires the advertised template to declare one variable.
-    pub fn require_variable(&mut self, variable: &'static str) {
-        self.required_variables.push(variable);
-    }
-
-    /// Requires the advertised template to support one optional variable.
-    pub fn require_supported_variable(&mut self, variable: &'static str) {
-        self.supported_variables.push(variable);
-    }
-
-    /// Requires template expansion to produce one query parameter.
-    pub fn require_query_parameter(&mut self, parameter: &'static str) {
-        self.required_query_parameters.push(parameter);
-    }
-}
-
-/// An advertised collection or URI-template target.
-#[derive(Debug)]
-pub enum AdvertisedTarget {
-    Collection(AdvertisedCollection),
-    Template(AdvertisedTemplate),
-}
-
-impl From<AdvertisedCollection> for AdvertisedTarget {
-    fn from(target: AdvertisedCollection) -> Self {
-        Self::Collection(target)
-    }
-}
-
-impl From<AdvertisedTemplate> for AdvertisedTarget {
-    fn from(target: AdvertisedTemplate) -> Self {
-        Self::Template(target)
-    }
-}
-
+/// An encoded request target. This split keeps encoding operation data
+/// separate from resolving them against advertised resources, which
+/// would couple it to access to a disovery document.
 pub(crate) enum EncodedTarget {
+    /// A static URI hard-coded into the library such as `/sap/bc/adt/discovery`
     Owned(AdtUri),
+    /// A target advertised through the discovery or the core discovery
     Advertised(AdvertisedTarget),
 }
 
+/// A request encoded from the internal operation into the HTTP envelope.
+///
+/// The remaining step is to resolve the contained [`EncodedTarget`] to
+/// obtain the request target - which may include query parameters of
+/// its own.
 pub(crate) struct EncodedRequest {
     pub(crate) method: Method,
     pub(crate) target: EncodedTarget,
@@ -149,10 +48,15 @@ pub(crate) struct EncodedRequest {
     pub(crate) body: Vec<u8>,
 }
 
-/// A transport-neutral operation plan whose target has not necessarily been resolved.
+/// Wraps the [`EncodedRequest`] with local operation metadata, session affinity
+/// and a target typestate to enable compile time target resolver guarantees
+/// such that an operation with `T = Advertised` can only be resolved by a
+/// [`Client<Ready>`] with knowledge of a discovery document.
 ///
-/// The encoded request contains only protocol data. Local execution metadata,
-/// such as user-session affinity, is retained separately by this plan.
+/// [`Operation::encode`] interfaces with this type and returns it on success.
+///
+/// TODO: This adds some friction because the internal enum and the typestate
+/// do not guarantee to stay in sync when an operation is defined incorrectly.
 pub struct EncodedOperation<T: OperationTarget> {
     pub(crate) request: EncodedRequest,
     bound_user_session: Option<UserSessionId>,

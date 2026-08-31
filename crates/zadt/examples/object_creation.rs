@@ -1,6 +1,6 @@
 use std::{env, error::Error, io};
 
-use zadt::{Class, ClassCreateProperties, Client, Object, Operation, ReqwestTransport};
+use zadt::{Class, ClassCreateProperties, Client, ObjectSnapshot, Operation, ReqwestTransport};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -40,7 +40,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         request.transport(transport.into());
     }
 
-    let result: Option<Object<Class>> = request.execute(&client).await?;
+    let result: Option<ObjectSnapshot<Class>> = request.execute(&client).await?;
     println!("{result:#?}");
 
     Ok(())

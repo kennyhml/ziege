@@ -2,7 +2,7 @@ use super::run::ObjectRun;
 use crate::{
     Advertised, CategoryId, EncodeError, EncodedOperation,
     error::ResponseError,
-    objects::{ImmediateRun, Object, ObjectRef, Program, RunCapability},
+    objects::{ImmediateRun, ObjectRef, ObjectSnapshot, Program, RunCapability},
     operation::{Operation, OperationResponse, Stateless},
 };
 
@@ -96,7 +96,7 @@ impl ObjectRef<Program> {
     }
 }
 
-impl Object<Program> {
+impl ObjectSnapshot<Program> {
     /// Creates an operation that runs this loaded program.
     pub fn run(&self) -> ProgramRun {
         self.reference().run()
@@ -299,38 +299,6 @@ mod tests {
                 ObjectError::UnsupportedTemplateParameter { parameter }
             )) if parameter == PROFILER_ID_QUERY
         ));
-    }
-
-    #[tokio::test]
-    async fn selects_the_relation_template_with_the_required_variables() {
-        let (client, requests) = recording_client(
-            br#"<app:service xmlns:app="http://www.w3.org/2007/app"
-                    xmlns:atom="http://www.w3.org/2005/Atom"
-                    xmlns:adtcomp="http://www.sap.com/adt/compatibility">
-                    <app:workspace>
-                        <atom:title>Programs</atom:title>
-                        <app:collection href="/sap/bc/adt/programs/programrun">
-                            <atom:category term="programrun"
-                                scheme="http://www.sap.com/adt/categories/programs" />
-                            <adtcomp:templateLinks>
-                                <adtcomp:templateLink
-                                    rel="http://www.sap.com/adt/relations/programs/programrun"
-                                    template="/sap/bc/adt/programs/programrun/wrong/{other}" />
-                                <adtcomp:templateLink
-                                    rel="http://www.sap.com/adt/relations/programs/programrun"
-                                    template="/sap/bc/adt/programs/programrun/{programname}" />
-                            </adtcomp:templateLinks>
-                        </app:collection>
-                    </app:workspace>
-                </app:service>"#,
-        );
-
-        program_run().execute(&client).await.unwrap();
-
-        assert_eq!(
-            requests.lock().unwrap()[0].target().as_str(),
-            "/sap/bc/adt/programs/programrun/z_test"
-        );
     }
 
     #[test]

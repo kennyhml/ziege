@@ -7,7 +7,7 @@ use crate::{
     AdtUri, Advertised, CategoryId, Client, EncodeError, EncodedOperation, GlobalWorkbenchType,
     ObjectError, ObjectRef, ObjectType, Operation, OperationResponse, Ready, RepositoryError,
     ResponseError, Stateless,
-    operation::CollectionTarget,
+    operation::CollectionLocator,
     resource::{AdvertisedLink, Relations},
 };
 
@@ -73,7 +73,7 @@ impl Default for RepositoryContentQuery {
 }
 
 impl RepositoryContentQuery {
-    const TARGET: CollectionTarget = CollectionTarget::new(CategoryId {
+    const TARGET: CollectionLocator = CollectionLocator::new(CategoryId {
         scheme: "http://www.sap.com/adt/categories/repository/virtualfolders",
         term: "contents",
     });

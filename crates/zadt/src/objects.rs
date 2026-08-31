@@ -14,7 +14,7 @@ pub use capabilities::{
 pub(crate) use capabilities::{ImmediateRun, RunCapability};
 pub(crate) use descriptors::SubObjectDescriptor;
 pub(crate) use object::ErasedProperties;
-pub use object::{ErasedObject, Object};
+pub use object::{ErasedObject, ObjectSnapshot};
 pub use reference::{AdvertisedObjectReference, ObjectRef, ObjectReferences};
 pub use types::*;
 pub use workbench::{

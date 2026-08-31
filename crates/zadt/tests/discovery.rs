@@ -297,8 +297,8 @@ async fn function_group_subobjects_require_the_advertised_template() {
 }
 
 #[tokio::test]
-async fn function_group_subobjects_select_the_supported_template_shape() {
-    let discovery = r#"<app:service xmlns:app="http://www.w3.org/2007/app"
+async fn function_group_subobjects_require_the_supported_template_shape() {
+    let unsupported = r#"<app:service xmlns:app="http://www.w3.org/2007/app"
             xmlns:atom="http://www.w3.org/2005/Atom"
             xmlns:adtcomp="http://www.sap.com/adt/compatibility">
             <app:workspace>
@@ -310,37 +310,11 @@ async fn function_group_subobjects_select_the_supported_template_shape() {
                         <adtcomp:templateLink
                             rel="http://www.sap.com/adt/categories/functiongroups/functionmodules"
                             template="/sap/bc/adt/functions/groups/{groupname}/fmodules/{module}" />
-                        <adtcomp:templateLink
-                            rel="http://www.sap.com/adt/categories/functiongroups/functionmodules"
-                            template="/sap/bc/adt/functions/groups/{groupname}/fmodules" />
                     </adtcomp:templateLinks>
                 </app:collection>
             </app:workspace>
         </app:service>"#;
-    let client = Client::new(FixtureTransport::new(discovery));
-    Logon::default().execute(&client).await.unwrap();
-    let client = client.discover().await.unwrap();
-
-    let module = client
-        .object::<FunctionGroup>("Z_TEST_GROUP")
-        .unwrap()
-        .subobject::<FunctionModule>("ZZZZFUNC")
-        .unwrap();
-
-    assert_eq!(
-        module.uri().as_str(),
-        "/sap/bc/adt/functions/groups/z_test_group/fmodules/zzzzfunc"
-    );
-
-    let direct_only = discovery.replacen(
-        r#"                        <adtcomp:templateLink
-                            rel="http://www.sap.com/adt/categories/functiongroups/functionmodules"
-                            template="/sap/bc/adt/functions/groups/{groupname}/fmodules" />
-"#,
-        "",
-        1,
-    );
-    let client = Client::new(FixtureTransport::new(direct_only));
+    let client = Client::new(FixtureTransport::new(unsupported));
     Logon::default().execute(&client).await.unwrap();
     let client = client.discover().await.unwrap();
     let group = client.object::<FunctionGroup>("Z_TEST_GROUP").unwrap();
@@ -350,8 +324,8 @@ async fn function_group_subobjects_select_the_supported_template_shape() {
         Err(ObjectError::MissingTemplate { .. })
     ));
 
-    let malformed = discovery.replacen(
-        "/sap/bc/adt/functions/groups/{groupname}/fmodules\" />",
+    let malformed = unsupported.replacen(
+        "/sap/bc/adt/functions/groups/{groupname}/fmodules/{module}\" />",
         "//other-host/{groupname}\" />",
         1,
     );

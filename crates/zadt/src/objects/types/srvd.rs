@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn relative_source_uri_resolves_against_the_object() {
         let properties = properties();
-        let object = crate::Object::new(
+        let object = crate::ObjectSnapshot::new(
             ObjectRef::<ServiceDefinition>::new(
                 properties.name.clone(),
                 AdtUri::parse("/sap/bc/adt/ddic/srvd/sources/managedistributions").unwrap(),

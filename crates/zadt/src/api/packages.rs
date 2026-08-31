@@ -5,7 +5,7 @@ use crate::{
     AdtUri, Advertised, AdvertisedObjectReference, CategoryId, Client, EncodeError,
     EncodedOperation, GlobalWorkbenchType, ObjectError, ObjectRef, ObjectType, Operation,
     OperationResponse, Package, PrimaryObjectType, Ready, ResponseError, Stateless,
-    operation::{CollectionTarget, TemplateTarget},
+    operation::{CollectionLocator, TemplateLocator},
     resource::resolve_href,
 };
 
@@ -280,7 +280,7 @@ pub struct PackageTreeQuery {
 }
 
 impl PackageTreeQuery {
-    const TARGET: TemplateTarget = TemplateTarget::new(Package::CATEGORY, PACKAGE_TREE_RELATION);
+    const TARGET: TemplateLocator = TemplateLocator::new(Package::CATEGORY, PACKAGE_TREE_RELATION);
 
     /// Creates a package-tree query with the selected direction.
     pub fn new(package: ObjectRef<Package>, kind: PackageTreeKind) -> Self {
@@ -297,10 +297,6 @@ impl Operation for PackageTreeQuery {
         let mut target = Self::TARGET.target();
         target.push_variable("packagename", self.package.name());
         target.push_variable("type", self.kind.as_str());
-        target.require_variable("packagename");
-        target.require_variable("type");
-        target.require_query_parameter("packagename");
-        target.require_query_parameter("type");
         let mut request = EncodedOperation::advertised(Method::GET, target);
         request.set_accept(PACKAGE_TREE_MEDIA_TYPE);
         Ok(request)
@@ -329,7 +325,7 @@ impl Operation for PackageSettingsQuery {
     type Target = Advertised;
 
     fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut request = CollectionTarget::new(PACKAGE_SETTINGS).operation(Method::GET);
+        let mut request = CollectionLocator::new(PACKAGE_SETTINGS).operation(Method::GET);
         request.set_accept(PACKAGE_SETTINGS_MEDIA_TYPE);
         Ok(request)
     }
@@ -510,10 +506,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn selects_a_template_with_required_query_variables() {
+    async fn follows_advertised_package_tree_variable_locations() {
         let discovery = String::from_utf8(DISCOVERY_XML.to_vec()).unwrap().replacen(
-            "<adtcomp:templateLink\n                    rel=\"tree\"",
-            "<adtcomp:templateLink\n                    rel=\"tree\"\n                    template=\"/sap/bc/adt/packages/$tree/{packagename}/{type}\" />\n                <adtcomp:templateLink\n                    rel=\"tree\"",
+            "/sap/bc/adt/packages/$tree{?packagename,type}",
+            "/sap/bc/adt/packages/$tree/{packagename}/{type}",
             1,
         );
         let (client, requests) = ready_client(discovery.as_bytes());
@@ -528,18 +524,15 @@ mod tests {
             .unwrap();
 
         let requests = requests.lock().unwrap();
-        assert_eq!(requests[0].target().as_str(), "/sap/bc/adt/packages/$tree");
         assert_eq!(
-            requests[0].query(),
-            [
-                ("packagename".to_owned(), "SADT_MAIN".to_owned()),
-                ("type".to_owned(), "sub".to_owned()),
-            ]
+            requests[0].target().as_str(),
+            "/sap/bc/adt/packages/$tree/SADT_MAIN/sub"
         );
+        assert!(requests[0].query().is_empty());
     }
 
     #[tokio::test]
-    async fn rejects_a_tree_template_without_required_variables() {
+    async fn rejects_a_tree_template_without_a_supplied_variable() {
         let discovery = String::from_utf8(DISCOVERY_XML.to_vec()).unwrap().replacen(
             "{?packagename,type}",
             "{?packagename}",
@@ -558,10 +551,9 @@ mod tests {
 
         assert!(matches!(
             error,
-            OperationError::Resolve(ResolveError::Object(ObjectError::InvalidTemplate {
-                reason,
-                ..
-            })) if reason.contains("`type`")
+            OperationError::Resolve(ResolveError::Object(
+                ObjectError::UnsupportedTemplateParameter { parameter: "type" }
+            ))
         ));
     }
 

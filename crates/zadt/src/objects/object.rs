@@ -7,24 +7,24 @@ use crate::{EntityTag, ObjectError, compatibility::matching_media_type};
 
 pub(crate) type ErasedProperties = Arc<dyn Any + Send + Sync>;
 
-/// A loaded ADT object with its properties, media type, and entity tag.
+/// An immutable snapshot of a loaded ADT object representation.
 ///
 /// Unlike [`ObjectRef<T>`], this value includes the object properties returned
 /// by ADT. The type parameter `T` selects the property type and the operations
 /// available for that object family.
 ///
 /// Some operations use links advertised by the loaded properties. Operations
-/// that only need the object identity can use [`Object::reference`].
+/// that only need the object identity can use [`ObjectSnapshot::reference`].
 #[derive(Debug, Serialize)]
 #[serde(bound(serialize = "T::Properties: Serialize"))]
-pub struct Object<T: ObjectType> {
+pub struct ObjectSnapshot<T: ObjectType> {
     reference: ObjectRef<T>,
     media_type: String,
     etag: Option<EntityTag>,
     properties: T::Properties,
 }
 
-impl<T: ObjectType> Object<T> {
+impl<T: ObjectType> ObjectSnapshot<T> {
     pub(crate) fn new(
         reference: ObjectRef<T>,
         media_type: impl Into<String>,
@@ -61,7 +61,7 @@ impl<T: ObjectType> Object<T> {
 
     /// Removes the static object family while retaining its concrete properties internally.
     pub fn try_into_erased(self) -> Result<ErasedObject, ObjectError> {
-        validate_typed_object::<T>(&self.reference, &self.media_type, &self.properties)?;
+        validate_typed_snapshot::<T>(&self.reference, &self.media_type, &self.properties)?;
         Ok(ErasedObject::new(
             self.reference.erase(),
             self.media_type,
@@ -71,7 +71,7 @@ impl<T: ObjectType> Object<T> {
     }
 }
 
-impl<T> Clone for Object<T>
+impl<T> Clone for ObjectSnapshot<T>
 where
     T: ObjectType,
     T::Properties: Clone,
@@ -86,7 +86,7 @@ where
     }
 }
 
-impl<T: ObjectType> ObjectIdentity for Object<T> {
+impl<T: ObjectType> ObjectIdentity for ObjectSnapshot<T> {
     fn object_name(&self) -> &str {
         self.reference().object_name()
     }
@@ -151,7 +151,7 @@ impl ErasedObject {
     }
 
     /// Restores a concrete loaded object after validating its runtime representation.
-    pub fn try_into_typed<T>(self) -> Result<Object<T>, ObjectError>
+    pub fn try_into_typed<T>(self) -> Result<ObjectSnapshot<T>, ObjectError>
     where
         T: ObjectType,
     {
@@ -170,8 +170,10 @@ impl ErasedObject {
             Ok(properties) => properties,
             Err(properties) => properties.as_ref().clone(),
         };
-        let media_type = validate_typed_object::<T>(&reference, &self.media_type, &properties)?;
-        Ok(Object::new(reference, media_type, self.etag, properties))
+        let media_type = validate_typed_snapshot::<T>(&reference, &self.media_type, &properties)?;
+        Ok(ObjectSnapshot::new(
+            reference, media_type, self.etag, properties,
+        ))
     }
 
     pub(crate) fn typed_reference<T: ObjectType>(&self) -> Result<ObjectRef<T>, ObjectError> {
@@ -223,20 +225,20 @@ impl fmt::Debug for ErasedObject {
     }
 }
 
-/// Temporary Serde value used while deserializing an [`Object`].
+/// Temporary Serde value used while deserializing an [`ObjectSnapshot`].
 ///
 /// The reference, media type, and properties are checked before the object is
 /// constructed.
 #[derive(Deserialize)]
 #[serde(bound(deserialize = "ObjectRef<T>: Deserialize<'de>, T::Properties: Deserialize<'de>"))]
-struct RawObject<T: ObjectType> {
+struct RawObjectSnapshot<T: ObjectType> {
     reference: ObjectRef<T>,
     media_type: String,
     etag: Option<EntityTag>,
     properties: T::Properties,
 }
 
-impl<'de, T> Deserialize<'de> for Object<T>
+impl<'de, T> Deserialize<'de> for ObjectSnapshot<T>
 where
     T: ObjectType,
     ObjectRef<T>: Deserialize<'de>,
@@ -245,9 +247,9 @@ where
     where
         D: Deserializer<'de>,
     {
-        let object = RawObject::<T>::deserialize(deserializer)?;
+        let object = RawObjectSnapshot::<T>::deserialize(deserializer)?;
         let media_type =
-            validate_typed_object::<T>(&object.reference, &object.media_type, &object.properties)
+            validate_typed_snapshot::<T>(&object.reference, &object.media_type, &object.properties)
                 .map_err(serde::de::Error::custom)?;
         Ok(Self::new(
             object.reference,
@@ -258,7 +260,7 @@ where
     }
 }
 
-pub(crate) fn validate_typed_object<T>(
+pub(crate) fn validate_typed_snapshot<T>(
     reference: &ObjectRef<T>,
     media_type: &str,
     properties: &T::Properties,

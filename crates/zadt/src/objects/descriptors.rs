@@ -1,9 +1,9 @@
 use super::{
     AccessControl, AnnotationDefinition, AssignObjectIdentity, Class, Create, DataDefinition,
     DataElement, Domain, ErasedObject, ErasedProperties, FunctionGroup, FunctionGroupInclude,
-    FunctionModule, GlobalWorkbenchType, Include, Interface, MediaTyped, MetadataExtension, Object,
-    ObjectIdentity, ObjectRef, ObjectType, Package, Program, RunCapability, ServiceDefinition,
-    Source, SourceComponents, Structure, ToXml, XmlConversion,
+    FunctionModule, GlobalWorkbenchType, Include, Interface, MediaTyped, MetadataExtension,
+    ObjectIdentity, ObjectRef, ObjectSnapshot, ObjectType, Package, Program, RunCapability,
+    ServiceDefinition, Source, SourceComponents, Structure, ToXml, XmlConversion,
 };
 use crate::{
     CategoryId, ObjectStructureQuery, SourceRef, compatibility::matching_media_type,
@@ -296,7 +296,7 @@ impl RuntimeCapabilities {
     pub(crate) fn source_adapter<T: Source>(
         object: &ErasedObject,
     ) -> Result<SourceRef, ObjectError> {
-        Object::<T>::source_from_parts(
+        ObjectSnapshot::<T>::source_from_parts(
             &object.typed_reference::<T>()?,
             object.typed_properties::<T>(),
         )
@@ -306,7 +306,7 @@ impl RuntimeCapabilities {
         object: &ErasedObject,
         name: &str,
     ) -> Result<Option<SourceRef>, ObjectError> {
-        Object::<T>::source_component_from_parts(
+        ObjectSnapshot::<T>::source_component_from_parts(
             &object.typed_reference::<T>()?,
             object.typed_properties::<T>(),
             name,
@@ -316,7 +316,7 @@ impl RuntimeCapabilities {
     pub(crate) fn object_structure_adapter<T: Structure>(
         object: &ErasedObject,
     ) -> Result<ObjectStructureQuery, ObjectError> {
-        Object::<T>::object_structure_from_parts(
+        ObjectSnapshot::<T>::object_structure_from_parts(
             &object.typed_reference::<T>()?,
             object.typed_properties::<T>(),
         )
@@ -466,7 +466,7 @@ mod tests {
             "../../tests/fixtures/class-cl-adt-uri-mapper-v4.xml"
         ))
         .unwrap();
-        let object = crate::Object::new(
+        let object = crate::ObjectSnapshot::new(
             ObjectRef::<Class>::new(
                 "CL_ADT_URI_MAPPER".to_owned(),
                 AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),

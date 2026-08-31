@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     Advertised, AdvertisedObjectReference, CategoryId, EncodeError, EncodedOperation,
     GlobalWorkbenchType, ObjectRef, Operation, OperationResponse, RepositoryError, ResponseError,
-    Stateless, User, operation::CollectionTarget,
+    Stateless, User, operation::CollectionLocator,
 };
 
 const CATEGORY: CategoryId = CategoryId {
@@ -32,7 +32,7 @@ pub struct FavoriteObjectsQuery {
 }
 
 impl FavoriteObjectsQuery {
-    const TARGET: CollectionTarget = CollectionTarget::new(CATEGORY);
+    const TARGET: CollectionLocator = CollectionLocator::new(CATEGORY);
 
     pub fn new() -> Self {
         Self { list: None }
@@ -103,7 +103,7 @@ pub struct FavoriteObjectsUpdate {
 }
 
 impl FavoriteObjectsUpdate {
-    const TARGET: CollectionTarget = CollectionTarget::new(CATEGORY);
+    const TARGET: CollectionLocator = CollectionLocator::new(CATEGORY);
 
     pub fn new(list: impl Into<String>) -> Self {
         Self {

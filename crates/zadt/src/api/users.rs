@@ -4,7 +4,7 @@ use serde::Deserialize;
 use crate::{
     Advertised, CategoryId, Client, EncodeError, EncodedOperation, Operation, OperationResponse,
     Ready, ResponseError, Stateless, User, UserError,
-    operation::{CollectionTarget, TemplateTarget},
+    operation::{CollectionLocator, TemplateLocator},
 };
 
 const USERS_CATEGORY: CategoryId = CategoryId {
@@ -25,7 +25,7 @@ pub struct UsersQuery {
 }
 
 impl UsersQuery {
-    const TARGET: CollectionTarget = CollectionTarget::new(USERS_CATEGORY);
+    const TARGET: CollectionLocator = CollectionLocator::new(USERS_CATEGORY);
 
     /// Creates a query using the backend's default selection and result limit.
     pub fn new() -> Self {
@@ -76,7 +76,7 @@ pub struct UserDetailsQuery {
 }
 
 impl UserDetailsQuery {
-    const TARGET: TemplateTarget = TemplateTarget::new(USERS_CATEGORY, USER_RELATION);
+    const TARGET: TemplateLocator = TemplateLocator::new(USERS_CATEGORY, USER_RELATION);
 
     fn new(user: User) -> Self {
         Self { user }
@@ -90,7 +90,6 @@ impl Operation for UserDetailsQuery {
 
     fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
         let mut target = Self::TARGET.target();
-        target.require_variable("username");
         target.push_variable("username", self.user.as_str());
         let mut request = EncodedOperation::advertised(Method::GET, target);
         request.set_accept(USERS_MEDIA_TYPE);

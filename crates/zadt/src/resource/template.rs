@@ -16,10 +16,6 @@ impl<'a> AdtUriTemplate<'a> {
         Self { template }
     }
 
-    pub(crate) fn as_str(self) -> &'a str {
-        self.template
-    }
-
     pub(crate) fn has_variable(self, expected: &str) -> bool {
         self.variable_names().contains(&expected)
     }
@@ -126,6 +122,47 @@ mod tests {
         assert!(template.has_variable("profilerId"));
         assert!(!template.has_variable("programname"));
         assert_eq!(template.variable_names(), ["classname", "profilerId"]);
+    }
+
+    #[test]
+    fn expands_exploded_query_lists() {
+        let template = AdtUriTemplate::new(
+            "/sap/bc/adt/repository/informationsystem/search{?query}{&objectType*}{&packageName*}",
+        );
+        let variables = HashMap::from([
+            ("query".to_owned(), Value::String("flight model".to_owned())),
+            (
+                "objectType".to_owned(),
+                Value::List(vec![
+                    Value::String("CLAS/OC".to_owned()),
+                    Value::String("PROG/P".to_owned()),
+                ]),
+            ),
+            (
+                "packageName".to_owned(),
+                Value::List(vec![
+                    Value::String("SADT_CORE".to_owned()),
+                    Value::String("SADT_TOOLS".to_owned()),
+                ]),
+            ),
+        ]);
+
+        let (target, query) = template.expand(&variables).unwrap();
+
+        assert_eq!(
+            target.as_str(),
+            "/sap/bc/adt/repository/informationsystem/search"
+        );
+        assert_eq!(
+            query,
+            [
+                ("query".to_owned(), "flight model".to_owned()),
+                ("objectType".to_owned(), "CLAS/OC".to_owned()),
+                ("objectType".to_owned(), "PROG/P".to_owned()),
+                ("packageName".to_owned(), "SADT_CORE".to_owned()),
+                ("packageName".to_owned(), "SADT_TOOLS".to_owned()),
+            ]
+        );
     }
 
     #[test]

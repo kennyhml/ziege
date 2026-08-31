@@ -2,9 +2,9 @@ use http::{Method, StatusCode};
 use serde::Deserialize;
 
 use crate::{
-    AdtUri, AdvertisedLink, EncodeError, EncodedOperation, ErasedObject, Links, Object,
-    ObjectError, ObjectStructureRef, ObjectVersion, Operation, OperationResponse, Owned, Relations,
-    ResponseError, Stateless, Structure, resource::resolve_href,
+    AdtUri, AdvertisedLink, EncodeError, EncodedOperation, ErasedObject, Links, ObjectError,
+    ObjectSnapshot, ObjectStructureRef, ObjectVersion, Operation, OperationResponse, Owned,
+    Relations, ResponseError, Stateless, Structure, resource::resolve_href,
 };
 
 const INHERITED_MEMBERS_QUERY: &str = "inheritedMembers";
@@ -122,7 +122,7 @@ impl ObjectStructureRef {
     }
 }
 
-impl<T: Structure> Object<T> {
+impl<T: Structure> ObjectSnapshot<T> {
     pub(crate) fn object_structure_from_parts(
         reference: &crate::ObjectRef<T>,
         properties: &T::Properties,
@@ -327,7 +327,7 @@ mod tests {
             AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
         );
         let properties: ClassProperties = serde_xml_rs::from_reader(CLASS_XML).unwrap();
-        let object = Object::new(
+        let object = ObjectSnapshot::new(
             reference,
             "application/vnd.sap.adt.oo.classes.v4+xml",
             None,
@@ -356,7 +356,7 @@ mod tests {
             AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
         );
         let properties: ProgramProperties = serde_xml_rs::from_reader(PROGRAM_XML).unwrap();
-        let object = Object::new(
+        let object = ObjectSnapshot::new(
             reference,
             "application/vnd.sap.adt.programs.programs.v3+xml",
             None,

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use crate::{
     AdtUri, Advertised, AdvertisedLink, CategoryId, Client, EncodeError, EncodedOperation,
     ObjectError, ObjectRef, ObjectVersion, Operation, OperationResponse, Ready, ResponseError,
-    Stateless, operation::CollectionTarget,
+    Stateless, operation::CollectionLocator,
 };
 
 const CHECK_RUN_CATEGORY: CategoryId = CategoryId {
@@ -37,7 +37,7 @@ const ADT_CORE_NAMESPACE: &str = "http://www.sap.com/adt/core";
 pub struct CheckRunReportersQuery;
 
 impl CheckRunReportersQuery {
-    const TARGET: CollectionTarget = CollectionTarget::new(REPORTERS_CATEGORY);
+    const TARGET: CollectionLocator = CollectionLocator::new(REPORTERS_CATEGORY);
 
     pub fn new() -> Self {
         Self
@@ -89,7 +89,7 @@ pub struct ObjectCheckRun {
 }
 
 impl ObjectCheckRun {
-    const TARGET: CollectionTarget = CollectionTarget::new(CHECK_RUN_CATEGORY);
+    const TARGET: CollectionLocator = CollectionLocator::new(CHECK_RUN_CATEGORY);
 
     pub fn new() -> Self {
         Self::default()
