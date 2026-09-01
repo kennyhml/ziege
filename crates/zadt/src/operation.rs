@@ -10,14 +10,14 @@ use crate::{
 };
 
 mod batch;
+mod concurrency;
 mod encoded;
-mod revalidation;
 mod target;
 
 pub use batch::{BatchError, BatchKey, BatchOperation, BatchResponses, Batched};
+pub use concurrency::{IfMatch, IfNoneMatch, PreconditionResult, Revalidation};
 use encoded::EncodedTarget;
 pub use encoded::{Advertised, EncodedOperation, OperationTarget, Owned};
-pub use revalidation::{IfNoneMatch, Revalidation};
 pub use target::{AdvertisedCollection, AdvertisedTarget, AdvertisedTemplate, DiscoveryDocument};
 pub(crate) use target::{CollectionLocator, TemplateLocator};
 

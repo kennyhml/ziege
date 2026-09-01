@@ -1,6 +1,6 @@
-//! HTTP cache revalidation based on entity tags.
+//! HTTP conditional requests based on entity tags.
 
-use http::StatusCode;
+use http::{StatusCode, header};
 
 use super::{Operation, OperationResponse};
 use crate::{EncodeError, EncodedOperation, EntityTag, ResponseError};
@@ -76,5 +76,54 @@ impl<T> Revalidation<T> {
             Self::Modified(_) => None,
             Self::NotModified { etag } => etag.as_deref(),
         }
+    }
+}
+
+/// Outcome of a request using optimistic concurrency control with `If-Match`.
+#[derive(Clone, Debug)]
+pub enum PreconditionResult<T> {
+    /// The precondition succeeded and the operation response was returned.
+    Success(T),
+
+    /// The entity tag no longer identifies the current representation.
+    Failed { etag: Option<EntityTag> },
+}
+
+/// An operation carrying an `If-Match` precondition.
+#[derive(Debug)]
+pub struct IfMatch<O> {
+    inner: O,
+    etag: EntityTag,
+}
+
+impl<O> IfMatch<O> {
+    pub(crate) fn new(inner: O, etag: EntityTag) -> Self {
+        Self { inner, etag }
+    }
+}
+
+impl<O> Operation for IfMatch<O>
+where
+    O: Operation,
+{
+    type Kind = O::Kind;
+    type Response = PreconditionResult<O::Response>;
+    type Target = O::Target;
+
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        let mut request = self.inner.encode()?;
+        request
+            .headers_mut()
+            .insert(header::IF_MATCH, self.etag.as_header_value().clone());
+        Ok(request)
+    }
+
+    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+        if response.status() == StatusCode::PRECONDITION_FAILED {
+            return Ok(PreconditionResult::Failed {
+                etag: response.entity_tag(),
+            });
+        }
+        self.inner.decode(response).map(PreconditionResult::Success)
     }
 }

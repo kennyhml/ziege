@@ -214,9 +214,7 @@ async fn erased_data_element_update_uses_the_json_consumer_boundary() {
         .await
         .unwrap();
     let result = properties
-        .update(edited_properties)
-        .unwrap()
-        .with_lock(&object_lock)
+        .update_with_lock(&object_lock, edited_properties)
         .unwrap()
         .execute(&session)
         .await

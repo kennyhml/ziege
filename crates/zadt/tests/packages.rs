@@ -207,9 +207,7 @@ async fn package_properties_update_returns_none_for_an_empty_response() {
         .await
         .unwrap();
     let result = package
-        .update(updated_properties)
-        .unwrap()
-        .with_lock(&object_lock)
+        .update_with_lock(&object_lock, updated_properties)
         .unwrap()
         .execute(&session)
         .await

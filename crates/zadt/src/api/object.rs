@@ -1,16 +1,12 @@
-/// Everything related to core object operations such as querying snapshots,
-/// updating object properties or creating objects.
-///
-/// Because all of this directly involves the objects properties, alof of
-/// parallel implementations are needed for typed and erased paths where
-/// the erased path must use the descriptor to cast the properties.
-///
-/// Because all of the operations return an object snapshot response using
-/// the same media type, it makes sense to keep them in one module.
+//! Core object operations for creation, snapshot queries, and property updates.
+//!
+//! Typed operations use concrete property models, while erased operations use
+//! runtime descriptors to convert properties. The operations share response
+//! decoding because each representation produces an object snapshot.
 use super::{locking::LOCK_HANDLE_QUERY, transports::TRANSPORT_REQUEST_QUERY};
 use crate::{
-    Advertised, CategoryId, ObjectError, ObjectLock, ObjectSnapshot, SnapshotKind, TransportNumber,
-    compatibility,
+    Advertised, CategoryId, IfMatch, ObjectError, ObjectLock, ObjectSnapshot, SnapshotKind,
+    TransportNumber, compatibility,
     error::{EncodeError, ResponseError},
     objects::{
         AssignObjectIdentity, Create, MediaTyped, ObjectIdentity, ObjectRef, ObjectType, ToXml,
@@ -22,18 +18,17 @@ use crate::{
     },
     protocol::EntityTag,
 };
-use http::{Method, header};
+use http::Method;
 
 /// Creates a repository object from a family-specific creation payload.
 ///
-/// Objects are created using a `POST` request on the objects base path,
+/// Objects are created using a `POST` request on the object collection path,
 /// which is generally discovered through its category. For instance, a
 /// `POST` request to `/sap/bc/adt/oo/classes` creates a new class based
-/// on the request body, which has the same content type as the objects
-/// properties.
+/// on a request body with the corresponding creation content type.
 ///
 /// Because only a small subset of the properties are actually used during
-/// creation, the api mirrors the properties into a separate struct instead
+/// creation, the API mirrors the properties into a separate struct instead
 /// of marking all other fields as optional.
 ///
 /// Successful responses without a representation decode to `None`. Object
@@ -44,9 +39,9 @@ pub struct ObjectCreation<T, P> {
     reference: ObjectRef<T>,
     /// The request payload, either typed or JSON.
     payload: P,
-    /// Media types we support creation with.
+    /// Media types supported for creation.
     create_media_types: &'static [&'static str],
-    /// Media types we accept as response.
+    /// Media types accepted for the response.
     response_media_types: &'static [&'static str],
     /// A transport request to assign the new object to.
     transport_request: Option<TransportNumber>,
@@ -60,7 +55,7 @@ impl<T, P> ObjectCreation<T, P> {
         self
     }
 
-    /// Shared internal helper for both typed and erased paths
+    /// Shared internal helper for both typed and erased paths.
     fn build_request(
         &self,
         category: CategoryId,
@@ -142,12 +137,14 @@ where
 {
     /// Constructs an [`Operation`] to create an object.
     ///
-    /// The object identity (workbench type & name) are taken from `self`.
+    /// The object identity, including Workbench type and name, comes from this
+    /// reference.
     ///
-    /// Other properties, such as description, abap language version and
+    /// Other properties, such as description, ABAP language version, and
     /// object specific properties can be supplied in the payload.
     ///
-    /// The created object is returnd as snapshot on success.
+    /// A response representation produces `Some` snapshot. An empty successful
+    /// response produces `None`.
     pub fn create(&self, mut payload: T::Payload) -> ObjectCreation<T, T::Payload> {
         // Make sure identify matches the reference. In the erased path,
         // the same thing happens during the descriptor xml serialization.
@@ -166,15 +163,15 @@ where
 impl ObjectRef<()> {
     /// Constructs an [`Operation`] to create an object.
     ///
-    /// The object identity (workbench type & name) are taken from `self`.
+    /// The object identity, including Workbench type and name, comes from this
+    /// reference.
     ///
-    /// Other properties, such as description, abap language version and
+    /// Other properties, such as description, ABAP language version, and
     /// object specific properties can be supplied in the payload.
     ///
-    /// Because the payload is supplied as JSON, deserialization to a typed
-    /// payload may fail at this point.
-    ///
-    /// The created object is returnd as snapshot on success.
+    /// JSON conversion and XML encoding occur when the operation is encoded and
+    /// can fail at that stage. A response representation produces `Some`
+    /// snapshot, while an empty successful response produces `None`.
     pub fn create(
         &self,
         payload: serde_json::Value,
@@ -205,7 +202,7 @@ impl ObjectRef<()> {
 /// is queried. If omitted, the server decides which version to return.
 ///
 /// The returned [`ObjectSnapshot`] represents the state of the object,
-/// combined with its version, etag and properties, at the time it was
+/// combined with its version, ETag, and properties at the time it was
 /// queried.
 ///
 /// It is a snapshot because it makes no guarantees that the object
@@ -218,7 +215,7 @@ pub struct ObjectQuery<T> {
 }
 
 impl<T> ObjectQuery<T> {
-    /// Internal helper to build the request for both typed and erased paths
+    /// Internal helper to build the request for both typed and erased paths.
     fn build_request(&self, media_types: &'static [&'static str]) -> EncodedOperation<Owned> {
         // Because the object uri is resolved at object construction through
         // the client, the request target is already owned. This kinda blurs
@@ -240,6 +237,7 @@ impl<T> ObjectQuery<T> {
         self
     }
 
+    /// Adds an `If-None-Match` cache validator to this query.
     pub fn if_none_match(self, etag: EntityTag) -> IfNoneMatch<Self> {
         IfNoneMatch::new(self, etag)
     }
@@ -282,9 +280,9 @@ impl Operation for ObjectQuery<()> {
 impl<T> ObjectRef<T> {
     /// Constructs an [`ObjectQuery<T>`] to snapshot this object.
     ///
-    /// A specific workbench version can be selected through the operation
-    /// builder. The snapshot retains the version retured by the server -
-    /// which is not neccessarily the requested one.
+    /// A specific Workbench version can be selected through the operation
+    /// builder. The snapshot retains the version returned by the server, which
+    /// is not necessarily the requested one.
     ///
     /// Because the [`ObjectRef`] makes no guarantees that the object
     /// it represents actually exists, the query may not find the object.
@@ -297,8 +295,8 @@ impl<T> ObjectRef<T> {
 }
 
 impl<T: SnapshotKind> ObjectSnapshot<T> {
-    /// Constructs an etag-decorated [`ObjectQuery`] to revalidate this
-    /// snapshot, provided that the snapshot has an etag.
+    /// Constructs an ETag-decorated [`ObjectQuery`] to revalidate this
+    /// snapshot, provided that the snapshot has an ETag.
     ///
     /// The response can then be used to check whether this snapshot is
     /// still the latest server state or, if not, replace the current
@@ -314,16 +312,16 @@ impl<T: SnapshotKind> ObjectSnapshot<T> {
     }
 }
 
-/// Updates an objects properties.
+/// Updates object properties using a normalized XML request body.
 ///
-/// The default state uses the snapshots entity tag for an optimistic,
-/// stateless update. [`ObjectUpdate::with_lock`] transitions to a pessimistic
-/// update using a lock handle bound to some user session.
+/// Only properties supported by the concrete object type can be changed through
+/// this operation. Source code updates use the corresponding [`crate::SourceRef`]
+/// operations instead.
 ///
-/// Successful execution decodes a new loaded object when ADT returns a response
+/// Successful execution decodes a new snapshot when ADT returns a response
 /// representation. An empty success response returns `None`.
 #[derive(Debug)]
-pub struct ObjectUpdate<T, S = Option<EntityTag>> {
+pub struct ObjectUpdate<T, S = ()> {
     /// A reference to the object to be updated
     resource: ObjectRef<T>,
     /// The new, already encoded properties
@@ -339,19 +337,15 @@ pub struct ObjectUpdate<T, S = Option<EntityTag>> {
 impl<T, S> ObjectUpdate<T, S> {
     /// Records this update in the supplied transport request.
     ///
-    /// This takes precedence over a transport request inherited by a subsequent
-    /// transition to a locked update.
+    /// For a locked update, this replaces the transport request inherited from
+    /// the lock.
     #[must_use]
     pub fn transport(mut self, transport_request: impl Into<TransportNumber>) -> Self {
         self.transport_request = Some(transport_request.into());
         self
     }
 
-    /// Shared helper to construct the operation for both typed and erased paths.
-    ///
-    /// Because pessimistic concurrency control requires statefulness, the
-    /// operation requires a handful of implementation paths between stateless,
-    /// stateful, typed and untyped combinations.
+    // Shared request encoding for typed, erased, stateless, and stateful updates.
     fn build_request(&self) -> EncodedOperation<Owned> {
         let mut request = EncodedOperation::owned(Method::PUT, self.resource.uri().clone());
         if let Some(transport_request) = &self.transport_request {
@@ -360,52 +354,6 @@ impl<T, S> ObjectUpdate<T, S> {
         request.set_accept(self.media_type);
         request.set_content_type(self.media_type);
         request.set_body(self.body.clone());
-        request
-    }
-}
-
-impl<T> ObjectUpdate<T> {
-    /// Switches this update from optimistic concurrency control to a persistent lock.
-    ///
-    /// The returned operation omits `If-Match`, sends the lock handle, and must be
-    /// executed in the user session that owns the lock.
-    pub fn with_lock(
-        self,
-        object_lock: &ObjectLock,
-    ) -> Result<ObjectUpdate<T, ObjectLock>, ObjectError> {
-        object_lock.validate_modification_for(&self.resource)?;
-        let transport_request = self
-            .transport_request
-            .or_else(|| object_lock.transport_request().cloned());
-
-        Ok(ObjectUpdate {
-            resource: self.resource,
-            body: self.body,
-            media_type: self.media_type,
-            transport_request,
-            state: object_lock.clone(),
-        })
-    }
-
-    /// Internal helper to build an optimistic request with an if-match etag
-    fn build_optimistic_request(&self) -> Result<EncodedOperation<Owned>, ObjectError> {
-        let etag = self.state.as_ref().ok_or(ObjectError::MissingEntityTag)?;
-        let mut request = self.build_request();
-        request
-            .headers_mut()
-            .insert(header::IF_MATCH, etag.as_header_value().clone());
-        Ok(request)
-    }
-}
-
-impl<T> ObjectUpdate<T, ObjectLock> {
-    /// Internal helper to build a pessimistic request with an associated lock
-    fn build_locked_request(&self) -> EncodedOperation<Owned> {
-        let mut request = self.build_request();
-        request.push_query(LOCK_HANDLE_QUERY, self.state.handle());
-        if let Some(user_session) = self.state.user_session() {
-            request.bind_user_session(user_session);
-        }
         request
     }
 }
@@ -419,7 +367,7 @@ where
     type Target = Owned;
 
     fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        Ok(self.build_optimistic_request()?)
+        Ok(self.build_request())
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
@@ -438,7 +386,7 @@ impl Operation for ObjectUpdate<()> {
     type Target = Owned;
 
     fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        Ok(self.build_optimistic_request()?)
+        Ok(self.build_request())
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
@@ -460,7 +408,12 @@ where
     type Target = Owned;
 
     fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        Ok(self.build_locked_request())
+        let mut request = self.build_request();
+        request.push_query(LOCK_HANDLE_QUERY, self.state.handle());
+        if let Some(user_session) = self.state.user_session() {
+            request.bind_user_session(user_session);
+        }
+        Ok(request)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
@@ -479,7 +432,12 @@ impl Operation for ObjectUpdate<(), ObjectLock> {
     type Target = Owned;
 
     fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        Ok(self.build_locked_request())
+        let mut request = self.build_request();
+        request.push_query(LOCK_HANDLE_QUERY, self.state.handle());
+        if let Some(user_session) = self.state.user_session() {
+            request.bind_user_session(user_session);
+        }
+        Ok(request)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
@@ -493,21 +451,39 @@ impl Operation for ObjectUpdate<(), ObjectLock> {
 }
 
 impl<T: ObjectType> ObjectSnapshot<T> {
-    /// Creates an optimistic update operation for this object.
+    /// Creates a stateless update guarded by the entity tag from this snapshot.
     ///
-    /// The operation captures this snapshot's entity tag. A missing entity tag
-    /// is accepted here so the operation can still transition through
-    /// [`ObjectUpdate::with_lock`], but encoding it optimistically will fail.
+    /// Construction fails when the snapshot has no entity tag. A failed HTTP
+    /// precondition is represented by [`crate::PreconditionResult::Failed`].
+    pub fn update_if_match(
+        &self,
+        properties: T::Properties,
+    ) -> Result<IfMatch<ObjectUpdate<T>>, ObjectError> {
+        let etag = self.etag().ok_or(ObjectError::MissingEntityTag)?.clone();
+        self.update(properties, ())
+            .map(|operation| IfMatch::new(operation, etag))
+    }
+
+    /// Creates a stateful update guarded by a persistent modification lock.
     ///
-    /// Only certain object properties, such as description, language
-    /// versions or object specifific properties can be updated through
-    /// this method. Source code updates take place on their respective
-    /// [`crate::SourceRef`] handles.
-    ///
-    /// Whether a property can be updated or not depends on the concrete object
-    /// type. When ADT returns a representation, the response includes the new
-    /// state after applying all possible updates on an inactive object snapshot.
-    pub fn update(&self, mut properties: T::Properties) -> Result<ObjectUpdate<T>, ObjectError> {
+    /// The lock must belong to this object and permit modifications. Its user
+    /// session and transport request are retained by the returned operation.
+    pub fn update_with_lock(
+        &self,
+        lock: &ObjectLock,
+        properties: T::Properties,
+    ) -> Result<ObjectUpdate<T, ObjectLock>, ObjectError> {
+        lock.validate_modification_for(self.reference())?;
+        let mut update = self.update(properties, lock.clone())?;
+        update.transport_request = lock.transport_request().cloned();
+        Ok(update)
+    }
+
+    fn update<S>(
+        &self,
+        mut properties: T::Properties,
+        state: S,
+    ) -> Result<ObjectUpdate<T, S>, ObjectError> {
         properties.assign_identity(self.reference());
 
         let media_type =
@@ -519,30 +495,48 @@ impl<T: ObjectType> ObjectSnapshot<T> {
             media_type,
             body: properties.to_xml()?,
             transport_request: None,
-            state: self.etag().cloned(),
+            state,
         })
     }
 }
 
 impl ObjectSnapshot<()> {
-    /// Creates an optimistic update operation for this object.
+    /// Creates a stateless update guarded by the entity tag from this snapshot.
     ///
-    /// The operation captures this snapshot's entity tag. A missing entity tag
-    /// is accepted here so the operation can still transition through
-    /// [`ObjectUpdate::with_lock`], but encoding it optimistically will fail.
+    /// Construction fails when the snapshot has no entity tag. JSON conversion
+    /// and XML encoding also occur during construction and can fail. A failed
+    /// HTTP precondition is represented by [`crate::PreconditionResult::Failed`].
+    pub fn update_if_match(
+        &self,
+        properties: serde_json::Value,
+    ) -> Result<IfMatch<ObjectUpdate<()>>, ObjectError> {
+        let etag = self.etag().ok_or(ObjectError::MissingEntityTag)?.clone();
+        self.update(properties, ())
+            .map(|operation| IfMatch::new(operation, etag))
+    }
+
+    /// Creates a stateful update guarded by a persistent modification lock.
     ///
-    /// Only certain object properties, such as description, language
-    /// versions or object specifific properties can be updated through
-    /// this method. Source code updates take place on their respective
-    /// [`crate::SourceRef`] handles.
-    ///
-    /// Whether a property can be updated or not depends on the concrete object
-    /// type. When ADT returns a representation, the response includes the new
-    /// state after applying all possible updates on an inactive object snapshot.
-    ///
-    /// Because the properties are supplied as JSON, deserialization to the
-    /// concrete object properties may fail at this point.
-    pub fn update(&self, properties: serde_json::Value) -> Result<ObjectUpdate<()>, ObjectError> {
+    /// The lock must belong to this object and permit modifications. Its user
+    /// session and transport request are retained by the returned operation.
+    /// JSON conversion and XML encoding occur during construction and can fail.
+    pub fn update_with_lock(
+        &self,
+        lock: &ObjectLock,
+        properties: serde_json::Value,
+    ) -> Result<ObjectUpdate<(), ObjectLock>, ObjectError> {
+        lock.validate_modification_for(self.reference())?;
+        let mut update = self.update(properties, lock.clone())?;
+        update.transport_request = lock.transport_request().cloned();
+        Ok(update)
+    }
+
+    /// Shared helper to build the core update operation for erased objects.
+    fn update<S>(
+        &self,
+        properties: serde_json::Value,
+        state: S,
+    ) -> Result<ObjectUpdate<(), S>, ObjectError> {
         let descriptor = self.reference().require_descriptor()?;
 
         // Select media type through the descriptor
@@ -566,7 +560,7 @@ impl ObjectSnapshot<()> {
             media_type,
             body,
             transport_request: None,
-            state: self.etag().cloned(),
+            state,
         })
     }
 }
@@ -988,7 +982,7 @@ mod tests {
         typed_properties.name = "ZOTHER".to_owned();
         typed_properties.object_type = Package::WORKBENCH_TYPE;
         typed_properties.version = WorkbenchVersion::Inactive;
-        let typed_update = snapshot.update(typed_properties).unwrap();
+        let typed_update = snapshot.update_if_match(typed_properties).unwrap();
         fn assert_stateless<O: Operation<Kind = Stateless>>(_: &O) {}
         assert_stateless(&typed_update);
         let typed = typed_update.encode().unwrap();
@@ -999,9 +993,7 @@ mod tests {
         runtime_properties["@adtcore:type"] = "DEVC/K".into();
         runtime_properties["@adtcore:version"] = "inactive".into();
         let runtime_update = runtime_snapshot
-            .update(runtime_properties)
-            .unwrap()
-            .with_lock(&lock)
+            .update_with_lock(&lock, runtime_properties)
             .unwrap();
         fn assert_stateful<O: Operation<Kind = Stateful>>(_: &O) {}
         assert_stateful(&runtime_update);
@@ -1038,7 +1030,35 @@ mod tests {
     }
 
     #[test]
-    fn update_without_an_etag_can_transition_to_a_lock() {
+    fn optimistic_update_reports_a_failed_precondition() {
+        let reference = reference("CL_ADT_URI_MAPPER");
+        let properties: ClassProperties = serde_xml_rs::from_reader(CLASS_XML).unwrap();
+        let snapshot = ObjectSnapshot::new(
+            reference.clone(),
+            WorkbenchVersion::Active,
+            ClassProperties::MEDIA_TYPES[0],
+            Some(EntityTag::from_static("stale-etag")),
+            properties.clone(),
+        );
+        let update = snapshot.update_if_match(properties).unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(header::ETAG, HeaderValue::from_static("current-etag"));
+        let response = OperationResponse::new(
+            AdtResponse::new(StatusCode::PRECONDITION_FAILED, headers, Vec::new()),
+            reference.uri().clone(),
+        );
+
+        let result = update.decode(response).unwrap();
+
+        assert!(matches!(
+            result,
+            crate::PreconditionResult::Failed { etag }
+                if etag.as_deref() == Some("current-etag")
+        ));
+    }
+
+    #[test]
+    fn locked_update_does_not_require_an_entity_tag() {
         let reference = reference("CL_ADT_URI_MAPPER");
         let properties: ClassProperties = serde_xml_rs::from_reader(CLASS_XML).unwrap();
         let snapshot = ObjectSnapshot::new(
@@ -1048,23 +1068,19 @@ mod tests {
             None,
             properties.clone(),
         );
-        let update = snapshot.update(properties).unwrap();
-
-        let error = match update.encode() {
-            Ok(_) => panic!("optimistic update without an ETag must fail"),
-            Err(error) => error,
-        };
-        assert!(matches!(
-            error,
-            EncodeError::Object(ObjectError::MissingEntityTag)
-        ));
+        let error = snapshot.update_if_match(properties.clone()).unwrap_err();
+        assert!(matches!(error, ObjectError::MissingEntityTag));
 
         let lock = ObjectLock::for_test_with_transport(
             reference.erase(),
             AccessMode::Modify,
             "A4HK900001",
         );
-        let request = update.with_lock(&lock).unwrap().encode().unwrap();
+        let request = snapshot
+            .update_with_lock(&lock, properties)
+            .unwrap()
+            .encode()
+            .unwrap();
 
         assert!(!request.headers().contains_key(header::IF_MATCH));
         assert!(
@@ -1079,11 +1095,9 @@ mod tests {
         );
 
         let request = snapshot
-            .update(snapshot.properties().clone())
+            .update_with_lock(&lock, snapshot.properties().clone())
             .unwrap()
             .transport("A4HK900002")
-            .with_lock(&lock)
-            .unwrap()
             .encode()
             .unwrap();
         assert!(
@@ -1099,9 +1113,7 @@ mod tests {
 
         let show_lock = ObjectLock::for_test(reference.erase(), AccessMode::Show);
         let error = snapshot
-            .update(snapshot.properties().clone())
-            .unwrap()
-            .with_lock(&show_lock)
+            .update_with_lock(&show_lock, snapshot.properties().clone())
             .unwrap_err();
         assert!(matches!(error, ObjectError::ObjectLockNotModifiable));
     }
