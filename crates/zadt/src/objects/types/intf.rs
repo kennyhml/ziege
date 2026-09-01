@@ -69,7 +69,7 @@ pub struct InterfaceProperties {
     /// The interface name supplied by ADT.
     #[for_create(identity, default, doc = "The interface name.")]
     #[serde(rename = "@adtcore:name")]
-    pub name: String,
+    pub(crate) name: String,
 
     /// The repository object type, normally `INTF/OI`.
     #[for_create(
@@ -78,7 +78,7 @@ pub struct InterfaceProperties {
         doc = "The interface's global Workbench type."
     )]
     #[serde(rename = "@adtcore:type")]
-    pub object_type: GlobalWorkbenchType,
+    pub(crate) object_type: GlobalWorkbenchType,
 
     /// The timestamp at which the interface was last changed.
     #[serde(rename = "@adtcore:changedAt")]
@@ -86,7 +86,7 @@ pub struct InterfaceProperties {
 
     /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: WorkbenchVersion,
+    pub(crate) version: WorkbenchVersion,
 
     /// The timestamp at which the interface was created.
     #[serde(rename = "@adtcore:createdAt")]

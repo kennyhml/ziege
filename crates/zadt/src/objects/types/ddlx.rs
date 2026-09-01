@@ -64,7 +64,7 @@ pub struct MetadataExtensionProperties {
     /// The Metadata Extension name supplied by ADT.
     #[for_create(identity, default, doc = "The Metadata Extension name.")]
     #[serde(rename = "@adtcore:name")]
-    pub name: String,
+    pub(crate) name: String,
 
     /// The repository object type, normally `DDLX/EX`.
     #[for_create(
@@ -73,7 +73,7 @@ pub struct MetadataExtensionProperties {
         doc = "The Metadata Extension's global Workbench type."
     )]
     #[serde(rename = "@adtcore:type")]
-    pub object_type: GlobalWorkbenchType,
+    pub(crate) object_type: GlobalWorkbenchType,
 
     /// The timestamp at which the object was last changed.
     #[serde(rename = "@adtcore:changedAt")]
@@ -81,7 +81,7 @@ pub struct MetadataExtensionProperties {
 
     /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: WorkbenchVersion,
+    pub(crate) version: WorkbenchVersion,
 
     /// The timestamp at which the object was created.
     #[serde(rename = "@adtcore:createdAt")]
@@ -194,6 +194,7 @@ mod tests {
                 properties.name.clone(),
                 AdtUri::parse("/sap/bc/adt/ddic/ddlx/sources/c_mdoapplicationscope").unwrap(),
             ),
+            crate::WorkbenchVersion::Active,
             MetadataExtensionProperties::MEDIA_TYPES[0],
             None,
             properties,

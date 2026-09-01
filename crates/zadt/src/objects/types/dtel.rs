@@ -21,11 +21,11 @@ pub struct DataElement;
 pub struct DataElementProperties {
     /// The Data Element name supplied by SAP.
     #[serde(rename = "@adtcore:name")]
-    pub name: String,
+    pub(crate) name: String,
 
     /// The repository object type, normally `DTEL/DE`.
     #[serde(rename = "@adtcore:type")]
-    pub object_type: GlobalWorkbenchType,
+    pub(crate) object_type: GlobalWorkbenchType,
 
     /// The user responsible for the Data Element, when advertised.
     #[serde(rename = "@adtcore:responsible")]
@@ -47,9 +47,9 @@ pub struct DataElementProperties {
     #[serde(rename = "@adtcore:changedAt")]
     pub last_changed: Option<String>,
 
-    /// The object version, when advertised.
+    /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: Option<WorkbenchVersion>,
+    pub(crate) version: WorkbenchVersion,
 
     /// The timestamp at which the object was created.
     #[serde(rename = "@adtcore:createdAt")]
@@ -205,7 +205,7 @@ mod tests {
     fn parses_live_data_element_properties_as_one_representation() {
         let properties = properties();
 
-        assert_eq!(properties.version, Some(WorkbenchVersion::New));
+        assert_eq!(properties.version, WorkbenchVersion::New);
         assert_eq!(
             properties
                 .abap_language_version

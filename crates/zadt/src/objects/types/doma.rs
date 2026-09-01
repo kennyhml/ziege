@@ -49,7 +49,7 @@ pub struct DomainProperties {
     /// The Domain name supplied by ADT.
     #[for_create(identity, default, doc = "The Domain name.")]
     #[serde(rename = "@adtcore:name")]
-    pub name: String,
+    pub(crate) name: String,
 
     /// The repository object type, normally `DOMA/DD`.
     #[for_create(
@@ -58,7 +58,7 @@ pub struct DomainProperties {
         doc = "The Domain's global Workbench type."
     )]
     #[serde(rename = "@adtcore:type")]
-    pub object_type: GlobalWorkbenchType,
+    pub(crate) object_type: GlobalWorkbenchType,
 
     /// The timestamp at which the object was last changed.
     #[serde(rename = "@adtcore:changedAt")]
@@ -66,7 +66,7 @@ pub struct DomainProperties {
 
     /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: WorkbenchVersion,
+    pub(crate) version: WorkbenchVersion,
 
     /// The timestamp at which the object was created, when advertised.
     #[serde(rename = "@adtcore:createdAt")]

@@ -118,7 +118,8 @@ async fn repository_object_properties_forward_through_the_typed_query() {
         "class-etag"
     );
     let class: ObjectSnapshot<Class> = properties.clone().try_into_typed::<Class>().unwrap();
-    assert_eq!(class.properties().name, "CL_ADT_URI_MAPPER");
+    assert_eq!(class.reference().name(), "CL_ADT_URI_MAPPER");
+    assert_eq!(class.workbench_version(), WorkbenchVersion::Active);
     assert_eq!(class.reference().uri(), object.uri());
     logon.assert_async().await;
     discovery.assert_async().await;
@@ -207,8 +208,8 @@ async fn class_properties_query_converts_the_live_v4_manifest() {
     let source_ref = response.source().unwrap();
     let source = source_ref.query().execute(&client).await.unwrap();
 
-    assert_eq!(class.name, "CL_ADT_URI_MAPPER");
-    assert_eq!(class.version, WorkbenchVersion::Active);
+    assert_eq!(response.reference().name(), "CL_ADT_URI_MAPPER");
+    assert_eq!(response.workbench_version(), WorkbenchVersion::Active);
     assert_eq!(class.package.name.as_deref(), Some("SADT_TOOLS_CORE"));
     assert_eq!(class.sources.len(), 5);
     assert_eq!(

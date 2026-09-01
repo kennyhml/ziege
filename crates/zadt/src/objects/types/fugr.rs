@@ -67,13 +67,13 @@ pub struct FunctionGroupProperties {
     #[serde(rename = "@adtcore:abapLanguageVersion")]
     pub abap_language_version: Option<AbapLanguageVersion>,
     #[serde(rename = "@adtcore:name")]
-    pub name: String,
+    pub(crate) name: String,
     #[serde(rename = "@adtcore:type")]
-    pub object_type: GlobalWorkbenchType,
+    pub(crate) object_type: GlobalWorkbenchType,
     #[serde(rename = "@adtcore:changedAt")]
     pub last_changed: String,
     #[serde(rename = "@adtcore:version")]
-    pub version: WorkbenchVersion,
+    pub(crate) version: WorkbenchVersion,
     #[serde(rename = "@adtcore:createdAt")]
     pub created_at: String,
     #[serde(rename = "@adtcore:changedBy")]
@@ -121,13 +121,13 @@ pub struct FunctionModuleProperties {
     #[serde(rename = "@abapsource:sourceUri")]
     pub source_uri: String,
     #[serde(rename = "@adtcore:name")]
-    pub name: String,
+    pub(crate) name: String,
     #[serde(rename = "@adtcore:type")]
-    pub object_type: GlobalWorkbenchType,
+    pub(crate) object_type: GlobalWorkbenchType,
     #[serde(rename = "@adtcore:changedAt")]
     pub last_changed: String,
     #[serde(rename = "@adtcore:version")]
-    pub version: WorkbenchVersion,
+    pub(crate) version: WorkbenchVersion,
     #[serde(rename = "@adtcore:createdAt")]
     pub created_at: String,
     #[serde(rename = "@adtcore:changedBy")]
@@ -165,13 +165,13 @@ pub struct FunctionGroupIncludeProperties {
     #[serde(rename = "@abapsource:sourceUri")]
     pub source_uri: String,
     #[serde(rename = "@adtcore:name")]
-    pub name: String,
+    pub(crate) name: String,
     #[serde(rename = "@adtcore:type")]
-    pub object_type: GlobalWorkbenchType,
+    pub(crate) object_type: GlobalWorkbenchType,
     #[serde(rename = "@adtcore:changedAt")]
     pub last_changed: String,
     #[serde(rename = "@adtcore:version")]
-    pub version: WorkbenchVersion,
+    pub(crate) version: WorkbenchVersion,
     #[serde(rename = "@adtcore:createdAt")]
     pub created_at: String,
     #[serde(rename = "@adtcore:changedBy")]

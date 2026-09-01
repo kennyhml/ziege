@@ -91,7 +91,7 @@ async fn package_properties_advertise_all_supported_contracts() {
     assert_eq!(response.media_type(), PackageProperties::MEDIA_TYPES[0]);
     let package = response.properties();
 
-    assert_eq!(package.name, "SADT_TOOLS_CORE");
+    assert_eq!(response.reference().name(), "SADT_TOOLS_CORE");
     assert_eq!(
         response.etag().map(zadt::EntityTag::as_str),
         Some("package-etag")

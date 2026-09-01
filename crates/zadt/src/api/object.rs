@@ -304,9 +304,13 @@ impl<T: SnapshotKind> ObjectSnapshot<T> {
     /// still the latest server state or, if not, replace the current
     /// snapshot.
     pub fn revalidate(&self) -> Option<IfNoneMatch<ObjectQuery<T>>> {
-        self.etag()
-            .cloned()
-            .map(|etag| self.reference().query().if_none_match(etag))
+        let etag = self.etag()?.clone();
+        Some(
+            self.reference()
+                .query()
+                .workbench_version(self.workbench_version())
+                .if_none_match(etag),
+        )
     }
 }
 
@@ -410,10 +414,10 @@ impl<T: ObjectType> ObjectSnapshot<T> {
     pub fn update(
         &self,
         lock: &ObjectLock,
-        properties: T::Properties,
+        mut properties: T::Properties,
     ) -> Result<ObjectUpdate<T>, ObjectError> {
         lock.validate_modification_for(self.reference())?;
-        properties.validate_for(self.reference())?;
+        properties.assign_identity(self.reference());
 
         let media_type =
             compatibility::matching_media_type(T::Properties::MEDIA_TYPES, self.media_type())
@@ -490,10 +494,17 @@ impl<T: ObjectType> ObjectSnapshot<T> {
             .expect("validated properties Content-Type must match a supported media type");
 
         let etag = response.entity_tag();
+        let extract = WorkbenchVersionExtractor::from_xml(response.body())?;
         let properties = T::Properties::from_xml(response.body())?;
         properties.validate_for(resource)?;
 
-        Ok(Self::new(resource.clone(), media_type, etag, properties))
+        Ok(Self::new(
+            resource.clone(),
+            extract.workbench_version,
+            media_type,
+            etag,
+            properties,
+        ))
     }
 }
 
@@ -514,13 +525,30 @@ impl ObjectSnapshot<()> {
             .expect("validated properties Content-Type must match a supported media type");
 
         let etag = response.entity_tag();
+        let extract = WorkbenchVersionExtractor::from_xml(response.body())?;
         let properties = descriptor.properties_from_xml(resource, response.body())?;
+
         Ok(Self::new_erased(
             resource.clone(),
+            extract.workbench_version,
             media_type,
             etag,
             properties,
         ))
+    }
+}
+
+/// Internal helper to extract only a workbench version from
+/// the response such that it is available for object creation.
+#[derive(serde::Deserialize)]
+struct WorkbenchVersionExtractor {
+    #[serde(rename = "@adtcore:version")]
+    workbench_version: WorkbenchVersion,
+}
+
+impl WorkbenchVersionExtractor {
+    fn from_xml(body: &[u8]) -> Result<Self, ObjectError> {
+        serde_xml_rs::from_reader(body).map_err(ObjectError::InvalidResponse)
     }
 }
 
@@ -531,9 +559,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        AbapLanguageVersion, AdtRequest, AdtResponse, AdtUri, AdvertisedObjectReference, Class,
-        ClassCategory, ClassCreateProperties, ClassProperties, ClassTemplate, Client,
-        CompatibilityError, ObjectType, Package, Ready, Resolve, Transport,
+        AbapLanguageVersion, AccessMode, AdtRequest, AdtResponse, AdtUri,
+        AdvertisedObjectReference, Class, ClassCategory, ClassCreateProperties, ClassProperties,
+        ClassTemplate, Client, CompatibilityError, ObjectType, Package, Ready, Resolve, Transport,
     };
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
@@ -845,10 +873,61 @@ mod tests {
         let created = operation.decode(response).unwrap().unwrap();
         let runtime_created = runtime.decode(runtime_response).unwrap().unwrap();
 
-        assert_eq!(created.properties().name, "CL_ADT_URI_MAPPER");
+        assert_eq!(created.reference().name(), "CL_ADT_URI_MAPPER");
+        assert_eq!(created.workbench_version(), WorkbenchVersion::Active);
         assert_eq!(
             runtime_created.properties().unwrap()["@adtcore:name"],
             "CL_ADT_URI_MAPPER"
         );
+    }
+
+    #[test]
+    fn updates_canonicalize_identity_and_use_the_property_version() {
+        let reference = reference("CL_ADT_URI_MAPPER");
+        let properties: ClassProperties = serde_xml_rs::from_reader(CLASS_XML).unwrap();
+        let snapshot = ObjectSnapshot::new(
+            reference.clone(),
+            WorkbenchVersion::Active,
+            ClassProperties::MEDIA_TYPES[0],
+            None,
+            properties.clone(),
+        );
+        let lock = ObjectLock::for_test(reference.erase(), AccessMode::Modify);
+
+        let mut typed_properties = properties;
+        typed_properties.name = "ZOTHER".to_owned();
+        typed_properties.object_type = Package::WORKBENCH_TYPE;
+        typed_properties.version = WorkbenchVersion::Inactive;
+        let typed = snapshot
+            .update(&lock, typed_properties)
+            .unwrap()
+            .encode()
+            .unwrap();
+
+        let runtime_snapshot = snapshot.into_erased();
+        let mut runtime_properties = runtime_snapshot.properties().unwrap();
+        runtime_properties["@adtcore:name"] = "ZOTHER".into();
+        runtime_properties["@adtcore:type"] = "DEVC/K".into();
+        runtime_properties["@adtcore:version"] = "inactive".into();
+        let runtime = runtime_snapshot
+            .update(&lock, runtime_properties)
+            .unwrap()
+            .encode()
+            .unwrap();
+
+        for request in [typed, runtime] {
+            let body = std::str::from_utf8(request.body()).unwrap();
+            let root = body
+                .split_once("<class:abapClass")
+                .unwrap()
+                .1
+                .split_once('>')
+                .unwrap()
+                .0;
+            assert!(body.contains("adtcore:name=\"CL_ADT_URI_MAPPER\""));
+            assert!(body.contains("adtcore:type=\"CLAS/OC\""));
+            assert!(!body.contains("ZOTHER"));
+            assert!(root.contains("adtcore:version=\"inactive\""));
+        }
     }
 }

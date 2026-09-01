@@ -64,7 +64,7 @@ pub struct AccessControlProperties {
     /// The Access Control name supplied by ADT.
     #[for_create(identity, default, doc = "The Access Control name.")]
     #[serde(rename = "@adtcore:name")]
-    pub name: String,
+    pub(crate) name: String,
 
     /// The repository object type, normally `DCLS/DL`.
     #[for_create(
@@ -73,7 +73,7 @@ pub struct AccessControlProperties {
         doc = "The Access Control's global Workbench type."
     )]
     #[serde(rename = "@adtcore:type")]
-    pub object_type: GlobalWorkbenchType,
+    pub(crate) object_type: GlobalWorkbenchType,
 
     /// The timestamp at which the object was last changed.
     #[serde(rename = "@adtcore:changedAt")]
@@ -81,7 +81,7 @@ pub struct AccessControlProperties {
 
     /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: WorkbenchVersion,
+    pub(crate) version: WorkbenchVersion,
 
     /// The timestamp at which the object was created.
     #[serde(rename = "@adtcore:createdAt")]

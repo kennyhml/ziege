@@ -329,6 +329,7 @@ mod tests {
         let properties: ClassProperties = serde_xml_rs::from_reader(CLASS_XML).unwrap();
         let object = ObjectSnapshot::new(
             reference,
+            WorkbenchVersion::Active,
             "application/vnd.sap.adt.oo.classes.v4+xml",
             None,
             properties,
@@ -358,6 +359,7 @@ mod tests {
         let properties: ProgramProperties = serde_xml_rs::from_reader(PROGRAM_XML).unwrap();
         let object = ObjectSnapshot::new(
             reference,
+            WorkbenchVersion::Inactive,
             "application/vnd.sap.adt.programs.programs.v3+xml",
             None,
             properties,

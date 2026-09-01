@@ -80,7 +80,7 @@ pub struct DataDefinitionProperties {
     /// The Data Definition name supplied by ADT.
     #[for_create(identity, default, doc = "The Data Definition name.")]
     #[serde(rename = "@adtcore:name")]
-    pub name: String,
+    pub(crate) name: String,
 
     /// The repository object type, normally `DDLS/DF`.
     #[for_create(
@@ -89,7 +89,7 @@ pub struct DataDefinitionProperties {
         doc = "The Data Definition's global Workbench type."
     )]
     #[serde(rename = "@adtcore:type")]
-    pub object_type: GlobalWorkbenchType,
+    pub(crate) object_type: GlobalWorkbenchType,
 
     /// The timestamp at which the object was last changed.
     #[serde(rename = "@adtcore:changedAt")]
@@ -97,7 +97,7 @@ pub struct DataDefinitionProperties {
 
     /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: WorkbenchVersion,
+    pub(crate) version: WorkbenchVersion,
 
     /// The timestamp at which the object was created.
     #[serde(rename = "@adtcore:createdAt")]

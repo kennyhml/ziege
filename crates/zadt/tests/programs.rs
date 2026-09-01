@@ -169,9 +169,9 @@ async fn include_properties_query_converts_the_live_ztest_properties() {
         .await
         .unwrap();
 
-    assert_eq!(include.name, "ZTEST");
-    assert_eq!(include.object_type.to_string(), "PROG/I");
-    assert_eq!(include.version, WorkbenchVersion::Active);
+    assert_eq!(response.reference().name(), "ZTEST");
+    assert_eq!(response.reference().object_type().to_string(), "PROG/I");
+    assert_eq!(response.workbench_version(), WorkbenchVersion::Active);
     assert_eq!(include.context_ref_count, 0);
     assert_eq!(include.package.name.as_deref(), Some("$TMP"));
     assert_eq!(include.links.len(), 7);
@@ -246,9 +246,9 @@ async fn program_properties_query_converts_the_live_z_test_v3_properties() {
         .await
         .unwrap();
 
-    assert_eq!(program.name, "Z_TEST");
-    assert_eq!(program.object_type.to_string(), "PROG/P");
-    assert_eq!(program.version, WorkbenchVersion::Inactive);
+    assert_eq!(response.reference().name(), "Z_TEST");
+    assert_eq!(response.reference().object_type().to_string(), "PROG/P");
+    assert_eq!(response.workbench_version(), WorkbenchVersion::Inactive);
     assert_eq!(program.program_type, "executableProgram");
     assert!(program.fix_point_arithmetic);
     assert!(program.unicode_check_active);
@@ -351,8 +351,8 @@ async fn program_properties_query_accepts_server_selected_v2() {
     assert_eq!(response.media_type(), ProgramProperties::MEDIA_TYPES[1]);
     let program = response.properties();
 
-    assert_eq!(program.name, "Z_TEST");
-    assert_eq!(program.version, WorkbenchVersion::Inactive);
+    assert_eq!(response.reference().name(), "Z_TEST");
+    assert_eq!(response.workbench_version(), WorkbenchVersion::Inactive);
     assert_eq!(program.source_uri, "source/main");
     logon.assert_async().await;
     discovery.assert_async().await;

@@ -76,11 +76,11 @@ pub struct SyntaxLanguage {
 pub struct ProgramProperties {
     /// The program name supplied by ADT.
     #[serde(rename = "@adtcore:name")]
-    pub name: String,
+    pub(crate) name: String,
 
     /// The root repository object type, normally `PROG/P`.
     #[serde(rename = "@adtcore:type")]
-    pub object_type: GlobalWorkbenchType,
+    pub(crate) object_type: GlobalWorkbenchType,
 
     /// The timestamp at which the program was last changed.
     #[serde(rename = "@adtcore:changedAt")]
@@ -88,7 +88,7 @@ pub struct ProgramProperties {
 
     /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: WorkbenchVersion,
+    pub(crate) version: WorkbenchVersion,
 
     /// The timestamp at which the program was created.
     #[serde(rename = "@adtcore:createdAt")]
@@ -181,11 +181,11 @@ impl ToXml for ProgramProperties {
 pub struct IncludeProperties {
     /// The include name supplied by ADT.
     #[serde(rename = "@adtcore:name")]
-    pub name: String,
+    pub(crate) name: String,
 
     /// The root repository object type, normally `PROG/I`.
     #[serde(rename = "@adtcore:type")]
-    pub object_type: GlobalWorkbenchType,
+    pub(crate) object_type: GlobalWorkbenchType,
 
     /// The timestamp at which the include was last changed.
     #[serde(rename = "@adtcore:changedAt")]
@@ -193,7 +193,7 @@ pub struct IncludeProperties {
 
     /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: WorkbenchVersion,
+    pub(crate) version: WorkbenchVersion,
 
     /// The timestamp at which the include was created.
     #[serde(rename = "@adtcore:createdAt")]

@@ -84,7 +84,7 @@ pub struct ServiceDefinitionProperties {
     /// The Service Definition name supplied by ADT.
     #[for_create(identity, default, doc = "The Service Definition name.")]
     #[serde(rename = "@adtcore:name")]
-    pub name: String,
+    pub(crate) name: String,
 
     /// The repository object type, normally `SRVD/SRV`.
     #[for_create(
@@ -93,7 +93,7 @@ pub struct ServiceDefinitionProperties {
         doc = "The Service Definition's global Workbench type."
     )]
     #[serde(rename = "@adtcore:type")]
-    pub object_type: GlobalWorkbenchType,
+    pub(crate) object_type: GlobalWorkbenchType,
 
     /// The timestamp at which the object was last changed.
     #[serde(rename = "@adtcore:changedAt")]
@@ -101,7 +101,7 @@ pub struct ServiceDefinitionProperties {
 
     /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: WorkbenchVersion,
+    pub(crate) version: WorkbenchVersion,
 
     /// The timestamp at which the object was created.
     #[serde(rename = "@adtcore:createdAt")]
@@ -218,6 +218,7 @@ mod tests {
                 properties.name.clone(),
                 AdtUri::parse("/sap/bc/adt/ddic/srvd/sources/managedistributions").unwrap(),
             ),
+            crate::WorkbenchVersion::Active,
             ServiceDefinitionProperties::MEDIA_TYPES[0],
             None,
             properties,

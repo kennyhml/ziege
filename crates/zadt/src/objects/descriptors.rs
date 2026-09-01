@@ -213,9 +213,9 @@ impl PropertiesCodec {
         properties: serde_json::Value,
     ) -> Result<ErasedProperties, ObjectError> {
         validate_object_type::<T>(object)?;
-        let properties: T::Properties =
+        let mut properties: T::Properties =
             serde_json::from_value(properties).map_err(ObjectError::InvalidPropertiesJson)?;
-        properties.validate_for(object)?;
+        properties.assign_identity(object);
         Ok(std::sync::Arc::new(properties))
     }
 
@@ -225,7 +225,6 @@ impl PropertiesCodec {
     ) -> Result<Vec<u8>, ObjectError> {
         validate_object_type::<T>(object)?;
         let properties = Self::properties::<T>(properties);
-        properties.validate_for(object)?;
         properties.to_xml()
     }
 
@@ -493,6 +492,7 @@ mod tests {
                 "CL_ADT_URI_MAPPER".to_owned(),
                 AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
             ),
+            crate::WorkbenchVersion::Active,
             "application/vnd.sap.adt.oo.classes.v4+xml",
             None,
             properties,

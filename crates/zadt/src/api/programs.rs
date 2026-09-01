@@ -115,7 +115,7 @@ mod tests {
     use crate::{
         AdtRequest, AdtResponse, AdtUri, Client, CompatibilityError, EntityTag, Include,
         IncludeProperties, MediaTyped, ObjectError, ObjectQuery, OperationError, ProgramProperties,
-        Ready, ResolveError, Revalidation, Transport,
+        Ready, ResolveError, Revalidation, Transport, WorkbenchVersion,
     };
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
@@ -372,7 +372,11 @@ mod tests {
             representation.media_type(),
             ProgramProperties::MEDIA_TYPES[1]
         );
-        assert_eq!(representation.properties().name, "Z_TEST");
+        assert_eq!(representation.reference().name(), "Z_TEST");
+        assert_eq!(
+            representation.workbench_version(),
+            WorkbenchVersion::Inactive
+        );
     }
 
     #[test]
@@ -386,7 +390,7 @@ mod tests {
             representation.media_type(),
             ProgramProperties::MEDIA_TYPES[0]
         );
-        assert_eq!(representation.properties().name, "Z_TEST");
+        assert_eq!(representation.reference().name(), "Z_TEST");
     }
 
     #[test]
@@ -457,6 +461,10 @@ mod tests {
         let request = program.revalidate().unwrap().encode().unwrap();
 
         assert_eq!(request.headers()[header::IF_NONE_MATCH], "program-etag");
+        assert_eq!(
+            request.query(),
+            &[("version".to_owned(), "inactive".to_owned())]
+        );
     }
 
     #[test]
@@ -488,7 +496,7 @@ mod tests {
         let representation = include_properties_query()
             .decode(operation_response(response))
             .unwrap();
-        assert_eq!(representation.properties().name, "ZTEST");
+        assert_eq!(representation.reference().name(), "ZTEST");
         assert_eq!(
             representation.etag().map(EntityTag::as_str),
             Some("include-etag")

@@ -219,6 +219,17 @@ fn expand_object_type_item(
         }
 
         #(#conditional_attrs)*
+        impl crate::objects::AssignObjectIdentity for #model {
+            fn assign_identity(
+                &mut self,
+                identity: &impl crate::objects::ObjectIdentity,
+            ) {
+                self.name = identity.object_name().to_owned();
+                self.object_type = identity.object_type().clone();
+            }
+        }
+
+        #(#conditional_attrs)*
         impl crate::objects::ObjectType for #object {
             type Properties = #model;
 

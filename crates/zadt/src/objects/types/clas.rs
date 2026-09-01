@@ -49,7 +49,7 @@ pub struct ClassProperties {
     /// The class name supplied by SAP.
     #[for_create(identity, default, doc = "The class name.")]
     #[serde(rename = "@adtcore:name")]
-    pub name: String,
+    pub(crate) name: String,
     /// The repository object type, normally `CLAS/OC`.
     #[for_create(
         identity,
@@ -57,13 +57,13 @@ pub struct ClassProperties {
         doc = "The class's global Workbench type."
     )]
     #[serde(rename = "@adtcore:type")]
-    pub object_type: GlobalWorkbenchType,
+    pub(crate) object_type: GlobalWorkbenchType,
     /// The timestamp at which the class was last changed.
     #[serde(rename = "@adtcore:changedAt")]
     pub last_changed: String,
     /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: WorkbenchVersion,
+    pub(crate) version: WorkbenchVersion,
     /// The timestamp at which the class was created.
     #[serde(rename = "@adtcore:createdAt")]
     pub created_at: String,

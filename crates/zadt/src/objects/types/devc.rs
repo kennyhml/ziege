@@ -21,16 +21,16 @@ pub struct Package;
 pub struct PackageProperties {
     /// The package name supplied by SAP.
     #[serde(rename = "@adtcore:name")]
-    pub name: String,
+    pub(crate) name: String,
     /// The repository object type, normally `DEVC/K`.
     #[serde(rename = "@adtcore:type")]
-    pub object_type: GlobalWorkbenchType,
+    pub(crate) object_type: GlobalWorkbenchType,
     /// The timestamp at which the package was last changed.
     #[serde(rename = "@adtcore:changedAt")]
     pub last_changed: String,
     /// The object version.
     #[serde(rename = "@adtcore:version")]
-    pub version: WorkbenchVersion,
+    pub(crate) version: WorkbenchVersion,
     /// The timestamp at which the package was created.
     #[serde(rename = "@adtcore:createdAt")]
     pub created_at: String,
@@ -304,6 +304,7 @@ mod property_tests {
         assert!(xml.contains("xmlns:atom=\"http://www.w3.org/2005/Atom\""));
         assert!(xml.contains("<pak:attributes"));
         assert!(xml.contains("<atom:link"));
+        assert!(xml.contains("adtcore:version=\"active\""));
         let roundtrip: PackageProperties = serde_xml_rs::from_str(&xml).unwrap();
         assert_eq!(roundtrip.name, properties.name);
         assert_eq!(roundtrip.description, properties.description);

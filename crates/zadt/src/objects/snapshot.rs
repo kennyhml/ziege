@@ -1,16 +1,16 @@
 use std::{any::Any, fmt, sync::Arc};
 
-use super::{ObjectIdentity, ObjectRef, ObjectType, SnapshotKind};
+use super::{ObjectIdentity, ObjectRef, ObjectType, SnapshotKind, WorkbenchVersion};
 use crate::{EntityTag, ObjectError};
 
 pub(crate) type ErasedProperties = Arc<dyn Any + Send + Sync>;
 
 /// An immutable snapshot of a loaded ADT object representation.
 ///
-/// Unlike [`ObjectRef<T>`], this value includes the object properties returned
-/// by ADT. The type parameter `T` selects the property type and the operations
-/// available for that object family. [`ObjectSnapshot<()>`] stores the object
-/// family and its concrete properties at runtime.
+/// Unlike [`ObjectRef<T>`], this value includes the Workbench version and object
+/// properties returned by ADT. The type parameter `T` selects the property type
+/// and the operations available for that object family. [`ObjectSnapshot<()>`]
+/// stores the object family and its concrete properties at runtime.
 ///
 /// The runtime form is the loaded counterpart to [`ObjectRef<()>`]. It is useful
 /// when the object family comes from user input or a repository response.
@@ -24,6 +24,7 @@ pub(crate) type ErasedProperties = Arc<dyn Any + Send + Sync>;
 /// that only need the object identity can use [`ObjectSnapshot::reference`].
 pub struct ObjectSnapshot<T: SnapshotKind = ()> {
     reference: ObjectRef<T>,
+    workbench_version: WorkbenchVersion,
     media_type: String,
     etag: Option<EntityTag>,
     properties: T::StoredProperties,
@@ -33,6 +34,11 @@ impl<T: SnapshotKind> ObjectSnapshot<T> {
     /// Returns the reference identifying this snapshot.
     pub fn reference(&self) -> &ObjectRef<T> {
         &self.reference
+    }
+
+    /// Returns the Workbench version represented by this snapshot.
+    pub fn workbench_version(&self) -> WorkbenchVersion {
+        self.workbench_version
     }
 
     /// Returns the media type of this snapshot.
@@ -47,16 +53,17 @@ impl<T: SnapshotKind> ObjectSnapshot<T> {
 }
 
 impl<T: ObjectType> ObjectSnapshot<T> {
-    /// Creates a new snapshot, internal usage only. API consumers need
-    /// should only get this as parsed query results.
+    /// Creates a new snapshot for an internally parsed query result.
     pub(crate) fn new(
         reference: ObjectRef<T>,
+        workbench_version: WorkbenchVersion,
         media_type: impl Into<String>,
         etag: Option<EntityTag>,
         properties: T::Properties,
     ) -> Self {
         Self {
             reference,
+            workbench_version,
             media_type: media_type.into(),
             etag,
             properties,
@@ -70,10 +77,11 @@ impl<T: ObjectType> ObjectSnapshot<T> {
 
     /// Erases the concrete object type of this snapshot.
     ///
-    /// All data is retained and properties are casted into [`ErasedProperties`].
+    /// All data is retained and properties move into type-erased storage.
     pub fn into_erased(self) -> ObjectSnapshot<()> {
         ObjectSnapshot::<()>::new_erased(
             self.reference.erase(),
+            self.workbench_version,
             self.media_type,
             self.etag,
             Arc::new(self.properties),
@@ -88,6 +96,7 @@ where
     fn clone(&self) -> Self {
         Self {
             reference: self.reference.clone(),
+            workbench_version: self.workbench_version,
             media_type: self.media_type.clone(),
             etag: self.etag.clone(),
             properties: self.properties.clone(),
@@ -109,12 +118,14 @@ impl ObjectSnapshot<()> {
     /// Constructs a snapshot with properties retained behind its runtime descriptor.
     pub(crate) fn new_erased(
         reference: ObjectRef<()>,
+        workbench_version: WorkbenchVersion,
         media_type: impl Into<String>,
         etag: Option<EntityTag>,
         properties: ErasedProperties,
     ) -> Self {
         Self {
             reference,
+            workbench_version,
             media_type: media_type.into(),
             etag,
             properties,
@@ -122,16 +133,16 @@ impl ObjectSnapshot<()> {
     }
 
     /// Exports the concrete properties through their runtime JSON representation.
+    ///
+    /// Private wire metadata is retained in the JSON representation, but is
+    /// canonicalized from this snapshot when constructing an update.
     pub fn properties(&self) -> Result<serde_json::Value, ObjectError> {
         self.reference
             .require_descriptor()?
             .properties_to_json(&self.reference, &self.properties)
     }
 
-    /// Restores a concrete loaded object after validating its runtime representation.
-    ///
-    /// The inner workbench type is validated against `T` and the identity of the
-    /// inner properties is validated against the stored reference.
+    /// Restores a concrete loaded object after validating its runtime type.
     pub fn try_into_typed<T>(self) -> Result<ObjectSnapshot<T>, ObjectError>
     where
         T: ObjectType,
@@ -152,6 +163,7 @@ impl ObjectSnapshot<()> {
 
         Ok(ObjectSnapshot::new(
             reference,
+            self.workbench_version,
             self.media_type,
             self.etag,
             properties,
@@ -184,6 +196,7 @@ impl fmt::Debug for ObjectSnapshot<()> {
         formatter
             .debug_struct("ObjectSnapshot")
             .field("reference", &self.reference)
+            .field("workbench_version", &self.workbench_version)
             .field("media_type", &self.media_type)
             .field("etag", &self.etag)
             .field("properties", &"<type-erased>")
@@ -201,6 +214,7 @@ where
         formatter
             .debug_struct("ObjectSnapshot")
             .field("reference", &self.reference)
+            .field("workbench_version", &self.workbench_version)
             .field("media_type", &self.media_type)
             .field("etag", &self.etag)
             .field("properties", &self.properties)
