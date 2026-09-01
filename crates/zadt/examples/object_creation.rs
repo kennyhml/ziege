@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut request = client.object::<Class>(&name)?.create(properties);
 
     if let Some(transport) = transport {
-        request.transport(transport.into());
+        request = request.transport(transport);
     }
 
     let result: Option<ObjectSnapshot<Class>> = request.execute(&client).await?;

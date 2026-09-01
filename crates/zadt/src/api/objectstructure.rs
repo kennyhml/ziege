@@ -342,7 +342,7 @@ mod tests {
         );
         assert!(query.resource.query.is_empty());
 
-        let runtime_object = object.clone().try_into_erased().unwrap();
+        let runtime_object = object.clone().into_erased();
         assert_eq!(
             runtime_object.object_structure().unwrap().resource,
             query.resource

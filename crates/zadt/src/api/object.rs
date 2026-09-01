@@ -4,6 +4,9 @@
 /// Because all of this directly involves the objects properties, alof of
 /// parallel implementations are needed for typed and erased paths where
 /// the erased path must use the descriptor to cast the properties.
+///
+/// Because all of the operations return an object snapshot response using
+/// the same media type, it makes sense to keep them in one module.
 use super::{locking::LOCK_HANDLE_QUERY, transports::TRANSPORT_REQUEST_QUERY};
 use crate::{
     Advertised, CategoryId, ObjectError, ObjectLock, ObjectSnapshot, SnapshotKind, TransportNumber,
@@ -51,8 +54,9 @@ pub struct ObjectCreation<T, P> {
 
 impl<T, P> ObjectCreation<T, P> {
     /// Records the creation in the supplied transport request.
-    pub fn transport(&mut self, transport_request: TransportNumber) -> &mut Self {
-        self.transport_request = Some(transport_request);
+    #[must_use]
+    pub fn transport(mut self, transport_request: impl Into<TransportNumber>) -> Self {
+        self.transport_request = Some(transport_request.into());
         self
     }
 
@@ -209,8 +213,8 @@ impl ObjectRef<()> {
 /// cases the object may even have been deleted since querying it.
 #[derive(Debug)]
 pub struct ObjectQuery<T> {
-    pub resource: ObjectRef<T>,
-    pub workbench_version: Option<WorkbenchVersion>,
+    resource: ObjectRef<T>,
+    workbench_version: Option<WorkbenchVersion>,
 }
 
 impl<T> ObjectQuery<T> {
@@ -325,8 +329,9 @@ pub struct ObjectUpdate<T> {
 }
 
 impl<T> ObjectUpdate<T> {
-    /// Assigns a transport request to the change. The object must be transportable
-    /// and not already locked in another transport request.
+    /// Records this update in the supplied transport request.
+    ///
+    /// This replaces any transport request inherited from the lock.
     #[must_use]
     pub fn transport(mut self, transport_request: impl Into<TransportNumber>) -> Self {
         self.transport_request = Some(transport_request.into());

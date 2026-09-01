@@ -497,8 +497,7 @@ mod tests {
             None,
             properties,
         )
-        .try_into_erased()
-        .unwrap();
+        .into_erased();
 
         let source = Class::DESCRIPTOR.source(&object).unwrap();
 

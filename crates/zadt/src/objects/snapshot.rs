@@ -1,7 +1,7 @@
 use std::{any::Any, fmt, sync::Arc};
 
-use super::{MediaTyped, ObjectIdentity, ObjectRef, ObjectType, SnapshotKind};
-use crate::{EntityTag, ObjectError, compatibility};
+use super::{ObjectIdentity, ObjectRef, ObjectType, SnapshotKind};
+use crate::{EntityTag, ObjectError};
 
 pub(crate) type ErasedProperties = Arc<dyn Any + Send + Sync>;
 
@@ -30,23 +30,25 @@ pub struct ObjectSnapshot<T: SnapshotKind = ()> {
 }
 
 impl<T: SnapshotKind> ObjectSnapshot<T> {
-    /// Returns the reference identifying this loaded object.
+    /// Returns the reference identifying this snapshot.
     pub fn reference(&self) -> &ObjectRef<T> {
         &self.reference
     }
 
-    /// Returns the media type of this representation.
+    /// Returns the media type of this snapshot.
     pub fn media_type(&self) -> &str {
         &self.media_type
     }
 
-    /// Returns the entity tag associated with this representation.
+    /// Returns the entity tag associated with this snapshot.
     pub fn etag(&self) -> Option<&EntityTag> {
         self.etag.as_ref()
     }
 }
 
 impl<T: ObjectType> ObjectSnapshot<T> {
+    /// Creates a new snapshot, internal usage only. API consumers need
+    /// should only get this as parsed query results.
     pub(crate) fn new(
         reference: ObjectRef<T>,
         media_type: impl Into<String>,
@@ -61,20 +63,21 @@ impl<T: ObjectType> ObjectSnapshot<T> {
         }
     }
 
-    /// Returns the immutable properties in this loaded representation.
+    /// Returns the immutable properties in this snapshot.
     pub fn properties(&self) -> &T::Properties {
         &self.properties
     }
 
-    /// Removes the static object family while retaining its concrete properties internally.
-    pub fn try_into_erased(self) -> Result<ObjectSnapshot<()>, ObjectError> {
-        validate_typed_snapshot::<T>(&self.reference, &self.media_type, &self.properties)?;
-        Ok(ObjectSnapshot::<()>::new_erased(
+    /// Erases the concrete object type of this snapshot.
+    ///
+    /// All data is retained and properties are casted into [`ErasedProperties`].
+    pub fn into_erased(self) -> ObjectSnapshot<()> {
+        ObjectSnapshot::<()>::new_erased(
             self.reference.erase(),
             self.media_type,
             self.etag,
             Arc::new(self.properties),
-        ))
+        )
     }
 }
 
@@ -126,31 +129,36 @@ impl ObjectSnapshot<()> {
     }
 
     /// Restores a concrete loaded object after validating its runtime representation.
+    ///
+    /// The inner workbench type is validated against `T` and the identity of the
+    /// inner properties is validated against the stored reference.
     pub fn try_into_typed<T>(self) -> Result<ObjectSnapshot<T>, ObjectError>
     where
         T: ObjectType,
     {
-        let reference =
-            self.reference
-                .typed::<T>()
-                .ok_or_else(|| ObjectError::UnexpectedObjectType {
-                    expected: T::WORKBENCH_TYPE,
-                    actual: self.reference.object_type().clone(),
-                })?;
+        let reference = self.typed_reference::<T>()?;
+
+        // If we could recover the reference from `T` then the property type matches too.
+        // Cannot use `typed_properties` here because we actually need the reference counter.
         let properties = self
             .properties
             .downcast::<T::Properties>()
             .expect("registered descriptor must retain its concrete property type");
+
         let properties = match Arc::try_unwrap(properties) {
             Ok(properties) => properties,
             Err(properties) => properties.as_ref().clone(),
         };
-        let media_type = validate_typed_snapshot::<T>(&reference, &self.media_type, &properties)?;
+
         Ok(ObjectSnapshot::new(
-            reference, media_type, self.etag, properties,
+            reference,
+            self.media_type,
+            self.etag,
+            properties,
         ))
     }
 
+    /// Returns a type tagged reference to the underlying object.
     pub(crate) fn typed_reference<T: ObjectType>(&self) -> Result<ObjectRef<T>, ObjectError> {
         self.reference
             .typed::<T>()
@@ -160,6 +168,9 @@ impl ObjectSnapshot<()> {
             })
     }
 
+    /// Casts the contained object properties to the property type of `T`
+    ///
+    /// This is an internal helper and panics when `T` does not match.
     pub(crate) fn typed_properties<T: ObjectType>(&self) -> &T::Properties {
         self.properties
             .downcast_ref::<T::Properties>()
@@ -168,6 +179,7 @@ impl ObjectSnapshot<()> {
 }
 
 impl fmt::Debug for ObjectSnapshot<()> {
+    // Custom debug implementation to ignore the erased properties
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("ObjectSnapshot")
@@ -194,21 +206,4 @@ where
             .field("properties", &self.properties)
             .finish()
     }
-}
-
-pub(crate) fn validate_typed_snapshot<T>(
-    reference: &ObjectRef<T>,
-    media_type: &str,
-    properties: &T::Properties,
-) -> Result<&'static str, ObjectError>
-where
-    T: ObjectType,
-{
-    let media_type = compatibility::matching_media_type(T::Properties::MEDIA_TYPES, media_type)
-        .ok_or_else(|| ObjectError::UnsupportedPropertiesMediaType {
-            object_type: T::WORKBENCH_TYPE,
-            media_type: media_type.to_owned(),
-        })?;
-    properties.validate_for(reference)?;
-    Ok(media_type)
 }
