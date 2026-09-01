@@ -22,7 +22,7 @@ use crate::{
     },
     protocol::EntityTag,
 };
-use http::Method;
+use http::{Method, header};
 
 /// Creates a repository object from a family-specific creation payload.
 ///
@@ -316,26 +316,31 @@ impl<T: SnapshotKind> ObjectSnapshot<T> {
 
 /// Updates an objects properties.
 ///
+/// The default state uses the snapshots entity tag for an optimistic,
+/// stateless update. [`ObjectUpdate::with_lock`] transitions to a pessimistic
+/// update using a lock handle bound to some user session.
+///
 /// Successful execution decodes a new loaded object when ADT returns a response
 /// representation. An empty success response returns `None`.
 #[derive(Debug)]
-pub struct ObjectUpdate<T> {
+pub struct ObjectUpdate<T, S = Option<EntityTag>> {
     /// A reference to the object to be updated
     resource: ObjectRef<T>,
-    /// The lock to update the object with, bound to some user session
-    object_lock: ObjectLock,
     /// The new, already encoded properties
     body: Vec<u8>,
     /// The content type of the request body
     media_type: &'static str,
     /// A transport request to assign the changes to
     transport_request: Option<TransportNumber>,
+    /// The concurrency control used by this update.
+    state: S,
 }
 
-impl<T> ObjectUpdate<T> {
+impl<T, S> ObjectUpdate<T, S> {
     /// Records this update in the supplied transport request.
     ///
-    /// This replaces any transport request inherited from the lock.
+    /// This takes precedence over a transport request inherited by a subsequent
+    /// transition to a locked update.
     #[must_use]
     pub fn transport(mut self, transport_request: impl Into<TransportNumber>) -> Self {
         self.transport_request = Some(transport_request.into());
@@ -343,18 +348,64 @@ impl<T> ObjectUpdate<T> {
     }
 
     /// Shared helper to construct the operation for both typed and erased paths.
+    ///
+    /// Because pessimistic concurrency control requires statefulness, the
+    /// operation requires a handful of implementation paths between stateless,
+    /// stateful, typed and untyped combinations.
     fn build_request(&self) -> EncodedOperation<Owned> {
         let mut request = EncodedOperation::owned(Method::PUT, self.resource.uri().clone());
-        request.push_query(LOCK_HANDLE_QUERY, self.object_lock.handle());
         if let Some(transport_request) = &self.transport_request {
             request.push_query(TRANSPORT_REQUEST_QUERY, transport_request.as_str());
-        }
-        if let Some(user_session) = self.object_lock.user_session() {
-            request.bind_user_session(user_session);
         }
         request.set_accept(self.media_type);
         request.set_content_type(self.media_type);
         request.set_body(self.body.clone());
+        request
+    }
+}
+
+impl<T> ObjectUpdate<T> {
+    /// Switches this update from optimistic concurrency control to a persistent lock.
+    ///
+    /// The returned operation omits `If-Match`, sends the lock handle, and must be
+    /// executed in the user session that owns the lock.
+    pub fn with_lock(
+        self,
+        object_lock: &ObjectLock,
+    ) -> Result<ObjectUpdate<T, ObjectLock>, ObjectError> {
+        object_lock.validate_modification_for(&self.resource)?;
+        let transport_request = self
+            .transport_request
+            .or_else(|| object_lock.transport_request().cloned());
+
+        Ok(ObjectUpdate {
+            resource: self.resource,
+            body: self.body,
+            media_type: self.media_type,
+            transport_request,
+            state: object_lock.clone(),
+        })
+    }
+
+    /// Internal helper to build an optimistic request with an if-match etag
+    fn build_optimistic_request(&self) -> Result<EncodedOperation<Owned>, ObjectError> {
+        let etag = self.state.as_ref().ok_or(ObjectError::MissingEntityTag)?;
+        let mut request = self.build_request();
+        request
+            .headers_mut()
+            .insert(header::IF_MATCH, etag.as_header_value().clone());
+        Ok(request)
+    }
+}
+
+impl<T> ObjectUpdate<T, ObjectLock> {
+    /// Internal helper to build a pessimistic request with an associated lock
+    fn build_locked_request(&self) -> EncodedOperation<Owned> {
+        let mut request = self.build_request();
+        request.push_query(LOCK_HANDLE_QUERY, self.state.handle());
+        if let Some(user_session) = self.state.user_session() {
+            request.bind_user_session(user_session);
+        }
         request
     }
 }
@@ -364,11 +415,11 @@ where
     T: ObjectType,
 {
     type Response = Option<ObjectSnapshot<T>>;
-    type Kind = Stateful;
+    type Kind = Stateless;
     type Target = Owned;
 
     fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        Ok(self.build_request())
+        Ok(self.build_optimistic_request()?)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
@@ -383,11 +434,52 @@ where
 
 impl Operation for ObjectUpdate<()> {
     type Response = Option<ObjectSnapshot<()>>;
+    type Kind = Stateless;
+    type Target = Owned;
+
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        Ok(self.build_optimistic_request()?)
+    }
+
+    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+        response.require_success()?;
+
+        if response.body().is_empty() {
+            return Ok(None);
+        }
+        ObjectSnapshot::<()>::decode(&self.resource, response).map(Some)
+    }
+}
+
+impl<T> Operation for ObjectUpdate<T, ObjectLock>
+where
+    T: ObjectType,
+{
+    type Response = Option<ObjectSnapshot<T>>;
     type Kind = Stateful;
     type Target = Owned;
 
     fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        Ok(self.build_request())
+        Ok(self.build_locked_request())
+    }
+
+    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+        response.require_success()?;
+
+        if response.body().is_empty() {
+            return Ok(None);
+        }
+        ObjectSnapshot::<T>::decode(&self.resource, response).map(Some)
+    }
+}
+
+impl Operation for ObjectUpdate<(), ObjectLock> {
+    type Response = Option<ObjectSnapshot<()>>;
+    type Kind = Stateful;
+    type Target = Owned;
+
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        Ok(self.build_locked_request())
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
@@ -401,7 +493,11 @@ impl Operation for ObjectUpdate<()> {
 }
 
 impl<T: ObjectType> ObjectSnapshot<T> {
-    /// Creates an update operation for this object.
+    /// Creates an optimistic update operation for this object.
+    ///
+    /// The operation captures this snapshot's entity tag. A missing entity tag
+    /// is accepted here so the operation can still transition through
+    /// [`ObjectUpdate::with_lock`], but encoding it optimistically will fail.
     ///
     /// Only certain object properties, such as description, language
     /// versions or object specifific properties can be updated through
@@ -411,12 +507,7 @@ impl<T: ObjectType> ObjectSnapshot<T> {
     /// Whether a property can be updated or not depends on the concrete object
     /// type. When ADT returns a representation, the response includes the new
     /// state after applying all possible updates on an inactive object snapshot.
-    pub fn update(
-        &self,
-        lock: &ObjectLock,
-        mut properties: T::Properties,
-    ) -> Result<ObjectUpdate<T>, ObjectError> {
-        lock.validate_modification_for(self.reference())?;
+    pub fn update(&self, mut properties: T::Properties) -> Result<ObjectUpdate<T>, ObjectError> {
         properties.assign_identity(self.reference());
 
         let media_type =
@@ -425,16 +516,20 @@ impl<T: ObjectType> ObjectSnapshot<T> {
 
         Ok(ObjectUpdate {
             resource: self.reference().clone(),
-            object_lock: lock.clone(),
             media_type,
             body: properties.to_xml()?,
-            transport_request: lock.transport_request().cloned(),
+            transport_request: None,
+            state: self.etag().cloned(),
         })
     }
 }
 
 impl ObjectSnapshot<()> {
-    /// Creates an update operation for this object.
+    /// Creates an optimistic update operation for this object.
+    ///
+    /// The operation captures this snapshot's entity tag. A missing entity tag
+    /// is accepted here so the operation can still transition through
+    /// [`ObjectUpdate::with_lock`], but encoding it optimistically will fail.
     ///
     /// Only certain object properties, such as description, language
     /// versions or object specifific properties can be updated through
@@ -447,12 +542,7 @@ impl ObjectSnapshot<()> {
     ///
     /// Because the properties are supplied as JSON, deserialization to the
     /// concrete object properties may fail at this point.
-    pub fn update(
-        &self,
-        lock: &ObjectLock,
-        properties: serde_json::Value,
-    ) -> Result<ObjectUpdate<()>, ObjectError> {
-        lock.validate_modification_for(self.reference())?;
+    pub fn update(&self, properties: serde_json::Value) -> Result<ObjectUpdate<()>, ObjectError> {
         let descriptor = self.reference().require_descriptor()?;
 
         // Select media type through the descriptor
@@ -473,10 +563,10 @@ impl ObjectSnapshot<()> {
 
         Ok(ObjectUpdate {
             resource: self.reference().clone(),
-            object_lock: lock.clone(),
             media_type,
             body,
-            transport_request: lock.transport_request().cloned(),
+            transport_request: None,
+            state: self.etag().cloned(),
         })
     }
 }
@@ -889,7 +979,7 @@ mod tests {
             reference.clone(),
             WorkbenchVersion::Active,
             ClassProperties::MEDIA_TYPES[0],
-            None,
+            Some(EntityTag::from_static("class-etag")),
             properties.clone(),
         );
         let lock = ObjectLock::for_test(reference.erase(), AccessMode::Modify);
@@ -898,22 +988,38 @@ mod tests {
         typed_properties.name = "ZOTHER".to_owned();
         typed_properties.object_type = Package::WORKBENCH_TYPE;
         typed_properties.version = WorkbenchVersion::Inactive;
-        let typed = snapshot
-            .update(&lock, typed_properties)
-            .unwrap()
-            .encode()
-            .unwrap();
+        let typed_update = snapshot.update(typed_properties).unwrap();
+        fn assert_stateless<O: Operation<Kind = Stateless>>(_: &O) {}
+        assert_stateless(&typed_update);
+        let typed = typed_update.encode().unwrap();
 
         let runtime_snapshot = snapshot.into_erased();
         let mut runtime_properties = runtime_snapshot.properties().unwrap();
         runtime_properties["@adtcore:name"] = "ZOTHER".into();
         runtime_properties["@adtcore:type"] = "DEVC/K".into();
         runtime_properties["@adtcore:version"] = "inactive".into();
-        let runtime = runtime_snapshot
-            .update(&lock, runtime_properties)
+        let runtime_update = runtime_snapshot
+            .update(runtime_properties)
             .unwrap()
-            .encode()
+            .with_lock(&lock)
             .unwrap();
+        fn assert_stateful<O: Operation<Kind = Stateful>>(_: &O) {}
+        assert_stateful(&runtime_update);
+        let runtime = runtime_update.encode().unwrap();
+
+        assert_eq!(typed.headers().get(header::IF_MATCH).unwrap(), "class-etag");
+        assert!(
+            typed
+                .query()
+                .iter()
+                .all(|(name, _)| name != LOCK_HANDLE_QUERY)
+        );
+        assert!(!runtime.headers().contains_key(header::IF_MATCH));
+        assert!(
+            runtime
+                .query()
+                .contains(&(LOCK_HANDLE_QUERY.to_owned(), "LOCK-HANDLE".to_owned()))
+        );
 
         for request in [typed, runtime] {
             let body = std::str::from_utf8(request.body()).unwrap();
@@ -929,5 +1035,74 @@ mod tests {
             assert!(!body.contains("ZOTHER"));
             assert!(root.contains("adtcore:version=\"inactive\""));
         }
+    }
+
+    #[test]
+    fn update_without_an_etag_can_transition_to_a_lock() {
+        let reference = reference("CL_ADT_URI_MAPPER");
+        let properties: ClassProperties = serde_xml_rs::from_reader(CLASS_XML).unwrap();
+        let snapshot = ObjectSnapshot::new(
+            reference.clone(),
+            WorkbenchVersion::Active,
+            ClassProperties::MEDIA_TYPES[0],
+            None,
+            properties.clone(),
+        );
+        let update = snapshot.update(properties).unwrap();
+
+        let error = match update.encode() {
+            Ok(_) => panic!("optimistic update without an ETag must fail"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            EncodeError::Object(ObjectError::MissingEntityTag)
+        ));
+
+        let lock = ObjectLock::for_test_with_transport(
+            reference.erase(),
+            AccessMode::Modify,
+            "A4HK900001",
+        );
+        let request = update.with_lock(&lock).unwrap().encode().unwrap();
+
+        assert!(!request.headers().contains_key(header::IF_MATCH));
+        assert!(
+            request
+                .query()
+                .contains(&(LOCK_HANDLE_QUERY.to_owned(), "LOCK-HANDLE".to_owned()))
+        );
+        assert!(
+            request
+                .query()
+                .contains(&(TRANSPORT_REQUEST_QUERY.to_owned(), "A4HK900001".to_owned()))
+        );
+
+        let request = snapshot
+            .update(snapshot.properties().clone())
+            .unwrap()
+            .transport("A4HK900002")
+            .with_lock(&lock)
+            .unwrap()
+            .encode()
+            .unwrap();
+        assert!(
+            request
+                .query()
+                .contains(&(TRANSPORT_REQUEST_QUERY.to_owned(), "A4HK900002".to_owned()))
+        );
+        assert!(
+            !request
+                .query()
+                .contains(&(TRANSPORT_REQUEST_QUERY.to_owned(), "A4HK900001".to_owned()))
+        );
+
+        let show_lock = ObjectLock::for_test(reference.erase(), AccessMode::Show);
+        let error = snapshot
+            .update(snapshot.properties().clone())
+            .unwrap()
+            .with_lock(&show_lock)
+            .unwrap_err();
+        assert!(matches!(error, ObjectError::ObjectLockNotModifiable));
     }
 }

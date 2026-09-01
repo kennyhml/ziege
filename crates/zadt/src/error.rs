@@ -217,6 +217,9 @@ pub enum ObjectError {
     #[error("object lock response did not contain a lock handle")]
     MissingLockHandle,
 
+    #[error("optimistic object update requires an entity tag")]
+    MissingEntityTag,
+
     #[error("object response was not valid UTF-8: {0}")]
     InvalidResponseEncoding(#[from] std::string::FromUtf8Error),
 

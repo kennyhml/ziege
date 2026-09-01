@@ -30,8 +30,8 @@ mod private {
 /// Stateless operations do not require a persistent user session. Stateful
 /// operations execute within a [`UserSession`] retained across requests.
 ///
-/// For example, updating a program requires a lock acquired and used within the
-/// same user session. The session keeps the lock alive until it is released,
+/// For example, updating program source requires a lock acquired and used within
+/// the same user session. The session keeps the lock alive until it is released,
 /// closed, or expires.
 ///
 /// SAP exposes these user sessions in transaction `SM04`. For HTTP ADT, the
