@@ -102,16 +102,12 @@ impl TryFrom<String> for GlobalWorkbenchType {
 pub enum WorkbenchVersion {
     /// The persistent active object (R3STATE `A`).
     Active,
-
     /// An inactive object awaiting activation (R3STATE `I`).
     Inactive,
-
     /// Uses the current users inactive version when available (R3STATE `_`).
     WorkingArea,
-
     /// A newly created object (R3STATE `N`).
     New,
-
     /// An object for which only part of the content is active (R3STATE `P`).
     PartlyActive,
 }

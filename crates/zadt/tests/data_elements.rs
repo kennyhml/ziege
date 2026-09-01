@@ -203,7 +203,7 @@ async fn erased_data_element_update_uses_the_json_consumer_boundary() {
     let client = ready_client(&server).await;
     let reference = client.object::<DataElement>("ZTFRWTFRT").unwrap();
     let object = reference.erase();
-    let properties = object.query().unwrap().execute(&client).await.unwrap();
+    let properties = object.query().execute(&client).await.unwrap();
     assert_eq!(&properties.reference().erase(), &object);
     let mut edited_properties = properties.properties().unwrap();
     edited_properties["@adtcore:description"] = "Updated description".into();
@@ -218,7 +218,8 @@ async fn erased_data_element_update_uses_the_json_consumer_boundary() {
         .unwrap()
         .execute(&session)
         .await
-        .unwrap();
+        .unwrap()
+        .expect("ADT returned updated data element properties");
     object
         .unlock(object_lock)
         .unwrap()

@@ -46,12 +46,12 @@ sequenceDiagram
 ```
 
 Metadata files are properties-backed rather than source-backed. The consumer
-queries the projected `ObjectRef<()>` to obtain `ErasedObject`, then
+queries the projected `ObjectRef<()>` to obtain `ObjectSnapshot<()>`, then
 uses `ProjectedFile::render_properties` and `ProjectedFile::merge_properties`.
 The file's registered family codec validates and transforms the runtime JSON
 through its concrete ZADT property type. Merging returns complete edited JSON
 that retains ADT fields the AFF schema does not represent; the consumer submits
-that JSON through `ErasedObject::update` to obtain a new loaded snapshot.
+that JSON through `ObjectSnapshot<()>::update` to obtain a new loaded snapshot.
 
 `DTEL/DE` projects to `<name>.dtel.json`, `CLAS/OC` to `<name>.clas.json`, and
 both `PROG/P` and standalone `PROG/I` to `<name>.prog.json`. Standalone Includes

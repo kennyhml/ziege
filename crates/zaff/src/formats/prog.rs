@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 use zadt::{
-    ErasedObject, GlobalWorkbenchType, Include, IncludeProperties, MediaTyped, ObjectType, Program,
-    ProgramProperties,
+    GlobalWorkbenchType, Include, IncludeProperties, MediaTyped, ObjectSnapshot, ObjectType,
+    Program, ProgramProperties,
 };
 
 use crate::{
     Cardinality, ComponentId, FileBacking, FileSpec, ObjectFormat, ProjectionError,
     format::{
-        FileDescriptor, FormatDescriptor, PropertiesCodec, SourceFileDescriptor,
-        UnbackedFileDescriptor, decode_properties, encode_properties,
+        FileDescriptor, FormatDescriptor, PropertiesCodec, PropertyProjection,
+        SourceFileDescriptor, UnbackedFileDescriptor, decode_properties, encode_properties,
     },
     language,
 };
@@ -113,7 +113,7 @@ impl FileDescriptor for ProgramMetadata {
 }
 
 impl PropertiesCodec for ProgramMetadata {
-    fn render(&self, properties: &ErasedObject) -> Result<String, ProjectionError> {
+    fn render(&self, properties: &ObjectSnapshot<()>) -> Result<String, ProjectionError> {
         if ProgramProperties::MEDIA_TYPES.contains(&properties.media_type()) {
             return render_program_properties(&decode_properties::<ProgramProperties>(
                 properties, "PROG",
@@ -124,7 +124,7 @@ impl PropertiesCodec for ProgramMetadata {
 
     fn merge(
         &self,
-        original: &ErasedObject,
+        original: &ObjectSnapshot<()>,
         edited: &str,
     ) -> Result<serde_json::Value, ProjectionError> {
         if ProgramProperties::MEDIA_TYPES.contains(&original.media_type()) {
@@ -286,7 +286,7 @@ impl AffLogicalDatabase {
 pub(crate) fn render_program_properties(
     properties: &ProgramProperties,
 ) -> Result<String, ProjectionError> {
-    render(&document_from_program(properties)?)
+    render(&<AffProgram as PropertyProjection<ProgramProperties>>::project(properties)?)
 }
 
 pub(crate) fn merge_program_properties(
@@ -294,7 +294,6 @@ pub(crate) fn merge_program_properties(
     edited: &str,
 ) -> Result<ProgramProperties, ProjectionError> {
     let edited = parse(edited)?;
-    let original_document = document_from_program(original)?;
     let edited_general = edited.general_information.clone().unwrap_or_default();
     validate_program_fields(&edited_general, edited.logical_database.as_ref())?;
     if edited_general.program_type == AffProgramType::Include {
@@ -304,6 +303,8 @@ pub(crate) fn merge_program_properties(
         ));
     }
 
+    let original_document =
+        <AffProgram as PropertyProjection<ProgramProperties>>::project(original)?;
     let original_general = original_document.general_information.unwrap_or_default();
     let mut merged = original.clone();
     let properties = &mut merged;
@@ -329,7 +330,7 @@ pub(crate) fn merge_program_properties(
 pub(crate) fn render_include_properties(
     properties: &IncludeProperties,
 ) -> Result<String, ProjectionError> {
-    render(&document_from_include(properties)?)
+    render(&<AffProgram as PropertyProjection<IncludeProperties>>::project(properties)?)
 }
 
 pub(crate) fn merge_include_properties(
@@ -349,7 +350,8 @@ pub(crate) fn merge_include_properties(
         return Err(unsupported("PROG", "generalInformation.editLocked"));
     }
 
-    let original_document = document_from_include(original)?;
+    let original_document =
+        <AffProgram as PropertyProjection<IncludeProperties>>::project(original)?;
     let original_general = original_document.general_information.unwrap_or_default();
     let mut merged = original.clone();
     let properties = &mut merged;
@@ -366,49 +368,53 @@ pub(crate) fn merge_include_properties(
     Ok(merged)
 }
 
-fn document_from_program(properties: &ProgramProperties) -> Result<AffProgram, ProjectionError> {
-    let general = AffProgramGeneralInformation {
-        program_type: AffProgramType::from_adt(&properties.program_type)?,
-        fix_point_arithmetic: properties.fix_point_arithmetic,
-        edit_locked: properties.locked_by_editor,
-        ..Default::default()
-    };
-    let document = AffProgram {
-        format_version: PROGRAM_FORMAT.version().to_owned(),
-        header: AffProgramHeader {
-            description: properties.description.clone(),
-            original_language: language::from_adt(
-                &properties.master_language,
-                "header.originalLanguage",
-            )?,
-        },
-        general_information: (!general.is_empty()).then_some(general),
-        logical_database: None,
-    };
-    document.validate()?;
-    Ok(document)
+impl PropertyProjection<ProgramProperties> for AffProgram {
+    fn project(properties: &ProgramProperties) -> Result<Self, ProjectionError> {
+        let general = AffProgramGeneralInformation {
+            program_type: AffProgramType::from_adt(&properties.program_type)?,
+            fix_point_arithmetic: properties.fix_point_arithmetic,
+            edit_locked: properties.locked_by_editor,
+            ..Default::default()
+        };
+        let document = Self {
+            format_version: PROGRAM_FORMAT.version().to_owned(),
+            header: AffProgramHeader {
+                description: properties.description.clone(),
+                original_language: language::from_adt(
+                    &properties.master_language,
+                    "header.originalLanguage",
+                )?,
+            },
+            general_information: (!general.is_empty()).then_some(general),
+            logical_database: None,
+        };
+        document.validate()?;
+        Ok(document)
+    }
 }
 
-fn document_from_include(properties: &IncludeProperties) -> Result<AffProgram, ProjectionError> {
-    let general = AffProgramGeneralInformation {
-        program_type: AffProgramType::Include,
-        fix_point_arithmetic: properties.fix_point_arithmetic,
-        ..Default::default()
-    };
-    let document = AffProgram {
-        format_version: PROGRAM_FORMAT.version().to_owned(),
-        header: AffProgramHeader {
-            description: properties.description.clone(),
-            original_language: language::from_adt(
-                &properties.master_language,
-                "header.originalLanguage",
-            )?,
-        },
-        general_information: Some(general),
-        logical_database: None,
-    };
-    document.validate()?;
-    Ok(document)
+impl PropertyProjection<IncludeProperties> for AffProgram {
+    fn project(properties: &IncludeProperties) -> Result<Self, ProjectionError> {
+        let general = AffProgramGeneralInformation {
+            program_type: AffProgramType::Include,
+            fix_point_arithmetic: properties.fix_point_arithmetic,
+            ..Default::default()
+        };
+        let document = Self {
+            format_version: PROGRAM_FORMAT.version().to_owned(),
+            header: AffProgramHeader {
+                description: properties.description.clone(),
+                original_language: language::from_adt(
+                    &properties.master_language,
+                    "header.originalLanguage",
+                )?,
+            },
+            general_information: Some(general),
+            logical_database: None,
+        };
+        document.validate()?;
+        Ok(document)
+    }
 }
 
 fn parse(content: &str) -> Result<AffProgram, ProjectionError> {

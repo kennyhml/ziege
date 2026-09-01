@@ -114,8 +114,8 @@ mod tests {
     use crate::api::run::PROFILER_ID_QUERY;
     use crate::{
         AdtRequest, AdtResponse, AdtUri, Client, CompatibilityError, EntityTag, Include,
-        IncludeProperties, MediaTyped, ObjectError, ObjectPropertiesQuery, OperationError,
-        ProgramProperties, Ready, ResolveError, Revalidation, Transport,
+        IncludeProperties, MediaTyped, ObjectError, ObjectQuery, OperationError, ProgramProperties,
+        Ready, ResolveError, Revalidation, Transport,
     };
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
@@ -166,7 +166,7 @@ mod tests {
         (client, requests)
     }
 
-    fn program_properties_query() -> ObjectPropertiesQuery<Program> {
+    fn program_properties_query() -> ObjectQuery<Program> {
         ObjectRef::<Program>::for_test(
             "Z_TEST",
             crate::AdtUri::parse("/sap/bc/adt/programs/programs/Z_TEST").unwrap(),
@@ -188,7 +188,7 @@ mod tests {
         ))
     }
 
-    fn include_properties_query() -> ObjectPropertiesQuery<Include> {
+    fn include_properties_query() -> ObjectQuery<Include> {
         ObjectRef::<Include>::for_test(
             "ZTEST",
             crate::AdtUri::parse("/sap/bc/adt/programs/includes/ZTEST").unwrap(),
@@ -460,13 +460,19 @@ mod tests {
     }
 
     #[test]
-    fn rejects_not_modified_for_an_unconditional_program_properties_query() {
+    fn reports_not_modified_as_an_unexpected_unconditional_program_response() {
         let response = AdtResponse::new(StatusCode::NOT_MODIFIED, HeaderMap::new(), Vec::new());
         let error = program_properties_query()
             .decode(operation_response(response))
             .unwrap_err();
 
-        assert!(matches!(error, ResponseError::UnexpectedNotModified));
+        assert!(matches!(
+            error,
+            ResponseError::UnexpectedStatus {
+                status: StatusCode::NOT_MODIFIED,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -505,12 +511,18 @@ mod tests {
     }
 
     #[test]
-    fn rejects_not_modified_for_an_unconditional_include_properties_query() {
+    fn reports_not_modified_as_an_unexpected_unconditional_include_response() {
         let response = AdtResponse::new(StatusCode::NOT_MODIFIED, HeaderMap::new(), Vec::new());
         let error = include_properties_query()
             .decode(operation_response(response))
             .unwrap_err();
 
-        assert!(matches!(error, ResponseError::UnexpectedNotModified));
+        assert!(matches!(
+            error,
+            ResponseError::UnexpectedStatus {
+                status: StatusCode::NOT_MODIFIED,
+                ..
+            }
+        ));
     }
 }

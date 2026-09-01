@@ -3,10 +3,9 @@ use serde::Deserialize;
 
 use super::{common::RepositoryFacet, content::RepositoryObjectEntry};
 use crate::{
-    AdtUri, Advertised, CategoryId, EncodeError, EncodedOperation, ErasedObject,
-    GlobalWorkbenchType, ObjectError, ObjectRef, ObjectSnapshot, ObjectType, Operation,
-    OperationResponse, Package, RepositoryError, ResponseError, Stateless, TransportNumber,
-    TransportStatus, User,
+    AdtUri, Advertised, CategoryId, EncodeError, EncodedOperation, GlobalWorkbenchType,
+    ObjectError, ObjectRef, ObjectSnapshot, ObjectType, Operation, OperationResponse, Package,
+    RepositoryError, ResponseError, Stateless, TransportNumber, TransportStatus, User,
     operation::CollectionLocator,
     resource::{AdvertisedLink, Relations},
 };
@@ -155,7 +154,7 @@ impl<T: ObjectType> ObjectSnapshot<T> {
     }
 }
 
-impl ErasedObject {
+impl ObjectSnapshot<()> {
     pub fn transport_requests(&self) -> AssignedTransportsQuery {
         AssignedTransportsQuery::new(self.reference())
     }

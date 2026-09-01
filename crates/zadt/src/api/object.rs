@@ -1,12 +1,17 @@
-use http::{Method, StatusCode};
-
+/// Everything related to core object operations such as querying snapshots,
+/// updating object properties or creating objects.
+///
+/// Because all of this directly involves the objects properties, alof of
+/// parallel implementations are needed for typed and erased paths where
+/// the erased path must use the descriptor to cast the properties.
+use super::{locking::LOCK_HANDLE_QUERY, transports::TRANSPORT_REQUEST_QUERY};
 use crate::{
-    Advertised, CategoryId, ErasedObject, ObjectError, ObjectLock, ObjectSnapshot, TransportNumber,
-    compatibility::matching_media_type,
+    Advertised, CategoryId, ObjectError, ObjectLock, ObjectSnapshot, SnapshotKind, TransportNumber,
+    compatibility,
     error::{EncodeError, ResponseError},
     objects::{
-        AssignObjectIdentity, Create, ErasedProperties, MediaTyped, ObjectIdentity, ObjectRef,
-        ObjectType, ToXml, WorkbenchVersion, XmlConversion,
+        AssignObjectIdentity, Create, MediaTyped, ObjectIdentity, ObjectRef, ObjectType, ToXml,
+        WorkbenchVersion, XmlConversion,
     },
     operation::{
         CollectionLocator, EncodedOperation, IfNoneMatch, Operation, OperationResponse, Owned,
@@ -14,43 +19,60 @@ use crate::{
     },
     protocol::EntityTag,
 };
-
-use super::{locking::LOCK_HANDLE_QUERY, transports::TRANSPORT_REQUEST_QUERY};
+use http::Method;
 
 /// Creates a repository object from a family-specific creation payload.
 ///
+/// Objects are created using a `POST` request on the objects base path,
+/// which is generally discovered through its category. For instance, a
+/// `POST` request to `/sap/bc/adt/oo/classes` creates a new class based
+/// on the request body, which has the same content type as the objects
+/// properties.
+///
+/// Because only a small subset of the properties are actually used during
+/// creation, the api mirrors the properties into a separate struct instead
+/// of marking all other fields as optional.
+///
 /// Successful responses without a representation decode to `None`. Object
 /// families that return their properties decode to a loaded object.
-///
-/// The operation supports both typed and generic JSON payloads. In a typed
-/// context, the response is also typed. Otherwise, the descriptor retains
-/// the concrete response properties behind an [`ErasedObject`].
 #[derive(Debug)]
-pub struct CreateObjectRequest<T, P> {
+pub struct ObjectCreation<T, P> {
+    /// A reference to the object to create, needed to decode the response.
     reference: ObjectRef<T>,
+    /// The request payload, either typed or JSON.
     payload: P,
+    /// Media types we support creation with.
     create_media_types: &'static [&'static str],
+    /// Media types we accept as response.
     response_media_types: &'static [&'static str],
+    /// A transport request to assign the new object to.
     transport_request: Option<TransportNumber>,
 }
 
-impl<T, P> CreateObjectRequest<T, P> {
+impl<T, P> ObjectCreation<T, P> {
     /// Records the creation in the supplied transport request.
     pub fn transport(&mut self, transport_request: TransportNumber) -> &mut Self {
         self.transport_request = Some(transport_request);
         self
     }
 
+    /// Shared internal helper for both typed and erased paths
     fn build_request(
         &self,
-        object_category: CategoryId,
+        category: CategoryId,
         body: Vec<u8>,
     ) -> Result<EncodedOperation<Advertised>, EncodeError> {
-        let mut target = CollectionLocator::new(object_category).target();
+        // Mark the target collection that we require it to accept one
+        // of the creation media types we used. This is then validated
+        // when the target collection is resolved.
+        let mut target = CollectionLocator::new(category).target();
         target.require_accepted_media_types(self.create_media_types);
+
         let mut request = EncodedOperation::advertised(Method::POST, target);
         request.set_accepts(self.response_media_types);
         request.set_body(body);
+
+        // Transport handling, no lock here that may carry one.
         if let Some(transport) = &self.transport_request {
             request.push_query(TRANSPORT_REQUEST_QUERY, transport.as_str());
         }
@@ -58,7 +80,8 @@ impl<T, P> CreateObjectRequest<T, P> {
     }
 }
 
-impl<T, P> Operation for CreateObjectRequest<T, P>
+// Typed creation implementation
+impl<T, P> Operation for ObjectCreation<T, P>
 where
     T: Create<Payload = P>,
     P: ToXml + Send + Sync,
@@ -76,25 +99,28 @@ where
         if response.body().is_empty() {
             return Ok(None);
         }
-        ObjectSnapshot::decode_properties(&self.reference, response).map(Some)
+        ObjectSnapshot::<T>::decode(&self.reference, response).map(Some)
     }
 }
 
-impl Operation for CreateObjectRequest<(), serde_json::Value> {
+// Untyped creation implementation
+impl Operation for ObjectCreation<(), serde_json::Value> {
     type Kind = Stateless;
-    type Response = Option<ErasedObject>;
+    type Response = Option<ObjectSnapshot<()>>;
     type Target = Advertised;
 
     fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
         let descriptor = self.reference.require_descriptor()?;
-        self.build_request(
-            descriptor
-                .category()
-                .ok_or_else(|| ObjectError::ParentObjectRequired {
-                    object_type: self.reference.object_type().clone(),
-                })?,
-            descriptor.creation_payload_to_xml(&self.reference, self.payload.clone())?,
-        )
+
+        // Currently only primary object creation is supported
+        let category = descriptor
+            .category()
+            .ok_or_else(|| ObjectError::ParentObjectRequired {
+                object_type: self.reference.object_type().clone(),
+            })?;
+
+        let payload = descriptor.creation_payload_to_xml(&self.reference, self.payload.clone())?;
+        self.build_request(category, payload)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
@@ -102,7 +128,7 @@ impl Operation for CreateObjectRequest<(), serde_json::Value> {
         if response.body().is_empty() {
             return Ok(None);
         }
-        ErasedObject::decode_properties(&self.reference, response).map(Some)
+        ObjectSnapshot::<()>::decode(&self.reference, response).map(Some)
     }
 }
 
@@ -110,10 +136,20 @@ impl<T> ObjectRef<T>
 where
     T: Create,
 {
-    /// Creates a typed object-creation request.
-    pub fn create(&self, mut payload: T::Payload) -> CreateObjectRequest<T, T::Payload> {
+    /// Constructs an [`Operation`] to create an object.
+    ///
+    /// The object identity (workbench type & name) are taken from `self`.
+    ///
+    /// Other properties, such as description, abap language version and
+    /// object specific properties can be supplied in the payload.
+    ///
+    /// The created object is returnd as snapshot on success.
+    pub fn create(&self, mut payload: T::Payload) -> ObjectCreation<T, T::Payload> {
+        // Make sure identify matches the reference. In the erased path,
+        // the same thing happens during the descriptor xml serialization.
         payload.assign_identity(self);
-        CreateObjectRequest {
+
+        ObjectCreation {
             reference: self.clone(),
             payload,
             transport_request: None,
@@ -124,25 +160,32 @@ where
 }
 
 impl ObjectRef<()> {
-    /// Creates a runtime object-creation request from its JSON payload.
+    /// Constructs an [`Operation`] to create an object.
+    ///
+    /// The object identity (workbench type & name) are taken from `self`.
+    ///
+    /// Other properties, such as description, abap language version and
+    /// object specific properties can be supplied in the payload.
+    ///
+    /// Because the payload is supplied as JSON, deserialization to a typed
+    /// payload may fail at this point.
+    ///
+    /// The created object is returnd as snapshot on success.
     pub fn create(
         &self,
         payload: serde_json::Value,
-    ) -> Result<CreateObjectRequest<(), serde_json::Value>, ObjectError> {
-        let descriptor = self
-            .descriptor()
-            .ok_or_else(|| ObjectError::UnsupportedObjectType {
+    ) -> Result<ObjectCreation<(), serde_json::Value>, ObjectError> {
+        let descriptor = self.require_descriptor()?;
+        // If there are no creation media types, we already know that this
+        // object type does not support creation.
+        let create_media_types = descriptor.creation_media_types().ok_or_else(|| {
+            ObjectError::UnsupportedCapability {
                 object_type: self.object_type().clone(),
-            })?;
-        let create_media_types =
-            descriptor
-                .create_media_types()
-                .ok_or_else(|| ObjectError::UnsupportedCapability {
-                    object_type: self.object_type().clone(),
-                    capability: "object creation",
-                })?;
+                capability: "object creation",
+            }
+        })?;
 
-        Ok(CreateObjectRequest {
+        Ok(ObjectCreation {
             reference: self.clone(),
             payload,
             transport_request: None,
@@ -152,24 +195,42 @@ impl ObjectRef<()> {
     }
 }
 
-/// Fetches a versioned object-properties representation.
+/// Fetches a snapshot of the specified repository object.
+///
+/// A [`WorkbenchVersion`] can be passed to control which object state
+/// is queried. If omitted, the server decides which version to return.
+///
+/// The returned [`ObjectSnapshot`] represents the state of the object,
+/// combined with its version, etag and properties, at the time it was
+/// queried.
+///
+/// It is a snapshot because it makes no guarantees that the object
+/// state has not changed since it has been queried - in extreme
+/// cases the object may even have been deleted since querying it.
 #[derive(Debug)]
-pub struct ObjectPropertiesQuery<T> {
+pub struct ObjectQuery<T> {
     pub resource: ObjectRef<T>,
     pub workbench_version: Option<WorkbenchVersion>,
 }
 
-impl<T> ObjectPropertiesQuery<T> {
+impl<T> ObjectQuery<T> {
+    /// Internal helper to build the request for both typed and erased paths
     fn build_request(&self, media_types: &'static [&'static str]) -> EncodedOperation<Owned> {
+        // Because the object uri is resolved at object construction through
+        // the client, the request target is already owned. This kinda blurs
+        // the lines between the responsibilities but its worthwhile being
+        // able to use ObjectRef for both internal and advertised objects.
         let mut request = EncodedOperation::owned(Method::GET, self.resource.uri().clone());
         if let Some(version) = self.workbench_version {
             request.push_query(WorkbenchVersion::QUERY_PARAMETER, version.as_str());
         }
+
         request.set_accepts(media_types);
         request.set_cache_revalidation(None);
         request
     }
 
+    /// Sets the workbench version of the object to be queried.
     pub fn workbench_version(mut self, version: WorkbenchVersion) -> Self {
         self.workbench_version = Some(version);
         self
@@ -180,19 +241,8 @@ impl<T> ObjectPropertiesQuery<T> {
     }
 }
 
-impl<T> ObjectPropertiesQuery<T>
-where
-    T: ObjectType,
-{
-    pub fn new(resource: ObjectRef<T>) -> Self {
-        Self {
-            resource,
-            workbench_version: None,
-        }
-    }
-}
-
-impl<T> Operation for ObjectPropertiesQuery<T>
+// Typed query implementation
+impl<T> Operation for ObjectQuery<T>
 where
     T: ObjectType,
 {
@@ -205,97 +255,85 @@ where
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        ObjectSnapshot::decode_properties(&self.resource, response)
+        ObjectSnapshot::<T>::decode(&self.resource, response)
     }
 }
 
-impl<T> ObjectRef<T>
-where
-    T: ObjectType,
-{
-    pub fn query(&self) -> ObjectPropertiesQuery<T> {
-        ObjectPropertiesQuery::new(self.clone())
-    }
-}
-
-impl<T: ObjectType> ObjectSnapshot<T> {
-    /// Creates a conditional query using this representation's entity tag.
-    pub fn revalidate(&self) -> Option<IfNoneMatch<ObjectPropertiesQuery<T>>> {
-        self.etag()
-            .cloned()
-            .map(|etag| self.reference().query().if_none_match(etag))
-    }
-
-    fn decode_properties(
-        resource: &ObjectRef<T>,
-        response: OperationResponse,
-    ) -> Result<Self, ResponseError> {
-        if response.status() == StatusCode::NOT_MODIFIED {
-            return Err(ResponseError::UnexpectedNotModified);
-        }
-        response.require_success()?;
-        let supported = T::Properties::MEDIA_TYPES;
-        let content_type = response.require_content_type(supported)?;
-        let media_type = matching_media_type(supported, content_type)
-            .expect("validated properties Content-Type must match a supported media type");
-        let etag = response.entity_tag();
-        let properties = T::Properties::from_xml(response.body())?;
-        properties.validate_for(resource)?;
-        Ok(Self::new(resource.clone(), media_type, etag, properties))
-    }
-}
-
-impl Operation for ObjectPropertiesQuery<()> {
-    type Response = ErasedObject;
+// Erased query implementation
+impl Operation for ObjectQuery<()> {
+    type Response = ObjectSnapshot<()>;
     type Kind = Stateless;
     type Target = Owned;
 
     fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let descriptor = self
-            .resource
-            .descriptor()
-            .ok_or_else(|| self.resource.unsupported_capability("object properties"))?;
+        let descriptor = self.resource.require_descriptor()?;
         Ok(self.build_request(descriptor.properties_media_types()))
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        ErasedObject::decode_properties(&self.resource, response)
+        ObjectSnapshot::<()>::decode(&self.resource, response)
     }
 }
 
-impl ObjectRef<()> {
-    pub fn query(&self) -> Result<ObjectPropertiesQuery<()>, ObjectError> {
-        self.descriptor()
-            .ok_or_else(|| self.unsupported_capability("object properties"))?;
-        Ok(ObjectPropertiesQuery {
+impl<T> ObjectRef<T> {
+    /// Constructs an [`ObjectQuery<T>`] to snapshot this object.
+    ///
+    /// A specific workbench version can be selected through the operation
+    /// builder. The snapshot retains the version retured by the server -
+    /// which is not neccessarily the requested one.
+    ///
+    /// Because the [`ObjectRef`] makes no guarantees that the object
+    /// it represents actually exists, the query may not find the object.
+    pub fn query(&self) -> ObjectQuery<T> {
+        ObjectQuery {
             resource: self.clone(),
             workbench_version: None,
-        })
+        }
     }
 }
 
-/// Replaces an object's properties representation.
+impl<T: SnapshotKind> ObjectSnapshot<T> {
+    /// Constructs an etag-decorated [`ObjectQuery`] to revalidate this
+    /// snapshot, provided that the snapshot has an etag.
+    ///
+    /// The response can then be used to check whether this snapshot is
+    /// still the latest server state or, if not, replace the current
+    /// snapshot.
+    pub fn revalidate(&self) -> Option<IfNoneMatch<ObjectQuery<T>>> {
+        self.etag()
+            .cloned()
+            .map(|etag| self.reference().query().if_none_match(etag))
+    }
+}
+
+/// Updates an objects properties.
 ///
-/// Successful execution returns a new loaded object. A response representation
-/// is decoded when ADT supplies one; an empty success response retains the
-/// submitted properties and any entity tag returned in the response headers.
+/// Successful execution decodes a new loaded object when ADT returns a response
+/// representation. An empty success response returns `None`.
 #[derive(Debug)]
-pub struct ObjectPropertiesUpdate<T> {
+pub struct ObjectUpdate<T> {
+    /// A reference to the object to be updated
     resource: ObjectRef<T>,
+    /// The lock to update the object with, bound to some user session
     object_lock: ObjectLock,
-    media_type: &'static str,
-    properties: ErasedProperties,
+    /// The new, already encoded properties
     body: Vec<u8>,
+    /// The content type of the request body
+    media_type: &'static str,
+    /// A transport request to assign the changes to
     transport_request: Option<TransportNumber>,
 }
 
-impl<T> ObjectPropertiesUpdate<T> {
+impl<T> ObjectUpdate<T> {
+    /// Assigns a transport request to the change. The object must be transportable
+    /// and not already locked in another transport request.
     #[must_use]
     pub fn transport(mut self, transport_request: impl Into<TransportNumber>) -> Self {
         self.transport_request = Some(transport_request.into());
         self
     }
 
+    /// Shared helper to construct the operation for both typed and erased paths.
     fn build_request(&self) -> EncodedOperation<Owned> {
         let mut request = EncodedOperation::owned(Method::PUT, self.resource.uri().clone());
         request.push_query(LOCK_HANDLE_QUERY, self.object_lock.handle());
@@ -312,11 +350,11 @@ impl<T> ObjectPropertiesUpdate<T> {
     }
 }
 
-impl<T> Operation for ObjectPropertiesUpdate<T>
+impl<T> Operation for ObjectUpdate<T>
 where
     T: ObjectType,
 {
-    type Response = ObjectSnapshot<T>;
+    type Response = Option<ObjectSnapshot<T>>;
     type Kind = Stateful;
     type Target = Owned;
 
@@ -326,117 +364,158 @@ where
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         response.require_success()?;
+
         if response.body().is_empty() {
-            let properties = self
-                .properties
-                .downcast_ref::<T::Properties>()
-                .expect("typed property updates retain their concrete property type")
-                .clone();
-            return Ok(ObjectSnapshot::new(
-                self.resource.clone(),
-                self.media_type,
-                response.entity_tag(),
-                properties,
-            ));
+            return Ok(None);
         }
-        ObjectSnapshot::decode_properties(&self.resource, response)
+        ObjectSnapshot::<T>::decode(&self.resource, response).map(Some)
+    }
+}
+
+impl Operation for ObjectUpdate<()> {
+    type Response = Option<ObjectSnapshot<()>>;
+    type Kind = Stateful;
+    type Target = Owned;
+
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        Ok(self.build_request())
+    }
+
+    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+        response.require_success()?;
+
+        if response.body().is_empty() {
+            return Ok(None);
+        }
+        ObjectSnapshot::<()>::decode(&self.resource, response).map(Some)
     }
 }
 
 impl<T: ObjectType> ObjectSnapshot<T> {
-    /// Creates an update that replaces this loaded representation's properties.
+    /// Creates an update operation for this object.
+    ///
+    /// Only certain object properties, such as description, language
+    /// versions or object specifific properties can be updated through
+    /// this method. Source code updates take place on their respective
+    /// [`crate::SourceRef`] handles.
+    ///
+    /// Whether a property can be updated or not depends on the concrete object
+    /// type. When ADT returns a representation, the response includes the new
+    /// state after applying all possible updates on an inactive object snapshot.
     pub fn update(
         &self,
-        object_lock: &ObjectLock,
+        lock: &ObjectLock,
         properties: T::Properties,
-    ) -> Result<ObjectPropertiesUpdate<T>, ObjectError> {
-        object_lock.validate_modification_for(self.reference())?;
+    ) -> Result<ObjectUpdate<T>, ObjectError> {
+        lock.validate_modification_for(self.reference())?;
         properties.validate_for(self.reference())?;
-        let media_type = matching_media_type(T::Properties::MEDIA_TYPES, self.media_type())
-            .expect("typed ADT objects carry a supported media type");
-        let body = properties.to_xml()?;
-        Ok(ObjectPropertiesUpdate {
+
+        let media_type =
+            compatibility::matching_media_type(T::Properties::MEDIA_TYPES, self.media_type())
+                .expect("typed ADT objects carry a supported media type");
+
+        Ok(ObjectUpdate {
             resource: self.reference().clone(),
-            object_lock: object_lock.clone(),
+            object_lock: lock.clone(),
             media_type,
-            properties: std::sync::Arc::new(properties),
-            body,
-            transport_request: object_lock.transport_request().cloned(),
+            body: properties.to_xml()?,
+            transport_request: lock.transport_request().cloned(),
         })
     }
 }
 
-impl ErasedObject {
-    /// Creates an update that replaces this loaded representation's properties.
+impl ObjectSnapshot<()> {
+    /// Creates an update operation for this object.
+    ///
+    /// Only certain object properties, such as description, language
+    /// versions or object specifific properties can be updated through
+    /// this method. Source code updates take place on their respective
+    /// [`crate::SourceRef`] handles.
+    ///
+    /// Whether a property can be updated or not depends on the concrete object
+    /// type. When ADT returns a representation, the response includes the new
+    /// state after applying all possible updates on an inactive object snapshot.
+    ///
+    /// Because the properties are supplied as JSON, deserialization to the
+    /// concrete object properties may fail at this point.
     pub fn update(
         &self,
-        object_lock: &ObjectLock,
+        lock: &ObjectLock,
         properties: serde_json::Value,
-    ) -> Result<ObjectPropertiesUpdate<()>, ObjectError> {
-        object_lock.validate_modification_for(self.reference())?;
+    ) -> Result<ObjectUpdate<()>, ObjectError> {
+        lock.validate_modification_for(self.reference())?;
         let descriptor = self.reference().require_descriptor()?;
-        let media_type = descriptor
-            .properties_media_type(self.media_type())
-            .ok_or_else(|| ObjectError::UnsupportedPropertiesMediaType {
-                object_type: self.reference().object_type().clone(),
-                media_type: self.media_type().to_owned(),
-            })?;
+
+        // Select media type through the descriptor
+        let media_type = compatibility::matching_media_type(
+            descriptor.properties_media_types(),
+            self.media_type(),
+        )
+        .ok_or_else(|| ObjectError::UnsupportedPropertiesMediaType {
+            object_type: self.reference().object_type().clone(),
+            media_type: self.media_type().to_owned(),
+        })?;
+
+        // Descriptor does the heavy lifting here, recover the typed properties
+        // from JSON and then serialize them to xml. This all uses the same
+        // implementations as the static path does under the hood.
         let properties = descriptor.properties_from_json(self.reference(), properties)?;
         let body = descriptor.properties_to_xml(self.reference(), &properties)?;
-        Ok(ObjectPropertiesUpdate {
+
+        Ok(ObjectUpdate {
             resource: self.reference().clone(),
-            object_lock: object_lock.clone(),
+            object_lock: lock.clone(),
             media_type,
-            properties,
             body,
-            transport_request: object_lock.transport_request().cloned(),
+            transport_request: lock.transport_request().cloned(),
         })
     }
 }
 
-impl Operation for ObjectPropertiesUpdate<()> {
-    type Response = ErasedObject;
-    type Kind = Stateful;
-    type Target = Owned;
-
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        Ok(self.build_request())
-    }
-
-    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+impl<T: ObjectType> ObjectSnapshot<T> {
+    /// Internal, module-private helper to construct the snapshot from a
+    /// response since creation, updating and query all may return an
+    /// object snapshot response with an identical content type.
+    fn decode(resource: &ObjectRef<T>, response: OperationResponse) -> Result<Self, ResponseError> {
         response.require_success()?;
-        if response.body().is_empty() {
-            return Ok(ErasedObject::new(
-                self.resource.clone(),
-                self.media_type,
-                response.entity_tag(),
-                self.properties.clone(),
-            ));
-        }
-        ErasedObject::decode_properties(&self.resource, response)
+
+        let supported = T::Properties::MEDIA_TYPES;
+        let content_type = response.require_content_type(supported)?;
+        let media_type = compatibility::matching_media_type(supported, content_type)
+            .expect("validated properties Content-Type must match a supported media type");
+
+        let etag = response.entity_tag();
+        let properties = T::Properties::from_xml(response.body())?;
+        properties.validate_for(resource)?;
+
+        Ok(Self::new(resource.clone(), media_type, etag, properties))
     }
 }
 
-impl ErasedObject {
-    fn decode_properties(
+impl ObjectSnapshot<()> {
+    /// Internal, module-private helper to construct the snapshot from a
+    /// response since creation, updating and query all may return an
+    /// object snapshot response with an identical content type.
+    fn decode(
         resource: &ObjectRef<()>,
         response: OperationResponse,
     ) -> Result<Self, ResponseError> {
-        if response.status() == StatusCode::NOT_MODIFIED {
-            return Err(ResponseError::UnexpectedNotModified);
-        }
         response.require_success()?;
-        let descriptor = resource
-            .descriptor()
-            .ok_or_else(|| resource.unsupported_capability("object properties"))?;
+        let descriptor = resource.require_descriptor()?;
+
         let supported = descriptor.properties_media_types();
         let content_type = response.require_content_type(supported)?;
-        let media_type = descriptor
-            .properties_media_type(content_type)
+        let media_type = compatibility::matching_media_type(supported, content_type)
             .expect("validated properties Content-Type must match a supported media type");
+
         let etag = response.entity_tag();
         let properties = descriptor.properties_from_xml(resource, response.body())?;
-        Ok(Self::new(resource.clone(), media_type, etag, properties))
+        Ok(Self::new_erased(
+            resource.clone(),
+            media_type,
+            etag,
+            properties,
+        ))
     }
 }
 

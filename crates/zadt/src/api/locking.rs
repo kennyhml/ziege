@@ -6,7 +6,7 @@ use serde::Deserialize;
 use crate::{
     PostAction, User, UserSessionId,
     error::{EncodeError, ObjectError, ResponseError},
-    objects::{ErasedObject, ObjectRef, ObjectSnapshot, ObjectType},
+    objects::{ObjectRef, ObjectSnapshot, ObjectType},
     operation::{EncodedOperation, Operation, OperationResponse, Owned, Stateful},
 };
 
@@ -252,7 +252,7 @@ impl<T: ObjectType> ObjectSnapshot<T> {
     }
 }
 
-impl ErasedObject {
+impl ObjectSnapshot<()> {
     /// Creates an object-lock operation.
     pub fn lock(&self, access_mode: AccessMode) -> LockRequest {
         self.reference().lock(access_mode)

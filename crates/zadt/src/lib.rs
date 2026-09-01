@@ -28,7 +28,7 @@ pub use api::discovery::{
     TemplateLink, Workspace,
 };
 pub use api::locking::{AccessMode, LockRequest, ObjectLock, UnlockRequest};
-pub use api::object::{CreateObjectRequest, ObjectPropertiesQuery, ObjectPropertiesUpdate};
+pub use api::object::{ObjectCreation, ObjectQuery, ObjectUpdate};
 pub use api::objectstructure::{ObjectStructure, ObjectStructureElement, ObjectStructureQuery};
 pub use api::packages::{
     PackageInterfaceReference, PackageReference, PackageSettings, PackageSettingsQuery,
@@ -81,19 +81,18 @@ pub use objects::{
     DataElementDefinition, DataElementProperties, Domain, DomainContent, DomainCreateProperties,
     DomainCreatePropertiesBuilder, DomainCreatePropertiesBuilderError, DomainFixedValue,
     DomainFixedValues, DomainOutputInformation, DomainProperties, DomainTypeInformation,
-    DomainValueInformation, ErasedObject, FunctionGroup, FunctionGroupInclude,
-    FunctionGroupIncludeProperties, FunctionGroupProperties, FunctionModule,
-    FunctionModuleProperties, GlobalWorkbenchType, Include, IncludeProperties, Interface,
-    InterfaceCreateProperties, InterfaceCreatePropertiesBuilder,
-    InterfaceCreatePropertiesBuilderError, InterfaceProperties, InvalidWorkbenchType, Links,
-    MediaTyped, MetadataExtension, MetadataExtensionCreateProperties,
+    DomainValueInformation, FunctionGroup, FunctionGroupInclude, FunctionGroupIncludeProperties,
+    FunctionGroupProperties, FunctionModule, FunctionModuleProperties, GlobalWorkbenchType,
+    Include, IncludeProperties, Interface, InterfaceCreateProperties,
+    InterfaceCreatePropertiesBuilder, InterfaceCreatePropertiesBuilderError, InterfaceProperties,
+    InvalidWorkbenchType, Links, MediaTyped, MetadataExtension, MetadataExtensionCreateProperties,
     MetadataExtensionCreatePropertiesBuilder, MetadataExtensionCreatePropertiesBuilderError,
     MetadataExtensionProperties, ObjectIdentity, ObjectRef, ObjectReferences, ObjectSnapshot,
     ObjectType, Package, PackageAssignment, PackageAttributes, PackageProperties, PackageTransport,
     PackageUseAccess, PrimaryObjectType, Program, ProgramProperties, ServiceDefinition,
     ServiceDefinitionCreateProperties, ServiceDefinitionCreatePropertiesBuilder,
-    ServiceDefinitionCreatePropertiesBuilderError, ServiceDefinitionProperties, Source,
-    SourceComponents, Structure, SubObjects, SyntaxConfiguration, SyntaxLanguage, ToXml,
+    ServiceDefinitionCreatePropertiesBuilderError, ServiceDefinitionProperties, SnapshotKind,
+    Source, SourceComponents, Structure, SubObjects, SyntaxConfiguration, SyntaxLanguage, ToXml,
     WorkbenchVersion, XmlConversion,
 };
 pub use operation::{

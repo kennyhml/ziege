@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 use zadt::{
     AbapLanguageVersion, AdvertisedObjectReference, Class, ClassCategory, ClassProperties,
-    ErasedObject, GlobalWorkbenchType, ObjectType,
+    GlobalWorkbenchType, ObjectSnapshot, ObjectType,
 };
 
 use crate::{
     Cardinality, ComponentId, FileBacking, FileSpec, ObjectFormat, ProjectionError,
     format::{
-        FileDescriptor, FormatDescriptor, PropertiesCodec, SourceFileDescriptor,
-        UnbackedFileDescriptor, decode_properties, encode_properties,
+        FileDescriptor, FormatDescriptor, PropertiesCodec, PropertyProjection,
+        SourceFileDescriptor, UnbackedFileDescriptor, decode_properties, encode_properties,
     },
     language,
 };
@@ -117,13 +117,13 @@ impl FileDescriptor for ClassMetadata {
 }
 
 impl PropertiesCodec for ClassMetadata {
-    fn render(&self, properties: &ErasedObject) -> Result<String, ProjectionError> {
+    fn render(&self, properties: &ObjectSnapshot<()>) -> Result<String, ProjectionError> {
         render_class_properties(&decode_properties::<ClassProperties>(properties, "CLAS")?)
     }
 
     fn merge(
         &self,
-        original: &ErasedObject,
+        original: &ObjectSnapshot<()>,
         edited: &str,
     ) -> Result<serde_json::Value, ProjectionError> {
         let properties = decode_properties::<ClassProperties>(original, "CLAS")?;
@@ -351,7 +351,7 @@ pub struct AffMethodDescription {
 pub(crate) fn render_class_properties(
     properties: &ClassProperties,
 ) -> Result<String, ProjectionError> {
-    let document = document_from_properties(properties)?;
+    let document = <AffClass as PropertyProjection<ClassProperties>>::project(properties)?;
     let mut content =
         serde_json::to_string_pretty(&document).map_err(ProjectionError::InvalidClassDocument)?;
     content.push('\n');
@@ -376,7 +376,7 @@ pub(crate) fn merge_class_properties(
         });
     }
 
-    let original_document = document_from_properties(original)?;
+    let original_document = AffClass::project(original)?;
     let original_language_version = original.abap_language_version.clone();
     let mut merged = original.clone();
     let properties = &mut merged;
@@ -409,31 +409,33 @@ pub(crate) fn merge_class_properties(
     Ok(merged)
 }
 
-fn document_from_properties(properties: &ClassProperties) -> Result<AffClass, ProjectionError> {
-    let document = AffClass {
-        format_version: CLASS_FORMAT.version().to_owned(),
-        header: AffClassHeader {
-            description: properties.description.clone(),
-            original_language: language::from_adt(
-                &properties.master_language,
-                "header.originalLanguage",
-            )?,
-            abap_language_version: AffClassAbapLanguageVersion::from_adt(
-                properties.abap_language_version.as_ref(),
-            )?,
-        },
-        category: AffClassCategory::from_adt(properties.category.as_str())?,
-        fix_point_arithmetic: properties.fix_point_arithmetic,
-        message_class: properties
-            .message_class
-            .as_ref()
-            .and_then(|reference| reference.name.clone())
-            .filter(|name| !name.is_empty())
-            .unwrap_or_default(),
-        descriptions: None,
-    };
-    document.validate()?;
-    Ok(document)
+impl PropertyProjection<ClassProperties> for AffClass {
+    fn project(properties: &ClassProperties) -> Result<Self, ProjectionError> {
+        let document = Self {
+            format_version: CLASS_FORMAT.version().to_owned(),
+            header: AffClassHeader {
+                description: properties.description.clone(),
+                original_language: language::from_adt(
+                    &properties.master_language,
+                    "header.originalLanguage",
+                )?,
+                abap_language_version: AffClassAbapLanguageVersion::from_adt(
+                    properties.abap_language_version.as_ref(),
+                )?,
+            },
+            category: AffClassCategory::from_adt(properties.category.as_str())?,
+            fix_point_arithmetic: properties.fix_point_arithmetic,
+            message_class: properties
+                .message_class
+                .as_ref()
+                .and_then(|reference| reference.name.clone())
+                .filter(|name| !name.is_empty())
+                .unwrap_or_default(),
+            descriptions: None,
+        };
+        document.validate()?;
+        Ok(document)
+    }
 }
 
 impl AffClass {

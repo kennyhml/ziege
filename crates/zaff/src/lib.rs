@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use thiserror::Error;
-use zadt::{ErasedObject, GlobalWorkbenchType, Object, ObjectType, SourceRef};
+use zadt::{GlobalWorkbenchType, ObjectSnapshot, SnapshotKind, SourceRef};
 
 mod format;
 mod formats;
@@ -34,18 +34,10 @@ impl TryFrom<&GlobalWorkbenchType> for ObjectFormat {
     }
 }
 
-impl<T: ObjectType> TryFrom<&Object<T>> for ObjectFormat {
+impl<T: SnapshotKind> TryFrom<&ObjectSnapshot<T>> for ObjectFormat {
     type Error = ProjectionError;
 
-    fn try_from(object: &Object<T>) -> Result<Self, Self::Error> {
-        Self::for_workbench_type(object.reference().object_type())
-    }
-}
-
-impl TryFrom<&ErasedObject> for ObjectFormat {
-    type Error = ProjectionError;
-
-    fn try_from(object: &ErasedObject) -> Result<Self, Self::Error> {
+    fn try_from(object: &ObjectSnapshot<T>) -> Result<Self, Self::Error> {
         Self::for_workbench_type(object.reference().object_type())
     }
 }
@@ -404,8 +396,8 @@ pub enum ProjectionError {
 mod test_support {
     use http::{HeaderMap, StatusCode};
     use zadt::{
-        AdtResponse, AdtUri, ErasedObject, Object, ObjectPropertiesQuery, ObjectRef, ObjectType,
-        Operation, OperationResponse, RepositoryContentQuery, RepositoryObjectEntry,
+        AdtResponse, AdtUri, ObjectQuery, ObjectRef, ObjectSnapshot, ObjectType, Operation,
+        OperationResponse, RepositoryContentQuery, RepositoryObjectEntry,
     };
 
     pub fn repository_entry(name: &str, object_type: &str, uri: &str) -> RepositoryObjectEntry {
@@ -438,7 +430,7 @@ mod test_support {
         media_type: &'static str,
         etag: &'static str,
         body: &[u8],
-    ) -> Object<T>
+    ) -> ObjectSnapshot<T>
     where
         T: ObjectType,
     {
@@ -448,11 +440,8 @@ mod test_support {
         let response = AdtResponse::new(StatusCode::OK, headers, body.to_vec());
         let target = reference.uri().clone();
         let query = reference.query();
-        <ObjectPropertiesQuery<T> as Operation>::decode(
-            &query,
-            OperationResponse::new(response, target),
-        )
-        .unwrap()
+        <ObjectQuery<T> as Operation>::decode(&query, OperationResponse::new(response, target))
+            .unwrap()
     }
 
     pub fn erased_properties<T>(
@@ -460,22 +449,19 @@ mod test_support {
         media_type: &'static str,
         etag: &'static str,
         body: &[u8],
-    ) -> ErasedObject
+    ) -> ObjectSnapshot<()>
     where
         T: ObjectType,
     {
         let reference = reference.erase();
-        let query = reference.query().unwrap();
+        let query = reference.query();
         let mut headers = HeaderMap::new();
         headers.insert(http::header::CONTENT_TYPE, media_type.parse().unwrap());
         headers.insert(http::header::ETAG, etag.parse().unwrap());
         let response = AdtResponse::new(StatusCode::OK, headers, body.to_vec());
         let target = reference.uri().clone();
-        <ObjectPropertiesQuery<()> as Operation>::decode(
-            &query,
-            OperationResponse::new(response, target),
-        )
-        .unwrap()
+        <ObjectQuery<()> as Operation>::decode(&query, OperationResponse::new(response, target))
+            .unwrap()
     }
 }
 

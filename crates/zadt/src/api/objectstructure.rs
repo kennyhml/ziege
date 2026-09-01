@@ -2,9 +2,9 @@ use http::{Method, StatusCode};
 use serde::Deserialize;
 
 use crate::{
-    AdtUri, AdvertisedLink, EncodeError, EncodedOperation, ErasedObject, Links, ObjectError,
-    ObjectSnapshot, ObjectStructureRef, Operation, OperationResponse, Owned, Relations,
-    ResponseError, Stateless, Structure, WorkbenchVersion, resource::resolve_href,
+    AdtUri, AdvertisedLink, EncodeError, EncodedOperation, Links, ObjectError, ObjectSnapshot,
+    ObjectStructureRef, Operation, OperationResponse, Owned, Relations, ResponseError, Stateless,
+    Structure, WorkbenchVersion, resource::resolve_href,
 };
 
 const INHERITED_MEMBERS_QUERY: &str = "inheritedMembers";
@@ -140,7 +140,7 @@ impl<T: Structure> ObjectSnapshot<T> {
     }
 }
 
-impl ErasedObject {
+impl ObjectSnapshot<()> {
     /// Creates an object-structure query through the runtime descriptor.
     pub fn object_structure(&self) -> Result<ObjectStructureQuery, ObjectError> {
         self.reference()

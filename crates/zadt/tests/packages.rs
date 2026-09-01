@@ -113,7 +113,7 @@ async fn package_properties_advertise_all_supported_contracts() {
 }
 
 #[tokio::test]
-async fn package_properties_update_returns_a_new_snapshot_for_an_empty_response() {
+async fn package_properties_update_returns_none_for_an_empty_response() {
     let server = MockServer::start_async().await;
     let logon = mock_logon(&server).await;
     let discovery = mock_discovery(&server).await;
@@ -221,11 +221,7 @@ async fn package_properties_update_returns_a_new_snapshot_for_an_empty_response(
     session.close().await.unwrap();
 
     assert_eq!(package.properties().description, original_description);
-    assert_eq!(
-        result.properties().description,
-        "Updated package description"
-    );
-    assert!(result.etag().is_none());
+    assert!(result.is_none());
     logon.assert_async().await;
     discovery.assert_async().await;
     csrf.assert_async().await;

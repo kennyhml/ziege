@@ -1,13 +1,14 @@
 use serde::{Deserialize, Serialize};
 use zadt::{
-    AbapLanguageVersion, DataElement, DataElementDefinition, DataElementProperties, ErasedObject,
-    GlobalWorkbenchType, ObjectType,
+    AbapLanguageVersion, DataElement, DataElementDefinition, DataElementProperties,
+    GlobalWorkbenchType, ObjectSnapshot, ObjectType,
 };
 
 use crate::{
     Cardinality, ComponentId, FileBacking, FileSpec, ObjectFormat, ProjectionError,
     format::{
-        FileDescriptor, FormatDescriptor, PropertiesCodec, decode_properties, encode_properties,
+        FileDescriptor, FormatDescriptor, PropertiesCodec, PropertyProjection, decode_properties,
+        encode_properties,
     },
     language,
 };
@@ -80,7 +81,7 @@ impl FileDescriptor for DataElementMetadata {
 }
 
 impl PropertiesCodec for DataElementMetadata {
-    fn render(&self, properties: &ErasedObject) -> Result<String, ProjectionError> {
+    fn render(&self, properties: &ObjectSnapshot<()>) -> Result<String, ProjectionError> {
         render_data_element_properties(&decode_properties::<DataElementProperties>(
             properties, "DTEL",
         )?)
@@ -88,7 +89,7 @@ impl PropertiesCodec for DataElementMetadata {
 
     fn merge(
         &self,
-        original: &ErasedObject,
+        original: &ObjectSnapshot<()>,
         edited: &str,
     ) -> Result<serde_json::Value, ProjectionError> {
         let properties = decode_properties::<DataElementProperties>(original, "DTEL")?;
@@ -421,57 +422,12 @@ impl AffBasicDirection {
 pub(crate) fn render_data_element_properties(
     properties: &DataElementProperties,
 ) -> Result<String, ProjectionError> {
-    let document = document_from_properties(properties)?;
+    let document =
+        <AffDataElement as PropertyProjection<DataElementProperties>>::project(properties)?;
     let mut content = serde_json::to_string_pretty(&document)
         .map_err(ProjectionError::InvalidDataElementDocument)?;
     content.push('\n');
     Ok(content)
-}
-
-fn document_from_properties(
-    properties: &DataElementProperties,
-) -> Result<AffDataElement, ProjectionError> {
-    let definition = &properties.definition;
-    let category = AffDataElementCategory::from_adt(&definition.type_kind)?;
-    let predefined_type = match (
-        category,
-        definition.data_type.clone(),
-        definition.data_type_length,
-    ) {
-        (AffDataElementCategory::PredefinedType, Some(data_type), Some(length)) => {
-            Some(AffPredefinedType {
-                data_type,
-                length,
-                decimals: definition.data_type_decimals.filter(|value| *value != 0),
-            })
-        }
-        _ => None,
-    };
-    let document = AffDataElement {
-        format_version: DATA_ELEMENT_FORMAT.version().to_owned(),
-        header: AffDataElementHeader {
-            description: required(properties.description.clone(), "header.description")?,
-            original_language: language::from_adt(
-                &required(
-                    properties.master_language.clone(),
-                    "header.originalLanguage",
-                )?,
-                "header.originalLanguage",
-            )?,
-            abap_language_version: AffAbapLanguageVersion::from_adt(
-                properties.abap_language_version.as_ref(),
-            )?,
-        },
-        data_type_information: AffDataElementTypeInformation {
-            category,
-            type_name: definition.type_name.clone(),
-            predefined_type,
-        },
-        field_labels: AffDataElementFieldLabels::from_definition(definition),
-        additional_properties: AffDataElementAdditionalProperties::from_definition(definition),
-    };
-    document.validate()?;
-    Ok(document)
 }
 
 /// Merges edited AFF JSON into the complete original ZADT properties value.
@@ -479,34 +435,79 @@ pub(crate) fn merge_data_element_properties(
     original: &DataElementProperties,
     edited: &str,
 ) -> Result<DataElementProperties, ProjectionError> {
-    let document: AffDataElement =
+    let edited: AffDataElement =
         serde_json::from_str(edited).map_err(ProjectionError::InvalidDataElementDocument)?;
-    document.validate()?;
-    let original_properties = original;
-    let original_document = document_from_properties(original_properties)?;
-    let original_language_version = original_properties.abap_language_version.clone();
-    let mut definition = original_properties.definition.clone();
-    apply_document(&original_document, &document, &mut definition);
+    edited.validate()?;
+    let original_document = AffDataElement::project(original)?;
+    let original_language_version = original.abap_language_version.clone();
+    let mut definition = original.definition.clone();
+    apply_document(&original_document, &edited, &mut definition);
 
     let mut merged = original.clone();
     let properties = &mut merged;
-    if document.header.description != original_document.header.description {
-        properties.description = Some(document.header.description);
+    if edited.header.description != original_document.header.description {
+        properties.description = Some(edited.header.description);
     }
-    if document.header.original_language != original_document.header.original_language {
+    if edited.header.original_language != original_document.header.original_language {
         properties.master_language = Some(language::to_adt(
-            &document.header.original_language,
+            &edited.header.original_language,
             "header.originalLanguage",
         )?);
     }
-    if document.header.abap_language_version != original_document.header.abap_language_version {
-        properties.abap_language_version = document
+    if edited.header.abap_language_version != original_document.header.abap_language_version {
+        properties.abap_language_version = edited
             .header
             .abap_language_version
             .adt_value(original_language_version.as_ref());
     }
     properties.definition = definition;
     Ok(merged)
+}
+
+impl PropertyProjection<DataElementProperties> for AffDataElement {
+    fn project(properties: &DataElementProperties) -> Result<Self, ProjectionError> {
+        let definition = &properties.definition;
+        let category = AffDataElementCategory::from_adt(&definition.type_kind)?;
+        let predefined_type = match (
+            category,
+            definition.data_type.clone(),
+            definition.data_type_length,
+        ) {
+            (AffDataElementCategory::PredefinedType, Some(data_type), Some(length)) => {
+                Some(AffPredefinedType {
+                    data_type,
+                    length,
+                    decimals: definition.data_type_decimals.filter(|value| *value != 0),
+                })
+            }
+            _ => None,
+        };
+        let document = Self {
+            format_version: DATA_ELEMENT_FORMAT.version().to_owned(),
+            header: AffDataElementHeader {
+                description: required(properties.description.clone(), "header.description")?,
+                original_language: language::from_adt(
+                    &required(
+                        properties.master_language.clone(),
+                        "header.originalLanguage",
+                    )?,
+                    "header.originalLanguage",
+                )?,
+                abap_language_version: AffAbapLanguageVersion::from_adt(
+                    properties.abap_language_version.as_ref(),
+                )?,
+            },
+            data_type_information: AffDataElementTypeInformation {
+                category,
+                type_name: definition.type_name.clone(),
+                predefined_type,
+            },
+            field_labels: AffDataElementFieldLabels::from_definition(definition),
+            additional_properties: AffDataElementAdditionalProperties::from_definition(definition),
+        };
+        document.validate()?;
+        Ok(document)
+    }
 }
 
 impl AffDataElement {

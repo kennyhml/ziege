@@ -114,14 +114,14 @@ flowchart TB
             direction TB
             DESCRIPTOR["Class::DESCRIPTOR<br>ObjectTypeDescriptor"]
             REGISTRY["OBJECT_TYPES registry<br>concrete descriptor table"]
-            RUNTIME_CALL["ErasedObject<br>descriptor function pointers"]
+            RUNTIME_CALL["ObjectSnapshot&lt;()&gt;<br>descriptor function pointers"]
         end
     end
 
     subgraph RESULTS["Type-state-specific results"]
         direction LR
         TYPED_OBJECT["ObjectSnapshot&lt;Class&gt;<br>ClassProperties"]
-        RUNTIME_OBJECT["ErasedObject<br>type-erased properties"]
+        RUNTIME_OBJECT["ObjectSnapshot&lt;()&gt;<br>type-erased properties"]
     end
 
     subgraph EXECUTION["Shared execution layer"]
@@ -195,10 +195,10 @@ executors.
 ### Runtime descriptors
 
 Runtime object types use `ObjectRef<()>`. A modeled runtime reference can load an
-`ErasedObject` with concrete type-erased properties. ZADT selects a registered
+`ObjectSnapshot<()>` with concrete type-erased properties. ZADT selects a registered
 descriptor from the exact Workbench type and validates capabilities at runtime.
-Consumers export JSON with `ErasedObject::properties` and submit edited JSON to
-`ErasedObject::update`. Loaded snapshots remain immutable, and internal capability
+Consumers export JSON with `ObjectSnapshot<()>::properties` and submit edited JSON to
+`ObjectSnapshot<()>::update`. Loaded snapshots remain immutable, and internal capability
 dispatch does not convert properties through JSON.
 
 Typed operations dispatch through Rust traits. Runtime operations dispatch through

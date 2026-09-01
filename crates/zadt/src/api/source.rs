@@ -2,7 +2,7 @@ use http::{Method, StatusCode};
 
 use crate::{
     error::{EncodeError, ObjectError, ResponseError},
-    objects::{ErasedObject, ObjectSnapshot, Source, SourceComponents},
+    objects::{ObjectSnapshot, Source, SourceComponents},
     operation::{EncodedOperation, Operation, OperationResponse, Owned, Stateful, Stateless},
     protocol::{EntityTag, TEXT_PLAIN_MEDIA_TYPE},
     resource::{SourceRef, refs::source_from_href},
@@ -133,7 +133,7 @@ impl<T: SourceComponents> ObjectSnapshot<T> {
     }
 }
 
-impl ErasedObject {
+impl ObjectSnapshot<()> {
     /// Resolves the primary source advertised by this runtime-typed object.
     pub fn source(&self) -> Result<SourceRef, ObjectError> {
         self.reference().require_descriptor()?.source(self)

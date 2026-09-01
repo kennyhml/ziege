@@ -9,7 +9,7 @@ mod private {
     pub trait Sealed {}
 }
 
-/// Marker type for a valid target of an [`Operation`].
+/// Marker type for a valid target of an [`crate::Operation`].
 pub trait OperationTarget: private::Sealed + Send + Sync + 'static {}
 
 /// An operation target already owned by the operation.
@@ -48,12 +48,13 @@ pub(crate) struct EncodedRequest {
     pub(crate) body: Vec<u8>,
 }
 
-/// Wraps the [`EncodedRequest`] with local operation metadata, session affinity
+/// Wraps the encoded request with local operation metadata, session affinity
 /// and a target typestate to enable compile time target resolver guarantees
 /// such that an operation with `T = Advertised` can only be resolved by a
-/// [`Client<Ready>`] with knowledge of a discovery document.
+/// [`crate::Client`] in the [`crate::Ready`] state with knowledge of a discovery
+/// document.
 ///
-/// [`Operation::encode`] interfaces with this type and returns it on success.
+/// [`crate::Operation::encode`] interfaces with this type and returns it on success.
 ///
 /// TODO: This adds some friction because the internal enum and the typestate
 /// do not guarantee to stay in sync when an operation is defined incorrectly.

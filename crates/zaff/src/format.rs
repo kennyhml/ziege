@@ -2,7 +2,7 @@ use std::fmt;
 
 use serde::{Serialize, de::DeserializeOwned};
 use zadt::{
-    Class, DataElement, ErasedObject, GlobalWorkbenchType, Include, MediaTyped, Object, ObjectRef,
+    Class, DataElement, GlobalWorkbenchType, Include, MediaTyped, ObjectRef, ObjectSnapshot,
     Package, Program, SourceRef,
 };
 
@@ -207,7 +207,10 @@ impl ProjectedFile {
     }
 
     /// Renders runtime ADT properties through this file's AFF codec.
-    pub fn render_properties(&self, properties: &ErasedObject) -> Result<String, ProjectionError> {
+    pub fn render_properties(
+        &self,
+        properties: &ObjectSnapshot<()>,
+    ) -> Result<String, ProjectionError> {
         let FileBacking::Properties(object) = &self.backing else {
             return Err(ProjectionError::NotPropertiesFile {
                 component: self.component,
@@ -225,7 +228,7 @@ impl ProjectedFile {
     /// Merges edited AFF content into the original runtime ADT properties.
     pub fn merge_properties(
         &self,
-        original: &ErasedObject,
+        original: &ObjectSnapshot<()>,
         edited: &str,
     ) -> Result<serde_json::Value, ProjectionError> {
         let FileBacking::Properties(object) = &self.backing else {
@@ -245,7 +248,7 @@ impl ProjectedFile {
 
 fn ensure_properties_owner(
     expected: &ObjectRef<()>,
-    properties: &ErasedObject,
+    properties: &ObjectSnapshot<()>,
 ) -> Result<(), ProjectionError> {
     if properties.reference().uri() != expected.uri()
         || properties.reference().name() != expected.name()
@@ -355,7 +358,7 @@ macro_rules! impl_sourceless_projection_object {
     };
 }
 
-impl ProjectionObject for ErasedObject {
+impl ProjectionObject for ObjectSnapshot<()> {
     fn reference(&self) -> ObjectRef<()> {
         self.reference().clone()
     }
@@ -365,7 +368,7 @@ impl ProjectionObject for ErasedObject {
     }
 
     fn source(&self) -> Result<Option<SourceRef>, zadt::ObjectError> {
-        match ErasedObject::source(self) {
+        match ObjectSnapshot::<()>::source(self) {
             Ok(source) => Ok(Some(source)),
             Err(
                 zadt::ObjectError::MissingRelation { relation: "source" }
@@ -379,7 +382,7 @@ impl ProjectionObject for ErasedObject {
     }
 
     fn source_component(&self, name: &str) -> Result<Option<SourceRef>, zadt::ObjectError> {
-        match ErasedObject::source_component(self, name) {
+        match ObjectSnapshot::<()>::source_component(self, name) {
             Err(zadt::ObjectError::UnsupportedCapability {
                 capability: "source components",
                 ..
@@ -389,7 +392,7 @@ impl ProjectionObject for ErasedObject {
     }
 }
 
-impl ProjectionObject for Object<Class> {
+impl ProjectionObject for ObjectSnapshot<Class> {
     fn reference(&self) -> ObjectRef<()> {
         self.reference().erase()
     }
@@ -399,22 +402,27 @@ impl ProjectionObject for Object<Class> {
     }
 
     fn source(&self) -> Result<Option<SourceRef>, zadt::ObjectError> {
-        Object::<Class>::source(self).map(Some)
+        ObjectSnapshot::<Class>::source(self).map(Some)
     }
 
     fn source_component(&self, name: &str) -> Result<Option<SourceRef>, zadt::ObjectError> {
-        Object::<Class>::source_component(self, name)
+        ObjectSnapshot::<Class>::source_component(self, name)
     }
 }
 
-impl_source_projection_object!(Object<Include>, Object<Program>);
-impl_sourceless_projection_object!(Object<DataElement>, Object<Package>);
+impl_source_projection_object!(ObjectSnapshot<Include>, ObjectSnapshot<Program>);
+impl_sourceless_projection_object!(ObjectSnapshot<DataElement>, ObjectSnapshot<Package>);
+
+/// Projects one ZADT property type into an AFF document.
+pub(crate) trait PropertyProjection<P>: Sized {
+    fn project(properties: &P) -> Result<Self, ProjectionError>;
+}
 
 pub(crate) trait PropertiesCodec: fmt::Debug + Sync {
-    fn render(&self, properties: &ErasedObject) -> Result<String, ProjectionError>;
+    fn render(&self, properties: &ObjectSnapshot<()>) -> Result<String, ProjectionError>;
     fn merge(
         &self,
-        original: &ErasedObject,
+        original: &ObjectSnapshot<()>,
         edited: &str,
     ) -> Result<serde_json::Value, ProjectionError>;
 }
@@ -489,7 +497,7 @@ impl FileDescriptor for UnbackedFileDescriptor {
 }
 
 pub(crate) fn decode_properties<P>(
-    properties: &ErasedObject,
+    properties: &ObjectSnapshot<()>,
     object_type: &'static str,
 ) -> Result<P, ProjectionError>
 where

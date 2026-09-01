@@ -1,16 +1,42 @@
 use super::{
     AccessControl, AnnotationDefinition, AssignObjectIdentity, Class, Create, DataDefinition,
-    DataElement, Domain, ErasedObject, ErasedProperties, FunctionGroup, FunctionGroupInclude,
-    FunctionModule, GlobalWorkbenchType, Include, Interface, MediaTyped, MetadataExtension,
-    ObjectIdentity, ObjectRef, ObjectSnapshot, ObjectType, Package, Program, RunCapability,
-    ServiceDefinition, Source, SourceComponents, Structure, ToXml, XmlConversion,
+    DataElement, Domain, ErasedProperties, FunctionGroup, FunctionGroupInclude, FunctionModule,
+    GlobalWorkbenchType, Include, Interface, MediaTyped, MetadataExtension, ObjectIdentity,
+    ObjectRef, ObjectSnapshot, ObjectType, Package, Program, RunCapability, ServiceDefinition,
+    Source, SourceComponents, Structure, ToXml, XmlConversion,
 };
-use crate::{
-    CategoryId, ObjectStructureQuery, SourceRef, compatibility::matching_media_type,
-    error::ObjectError,
-};
+use crate::{CategoryId, ObjectStructureQuery, SourceRef, error::ObjectError};
 
-/// Runtime metadata and type-erased capability functions for one modeled object type.
+/// Runtime descriptor for one modeled object type.
+///
+/// Typed APIs use `T: ObjectType` to select properties and capabilities at
+/// compile time. Some consumers, however, identify objects only by their
+/// runtime Workbench type, such as objects supplied through a command-line
+/// interface or opened dynamically in an editor.
+///
+/// This descriptor bridges those erased references to their concrete object
+/// families. It stores required addressing and properties metadata together
+/// with optional adapters for capabilities supported by the object family.
+/// Consequently, erased operations validate object types and capabilities at
+/// runtime, while typed operations retain their compile-time guarantees.
+///
+/// The adapters are function pointers with common erased signatures. Generic
+/// implementations are monomorphized for each registered object type and then
+/// stored using those signatures. For example, [`PropertiesCodec::for_type`]
+/// stores `PropertiesCodec::decode_xml::<T>` as:
+///
+/// ```ignore
+/// type DecodeXmlFn =
+///     fn(&ObjectRef<()>, &[u8]) -> Result<ErasedProperties, ObjectError>;
+/// ```
+///
+/// For `T = Class`, the stored function pointer targets the `Class`
+/// monomorphization. It deserializes `Class::Properties`, validates the
+/// resulting identity, and returns the properties behind the erased handle.
+///
+/// This resembles a manually constructed vtable - shared generic adapters
+/// provide the implementations, while each descriptor selects the functions
+/// appropriate for one concrete object family.
 #[derive(Clone, Debug)]
 pub(crate) struct ObjectTypeDescriptor {
     object_type: GlobalWorkbenchType,
@@ -52,7 +78,7 @@ impl ObjectTypeDescriptor {
         }
     }
 
-    pub(crate) fn create_media_types(&self) -> Option<&'static [&'static str]> {
+    pub(crate) fn creation_media_types(&self) -> Option<&'static [&'static str]> {
         self.capabilities.create.map(|create| create.media_types)
     }
 
@@ -72,7 +98,7 @@ impl ObjectTypeDescriptor {
         self.capabilities.run
     }
 
-    pub(crate) fn source(&self, object: &ErasedObject) -> Result<SourceRef, ObjectError> {
+    pub(crate) fn source(&self, object: &ObjectSnapshot<()>) -> Result<SourceRef, ObjectError> {
         let source = self
             .capabilities
             .source
@@ -82,7 +108,7 @@ impl ObjectTypeDescriptor {
 
     pub(crate) fn source_component(
         &self,
-        object: &ErasedObject,
+        object: &ObjectSnapshot<()>,
         name: &str,
     ) -> Result<Option<crate::SourceRef>, ObjectError> {
         let source_component = self.capabilities.source_component.ok_or_else(|| {
@@ -95,7 +121,7 @@ impl ObjectTypeDescriptor {
 
     pub(crate) fn object_structure(
         &self,
-        object: &ErasedObject,
+        object: &ObjectSnapshot<()>,
     ) -> Result<ObjectStructureQuery, ObjectError> {
         let object_structure = self.capabilities.object_structure.ok_or_else(|| {
             object
@@ -137,10 +163,6 @@ impl ObjectTypeDescriptor {
         (self.properties.encode_json)(object, properties)
     }
 
-    pub(crate) fn properties_media_type(&self, media_type: &str) -> Option<&'static str> {
-        matching_media_type(self.properties.media_types, media_type)
-    }
-
     pub(crate) const fn properties_media_types(&self) -> &'static [&'static str] {
         self.properties.media_types
     }
@@ -151,9 +173,9 @@ type DecodeJsonFn = fn(&ObjectRef, serde_json::Value) -> Result<ErasedProperties
 type EncodeXmlFn = fn(&ObjectRef, &ErasedProperties) -> Result<Vec<u8>, ObjectError>;
 type EncodeJsonFn = fn(&ObjectRef, &ErasedProperties) -> Result<serde_json::Value, ObjectError>;
 type EncodeCreationFn = fn(&ObjectRef, serde_json::Value) -> Result<Vec<u8>, ObjectError>;
-type SourceFn = fn(&ErasedObject) -> Result<SourceRef, ObjectError>;
-type SourceComponentFn = fn(&ErasedObject, &str) -> Result<Option<SourceRef>, ObjectError>;
-type ObjectStructureFn = fn(&ErasedObject) -> Result<ObjectStructureQuery, ObjectError>;
+type SourceFn = fn(&ObjectSnapshot<()>) -> Result<SourceRef, ObjectError>;
+type SourceComponentFn = fn(&ObjectSnapshot<()>, &str) -> Result<Option<SourceRef>, ObjectError>;
+type ObjectStructureFn = fn(&ObjectSnapshot<()>) -> Result<ObjectStructureQuery, ObjectError>;
 
 /// Type-erased codecs for one complete properties representation.
 #[derive(Clone, Copy, Debug)]
@@ -294,7 +316,7 @@ impl RuntimeCapabilities {
     }
 
     pub(crate) fn source_adapter<T: Source>(
-        object: &ErasedObject,
+        object: &ObjectSnapshot<()>,
     ) -> Result<SourceRef, ObjectError> {
         ObjectSnapshot::<T>::source_from_parts(
             &object.typed_reference::<T>()?,
@@ -303,7 +325,7 @@ impl RuntimeCapabilities {
     }
 
     pub(crate) fn source_component_adapter<T: SourceComponents>(
-        object: &ErasedObject,
+        object: &ObjectSnapshot<()>,
         name: &str,
     ) -> Result<Option<SourceRef>, ObjectError> {
         ObjectSnapshot::<T>::source_component_from_parts(
@@ -314,7 +336,7 @@ impl RuntimeCapabilities {
     }
 
     pub(crate) fn object_structure_adapter<T: Structure>(
-        object: &ErasedObject,
+        object: &ObjectSnapshot<()>,
     ) -> Result<ObjectStructureQuery, ObjectError> {
         ObjectSnapshot::<T>::object_structure_from_parts(
             &object.typed_reference::<T>()?,

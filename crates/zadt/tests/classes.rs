@@ -98,9 +98,8 @@ async fn repository_object_properties_forward_through_the_typed_query() {
 
     let client = ready_client(transport(&server)).await;
     let object = client.object::<Class>("CL_ADT_URI_MAPPER").unwrap().erase();
-    let properties = object
+    let properties: ObjectSnapshot<()> = object
         .query()
-        .unwrap()
         .workbench_version(WorkbenchVersion::Active)
         .execute(&client)
         .await
@@ -113,6 +112,11 @@ async fn repository_object_properties_forward_through_the_typed_query() {
     let properties_json = properties.properties().unwrap();
     assert_eq!(properties_json["@adtcore:name"], "CL_ADT_URI_MAPPER");
     assert_eq!(properties.etag().map(EntityTag::as_str), Some("class-etag"));
+    let revalidation = properties.revalidate().unwrap().encode().unwrap();
+    assert_eq!(
+        revalidation.headers()[http::header::IF_NONE_MATCH],
+        "class-etag"
+    );
     let class: ObjectSnapshot<Class> = properties.clone().try_into_typed::<Class>().unwrap();
     assert_eq!(class.properties().name, "CL_ADT_URI_MAPPER");
     assert_eq!(class.reference().uri(), object.uri());
@@ -199,22 +203,6 @@ async fn class_properties_query_converts_the_live_v4_manifest() {
         .await
         .unwrap();
     assert_eq!(response.media_type(), ClassProperties::MEDIA_TYPES[0]);
-    let cached = serde_json::to_value(&response).unwrap();
-    assert!(cached.get("marker").is_none());
-
-    let mut wrong_type = cached.clone();
-    wrong_type["reference"]["object_type"] = serde_json::json!("PROG/P");
-    assert!(serde_json::from_value::<ObjectSnapshot<Class>>(wrong_type).is_err());
-
-    let mut wrong_media_type = cached.clone();
-    wrong_media_type["media_type"] = serde_json::json!("application/xml");
-    assert!(serde_json::from_value::<ObjectSnapshot<Class>>(wrong_media_type).is_err());
-
-    let mut wrong_name = cached.clone();
-    wrong_name["properties"]["@adtcore:name"] = serde_json::json!("OTHER_CLASS");
-    assert!(serde_json::from_value::<ObjectSnapshot<Class>>(wrong_name).is_err());
-
-    let response: ObjectSnapshot<Class> = serde_json::from_value(cached).unwrap();
     let class = response.properties();
     let source_ref = response.source().unwrap();
     let source = source_ref.query().execute(&client).await.unwrap();

@@ -3,7 +3,7 @@ use serde::Deserialize;
 
 use crate::{
     Advertised, AdvertisedLink, AdvertisedObjectReference, CategoryId, EncodeError,
-    EncodedOperation, ErasedObject, ObjectError, ObjectRef, ObjectSnapshot, ObjectType, Operation,
+    EncodedOperation, ObjectError, ObjectRef, ObjectSnapshot, ObjectType, Operation,
     OperationResponse, ResponseError, Stateless, objects::ObjectReferences,
     operation::CollectionLocator,
 };
@@ -161,7 +161,7 @@ impl<T: ObjectType> ObjectSnapshot<T> {
     }
 }
 
-impl ErasedObject {
+impl ObjectSnapshot<()> {
     /// Creates an activation run for this loaded object.
     pub fn activation(&self) -> ActivationRun {
         self.reference().activation()
