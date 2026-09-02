@@ -196,7 +196,7 @@ async fn runtime_object_types_use_the_registered_descriptor() {
         ),
     ] {
         let parsed_type: GlobalWorkbenchType = object_type.parse().unwrap();
-        let object = client.repository_object(&parsed_type, name).unwrap();
+        let object = client.object_from_wb_type(&parsed_type, name).unwrap();
 
         assert_eq!(object.object_type().as_str(), object_type);
         assert_eq!(object.uri().as_str(), expected_uri);
@@ -220,14 +220,14 @@ async fn runtime_object_types_use_the_registered_descriptor() {
 
     let child_type: GlobalWorkbenchType = "FUGR/FF".parse().unwrap();
     assert!(matches!(
-        client.repository_object(&child_type, "ZZZZFUNC"),
+        client.object_from_wb_type(&child_type, "ZZZZFUNC"),
         Err(ObjectError::ParentObjectRequired { object_type })
             if object_type.as_str() == "FUGR/FF"
     ));
 
     let unsupported_type: GlobalWorkbenchType = "ENQU/DL".parse().unwrap();
     assert!(matches!(
-        client.repository_object(&unsupported_type, "EZABAPGIT"),
+        client.object_from_wb_type(&unsupported_type, "EZABAPGIT"),
         Err(ObjectError::UnsupportedObjectType { object_type })
             if object_type.as_str() == "ENQU/DL"
     ));

@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         "erased" => {
             // get the erased primary object
-            let group = client.repository_object(&FunctionGroup::WORKBENCH_TYPE, &group_name)?;
+            let group = client.object_from_wb_type(&FunctionGroup::WORKBENCH_TYPE, &group_name)?;
 
             // get the erased sub-object, no static guarantees can be made, this is a runtime check
             let module = group.subobject(&FunctionModule::WORKBENCH_TYPE, &module_name)?;

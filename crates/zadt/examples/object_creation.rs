@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             // get an erased object reference and pass the creation payload
             let mut request = client
-                .repository_object(&Class::WORKBENCH_TYPE, &name)?
+                .object_from_wb_type(&Class::WORKBENCH_TYPE, &name)?
                 .create(properties)?;
 
             // optionally add a transport

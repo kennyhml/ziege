@@ -365,7 +365,19 @@ pub struct ObjectReferences {
 }
 
 impl Client<Ready> {
-    fn object_identity(
+    /// Loads all parts of an object identity by its category in the discovery.
+    ///
+    /// This includes checking all associated sub-object relationships and finding
+    /// the advertised template for each of them, substituting the primary object
+    /// in the template and then storing those uris in the returned reference.
+    ///
+    /// The resolved sub-objects map each sub-object workbench type to an [`AdtUri`]:
+    /// `FUGR/FF` -> `/sap/bc/adt/functions/groups/zgroup/fmodules`
+    /// `FUGR/I` -> `/sap/bc/adt/functions/groups/zgroup/includes`
+    ///
+    /// Both typed and erased objects can use this path, they only differ in where
+    /// the sub object descriptors come from (static vs descriptor).
+    fn resolve_object_identity(
         &self,
         category: CategoryId,
         name: &str,
@@ -374,26 +386,39 @@ impl Client<Ready> {
         let name = name.to_ascii_uppercase();
         let uri_name = name.to_ascii_lowercase();
         let collection = self.require_collection(category)?;
-        let uri = collection.target()?.append_segments([&uri_name])?;
-        let mut resolved_subobjects = HashMap::new();
 
+        // Base URI of the primary object
+        let uri = collection.target()?.append_segments([&uri_name])?;
+        let templates = collection.template_links();
+
+        let mut resolved_subobjects = HashMap::new();
         for subobject in subobjects {
-            let variables = HashMap::from([(
-                subobject.parent_variable().to_owned(),
-                Value::String(uri_name.clone()),
-            )]);
-            let Some(link) = collection
-                .template_links()
+            let Some(link) = templates
                 .iter()
                 .find(|link| link.relation() == subobject.relation())
             else {
+                // no template found for this sub-object, which is weird
+                // and hints towards an incompatible API, but dont consider
+                // this an error yet until its actually used
                 continue;
             };
+
+            // We expect the template to have exactly one variable name for the
+            // parent object, e.g. `/sap/bc/adt/functions/groups/{fgroup}/fmodules`
             let template = AdtUriTemplate::new(link.template());
             if template.variable_names() != [subobject.parent_variable()] {
                 continue;
             }
+
+            // Substitute the variable to create a concrete adt uri, such
+            // as `/sap/bc/adt/functions/groups/zgroup/fmodules` for FUGR.
+            let variables = HashMap::from([(
+                subobject.parent_variable().to_owned(),
+                Value::String(uri_name.clone()),
+            )]);
             let (target, query) = template.expand(&variables)?;
+
+            // query parameters are not expected / supported
             if query.is_empty() {
                 resolved_subobjects.insert(subobject.object_type().clone(), target);
             }
@@ -402,17 +427,30 @@ impl Client<Ready> {
     }
 
     /// Resolves a primary object reference from its statically known collection.
+    ///
+    /// This resolves from the client because some system discovery knowledge is
+    /// required in order to resolve the base [`AdtUri`] of the object collection
+    /// as well as locating and resolving any subobject relationship templates.
     pub fn object<T: PrimaryObjectType>(&self, name: &str) -> Result<ObjectRef<T>, ObjectError> {
-        self.object_identity(
+        let (name, uri, subobjects) = self.resolve_object_identity(
             T::CATEGORY,
             name,
             <T as super::private::PrimaryMetadata>::SUBOBJECTS,
-        )
-        .map(|(name, uri, subobjects)| ObjectRef::new(name, uri).with_subobjects(subobjects))
+        )?;
+
+        Ok(ObjectRef::new(name, uri).with_subobjects(subobjects))
     }
 
-    /// Resolves a runtime object reference from its Workbench type and name.
-    pub fn repository_object(
+    /// Resolves an object reference from a dynamically specified workbench type
+    /// and name. This method can make no static guarantees that the object is
+    /// a primary object and can actually be resolved through this method.
+    ///
+    /// If the object is actually a subobject, such as `FUGR/FF`, it must be
+    /// resolved from its parent object `FUGR/F` instead.
+    ///
+    /// The result is the same as when calling [`Self::object<T>`] except
+    /// that the type tag is erased.
+    pub fn object_from_wb_type(
         &self,
         object_type: &GlobalWorkbenchType,
         name: &str,
@@ -422,19 +460,29 @@ impl Client<Ready> {
                 object_type: object_type.clone(),
             }
         })?;
+
         let category = descriptor
             .category()
             .ok_or_else(|| ObjectError::ParentObjectRequired {
                 object_type: object_type.clone(),
             })?;
+
         let (name, uri, subobjects) =
-            self.object_identity(category, name, descriptor.subobjects())?;
+            self.resolve_object_identity(category, name, descriptor.subobjects())?;
         Ok(ObjectRef::erased(name, uri, object_type.clone()).with_subobjects(subobjects))
     }
 }
 
 impl<P: PrimaryObjectType> ObjectRef<P> {
-    /// Resolves a typed child reference through this parent's discovery binding.
+    /// Resolves the location of a subobject belonging to this primary object.
+    ///
+    /// [`SubObject<C>`] guarantees that the returned object reference has a sub-
+    /// object relationship with `T` and the relationship lookup is infallible.
+    ///
+    /// Constructing the subobject may still fail when the server does not
+    /// advertise the template needed to resolve the relationship.
+    ///
+    /// The parent reference is implicitly added to the returnd child.
     pub fn subobject<C>(&self, name: &str) -> Result<ObjectRef<C>, ObjectError>
     where
         C: ObjectType,
@@ -447,7 +495,16 @@ impl<P: PrimaryObjectType> ObjectRef<P> {
 }
 
 impl ObjectRef<()> {
-    /// Resolves a runtime-typed child reference through this parent's discovery binding.
+    /// Resolves the location of a subobject belonging to this primary object.
+    ///
+    /// Because the object type is erased, there are no static guarantees that
+    /// this object has any of the requested subobjects or even any at all. This
+    /// is instead turned into a descriptor backed runtime check.
+    ///
+    /// Constructing the subobject may also fail when the server does not
+    /// advertise the template needed to resolve the relationship.
+    ///
+    /// The parent reference is implicitly added to the returnd child.
     pub fn subobject(
         &self,
         child_type: &GlobalWorkbenchType,
@@ -462,13 +519,6 @@ impl ObjectRef<()> {
                 parent_type: self.object_type().clone(),
                 child_type: child_type.clone(),
             })?;
-
-        // make sure we support the sub-object
-        descriptors::object_type_descriptor(child_type).ok_or_else(|| {
-            ObjectError::UnsupportedObjectType {
-                object_type: child_type.clone(),
-            }
-        })?;
 
         let uri = self.subobject_uri(subobject, name)?;
         Ok(ObjectRef::erased(name.to_ascii_uppercase(), uri, child_type.clone()).with_parent(self))
