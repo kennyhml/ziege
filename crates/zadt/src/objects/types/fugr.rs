@@ -1,11 +1,12 @@
 use serde::{Deserialize, Serialize};
-use zadt_macros::object_type;
+use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
     MediaTyped, SyntaxConfiguration, ToXml, WorkbenchVersion,
 };
 
+/// An ABAP function group.
 #[object_type(
     properties = FunctionGroupProperties,
     workbench_type = "FUGR/F",
@@ -23,31 +24,44 @@ use crate::{
             parent_variable = "groupname",
         ),
     ),
-    capabilities(Source(properties.source_uri), Structure)
+    capabilities(
+        Create(FunctionGroupCreateProperties),
+        Source(properties.source_uri),
+        Structure,
+    )
 )]
-/// An ABAP function group.
 pub struct FunctionGroup;
 
+/// A function module owned by an ABAP function group.
 #[object_type(
     properties = FunctionModuleProperties,
     workbench_type = "FUGR/FF",
     subobject,
-    capabilities(Source(properties.source_uri))
+    capabilities(
+        Create(FunctionModuleCreateProperties),
+        Source(properties.source_uri),
+    )
 )]
-/// A function module owned by an ABAP function group.
 pub struct FunctionModule;
 
+/// A source include owned by an ABAP function group.
 #[object_type(
     properties = FunctionGroupIncludeProperties,
     workbench_type = "FUGR/I",
     subobject,
-    capabilities(Source(properties.source_uri))
+    capabilities(
+        Create(FunctionGroupIncludeCreateProperties),
+        Source(properties.source_uri),
+    )
 )]
-/// A source include owned by an ABAP function group.
 pub struct FunctionGroupInclude;
 
 /// The complete function-group properties payload.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, CreateProperties, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[create_properties(
+    name = FunctionGroupCreateProperties,
+    doc = "The sparse payload used to create an ABAP function group."
+)]
 #[serde(rename = "group:abapFunctionGroup", deny_unknown_fields)]
 pub struct FunctionGroupProperties {
     #[serde(rename = "@group:lockedByEditor")]
@@ -64,10 +78,20 @@ pub struct FunctionGroupProperties {
     pub master_language: String,
     #[serde(rename = "@adtcore:masterSystem")]
     pub master_system: String,
+    #[for_create(
+        optional,
+        doc = "The requested ABAP language version, or the package default when omitted."
+    )]
     #[serde(rename = "@adtcore:abapLanguageVersion")]
     pub abap_language_version: Option<AbapLanguageVersion>,
+    #[for_create(identity, default, doc = "The function-group name.")]
     #[serde(rename = "@adtcore:name")]
     pub(crate) name: String,
+    #[for_create(
+        identity,
+        default = <FunctionGroup as crate::ObjectType>::WORKBENCH_TYPE,
+        doc = "The function group's global Workbench type."
+    )]
     #[serde(rename = "@adtcore:type")]
     pub(crate) object_type: GlobalWorkbenchType,
     #[serde(rename = "@adtcore:changedAt")]
@@ -80,6 +104,7 @@ pub struct FunctionGroupProperties {
     pub changed_by: String,
     #[serde(rename = "@adtcore:createdBy")]
     pub created_by: String,
+    #[for_create(doc = "The description, limited by SAP to 40 characters.")]
     #[serde(rename = "@adtcore:description")]
     pub description: String,
     #[serde(rename = "@adtcore:descriptionTextLimit")]
@@ -88,6 +113,7 @@ pub struct FunctionGroupProperties {
     pub language: String,
     #[serde(rename = "atom:link", default)]
     pub links: Vec<AdvertisedLink>,
+    #[for_create(doc = "The package receiving the function group.")]
     #[serde(rename = "adtcore:packageRef")]
     pub package: AdvertisedObjectReference,
     #[serde(rename = "abapsource:syntaxConfiguration")]
@@ -111,7 +137,11 @@ impl ToXml for FunctionGroupProperties {
 }
 
 /// The complete function-module properties payload.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, CreateProperties, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[create_properties(
+    name = FunctionModuleCreateProperties,
+    doc = "The sparse payload used to create an ABAP function module."
+)]
 #[serde(rename = "fmodule:abapFunctionModule", deny_unknown_fields)]
 pub struct FunctionModuleProperties {
     #[serde(rename = "@fmodule:releaseState")]
@@ -120,8 +150,14 @@ pub struct FunctionModuleProperties {
     pub processing_type: String,
     #[serde(rename = "@abapsource:sourceUri")]
     pub source_uri: String,
+    #[for_create(identity, default, doc = "The function-module name.")]
     #[serde(rename = "@adtcore:name")]
     pub(crate) name: String,
+    #[for_create(
+        identity,
+        default = <FunctionModule as crate::ObjectType>::WORKBENCH_TYPE,
+        doc = "The function module's global Workbench type."
+    )]
     #[serde(rename = "@adtcore:type")]
     pub(crate) object_type: GlobalWorkbenchType,
     #[serde(rename = "@adtcore:changedAt")]
@@ -132,12 +168,14 @@ pub struct FunctionModuleProperties {
     pub created_at: String,
     #[serde(rename = "@adtcore:changedBy")]
     pub changed_by: String,
+    #[for_create(doc = "The function-module description.")]
     #[serde(rename = "@adtcore:description")]
     pub description: String,
     #[serde(rename = "@adtcore:descriptionTextLimit")]
     pub description_text_limit: u32,
     #[serde(rename = "@adtcore:language")]
     pub language: String,
+    #[for_create(parent, doc = "The function group containing this module.")]
     #[serde(rename = "adtcore:containerRef")]
     pub container: AdvertisedObjectReference,
     #[serde(rename = "atom:link", default)]
@@ -159,13 +197,23 @@ impl ToXml for FunctionModuleProperties {
 }
 
 /// The complete function-group include properties payload.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, CreateProperties, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[create_properties(
+    name = FunctionGroupIncludeCreateProperties,
+    doc = "The sparse payload used to create an ABAP function-group include."
+)]
 #[serde(rename = "finclude:abapFunctionGroupInclude", deny_unknown_fields)]
 pub struct FunctionGroupIncludeProperties {
     #[serde(rename = "@abapsource:sourceUri")]
     pub source_uri: String,
+    #[for_create(identity, default, doc = "The function-group include name.")]
     #[serde(rename = "@adtcore:name")]
     pub(crate) name: String,
+    #[for_create(
+        identity,
+        default = <FunctionGroupInclude as crate::ObjectType>::WORKBENCH_TYPE,
+        doc = "The include's global Workbench type."
+    )]
     #[serde(rename = "@adtcore:type")]
     pub(crate) object_type: GlobalWorkbenchType,
     #[serde(rename = "@adtcore:changedAt")]
@@ -176,12 +224,14 @@ pub struct FunctionGroupIncludeProperties {
     pub created_at: String,
     #[serde(rename = "@adtcore:changedBy")]
     pub changed_by: String,
+    #[for_create(optional, doc = "The include description.")]
     #[serde(rename = "@adtcore:description", default)]
     pub description: Option<String>,
     #[serde(rename = "@adtcore:descriptionTextLimit", default)]
     pub description_text_limit: Option<u32>,
     #[serde(rename = "@adtcore:language")]
     pub language: String,
+    #[for_create(parent, doc = "The function group containing this include.")]
     #[serde(rename = "adtcore:containerRef")]
     pub container: AdvertisedObjectReference,
     #[serde(rename = "atom:link", default)]
@@ -205,6 +255,7 @@ impl ToXml for FunctionGroupIncludeProperties {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{AdtUri, AssignObjectIdentity, ObjectRef};
 
     const GROUP_XML: &str = include_str!("../../../tests/fixtures/function-group-z-test-group.xml");
     const GROUP_V2_XML: &str =
@@ -224,6 +275,31 @@ mod tests {
             "X"
         );
         assert_eq!(properties.links.len(), 9);
+    }
+
+    #[test]
+    fn builds_sparse_function_group_creation_properties() {
+        let mut properties = FunctionGroupCreateProperties::builder()
+            .description("Created function group")
+            .package("$TMP")
+            .abap_language_version(AbapLanguageVersion::CloudDevelopment)
+            .build()
+            .unwrap();
+        let reference = ObjectRef::<FunctionGroup>::new(
+            "Z_TEST_GROUP".to_owned(),
+            AdtUri::parse("/sap/bc/adt/functions/groups/z_test_group").unwrap(),
+        );
+        properties.assign_reference(&reference);
+
+        let body = String::from_utf8(properties.to_xml().unwrap()).unwrap();
+        assert!(body.contains("<group:abapFunctionGroup"));
+        assert!(body.contains("adtcore:name=\"Z_TEST_GROUP\""));
+        assert!(body.contains("adtcore:type=\"FUGR/F\""));
+        assert!(body.contains("adtcore:description=\"Created function group\""));
+        assert!(body.contains("adtcore:abapLanguageVersion=\"5\""));
+        assert!(body.contains("<adtcore:packageRef adtcore:name=\"$TMP\""));
+        assert!(!body.contains("abapsource:sourceUri"));
+        assert!(!body.contains("abapsource:syntaxConfiguration"));
     }
 
     #[test]
@@ -256,6 +332,35 @@ mod tests {
         assert_eq!(properties.name, "LZ_TEST_GROUPTOP");
         assert_eq!(properties.container.name.as_deref(), Some("Z_TEST_GROUP"));
         assert_eq!(properties.links.len(), 6);
+    }
+
+    #[test]
+    fn assigns_the_parent_to_function_group_include_creation_properties() {
+        let group = ObjectRef::<FunctionGroup>::new(
+            "ZGROUP123".to_owned(),
+            AdtUri::parse("/sap/bc/adt/functions/groups/zgroup123").unwrap(),
+        );
+        let include = ObjectRef::<FunctionGroupInclude>::new(
+            "LZGROUP123RRR".to_owned(),
+            AdtUri::parse("/sap/bc/adt/functions/groups/zgroup123/includes/lzgroup123rrr").unwrap(),
+        )
+        .with_parent(&group);
+        let mut properties = FunctionGroupIncludeCreateProperties::builder()
+            .description("zttfart")
+            .build()
+            .unwrap();
+        properties.assign_reference(&include);
+
+        let body = String::from_utf8(properties.to_xml().unwrap()).unwrap();
+        assert!(body.contains("<finclude:abapFunctionGroupInclude"));
+        assert!(body.contains("adtcore:description=\"zttfart\""));
+        assert!(body.contains("adtcore:name=\"LZGROUP123RRR\""));
+        assert!(body.contains("adtcore:type=\"FUGR/I\""));
+        assert!(body.contains("<adtcore:containerRef"));
+        assert!(body.contains("adtcore:name=\"ZGROUP123\""));
+        assert!(body.contains("adtcore:type=\"FUGR/F\""));
+        assert!(body.contains("adtcore:uri=\"/sap/bc/adt/functions/groups/zgroup123\""));
+        assert!(!body.contains("adtcore:packageRef"));
     }
 
     #[test]

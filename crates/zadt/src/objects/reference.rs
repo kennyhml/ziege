@@ -15,6 +15,15 @@ use crate::{
     uri::AdtUri,
 };
 
+/// A mapping of subobject workbench types to their resolved locators
+///
+/// For instance, function groups `FUGR/F` has a mapping of
+/// `FUGR/FF` -> `/sap/bc/adt/functions/groups/zgroup/fmodules` (+media type)
+/// `FUGR/I` -> `/sap/bc/adt/functions/groups/zgroup/includes` (+media type)
+///
+/// That way, child objects can be resolved from the parent object.
+type SubObjectMapping = HashMap<GlobalWorkbenchType, ResolvedCollection>;
+
 /// A reference to an ADT object with its name, URI, and Workbench type.
 ///
 /// Unlike [`crate::ObjectSnapshot<T>`], this value does not include loaded properties.
@@ -24,10 +33,11 @@ use crate::{
 /// [`ObjectRef<()>`] stores the object family at runtime. It is useful when the
 /// family comes from user input or a repository response.
 ///
-/// Primary references created by [`Client::object`] also retain any subobject
-/// targets resolved from discovery. Those targets are transient and are not
-/// serialized. Child references retain and serialize their parent identity so
-/// response validation and operations such as activation remain stable.
+/// References created by [`Client::object`] retain their containing collection
+/// and any subobject collections resolved from discovery. Those targets are
+/// transient and are not serialized. Child references retain and serialize
+/// their parent identity so response validation and operations such as
+/// activation remain stable.
 #[derive(Debug, Serialize)]
 #[serde(bound = "")]
 pub struct ObjectRef<T = ()> {
@@ -35,9 +45,12 @@ pub struct ObjectRef<T = ()> {
     uri: AdtUri,
     object_type: GlobalWorkbenchType,
 
+    #[serde(skip)]
+    collection: Option<ResolvedCollection>,
+
     /// Describes which sub-objects this object type may carry
     #[serde(skip)]
-    subobjects: Option<Arc<HashMap<GlobalWorkbenchType, AdtUri>>>,
+    subobjects: Option<Arc<HashMap<GlobalWorkbenchType, ResolvedCollection>>>,
 
     /// An optional parent of this object, if it has one
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -45,6 +58,18 @@ pub struct ObjectRef<T = ()> {
 
     #[serde(skip)]
     marker: PhantomData<fn() -> T>,
+}
+
+/// A resource collection that has been resolved from the discovery.
+///
+/// This is the same target uri the object reference has been created from.
+/// Its saved as context needed for creation requests to the object reference
+/// as the reference stores only the future location, not its base or the
+/// media types accepted for creation requests.
+#[derive(Clone, Debug)]
+struct ResolvedCollection {
+    target: AdtUri,
+    accepted_media_types: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -80,6 +105,7 @@ impl<T> ObjectRef<T> {
             name: self.name.clone(),
             uri: self.uri.clone(),
             object_type: self.object_type.clone(),
+            collection: self.collection.clone(),
             subobjects: self.subobjects.clone(),
             parent: self.parent.clone(),
             marker: PhantomData,
@@ -110,7 +136,29 @@ impl<T> ObjectRef<T> {
         }
     }
 
-    fn with_subobjects(mut self, subobjects: HashMap<GlobalWorkbenchType, AdtUri>) -> Self {
+    pub(crate) fn collection(&self) -> Result<(&AdtUri, &[String]), ObjectError> {
+        self.collection
+            .as_ref()
+            .map(|collection| {
+                (
+                    &collection.target,
+                    collection.accepted_media_types.as_slice(),
+                )
+            })
+            .ok_or_else(|| ObjectError::MissingCollectionContext {
+                object_type: self.object_type.clone(),
+            })
+    }
+
+    fn with_collection(mut self, collection: ResolvedCollection) -> Self {
+        self.collection = Some(collection);
+        self
+    }
+
+    fn with_subobjects(
+        mut self,
+        subobjects: HashMap<GlobalWorkbenchType, ResolvedCollection>,
+    ) -> Self {
         self.subobjects = Some(Arc::new(subobjects));
         self
     }
@@ -129,6 +177,17 @@ impl<T> ObjectRef<T> {
             .as_ref()
             .map(|parent| (parent.name.as_str(), &parent.uri, &parent.object_type))
     }
+
+    pub(crate) fn parent_reference(&self) -> Option<AdvertisedObjectReference> {
+        self.parent
+            .as_ref()
+            .map(|parent| AdvertisedObjectReference {
+                name: Some(parent.name.clone()),
+                uri: Some(parent.uri.as_str().to_owned()),
+                object_type: Some(parent.object_type.clone()),
+                ..Default::default()
+            })
+    }
 }
 
 impl<T: ObjectType> ObjectRef<T> {
@@ -137,6 +196,7 @@ impl<T: ObjectType> ObjectRef<T> {
             name,
             uri,
             object_type: T::WORKBENCH_TYPE,
+            collection: None,
             subobjects: None,
             parent: None,
             marker: PhantomData,
@@ -150,6 +210,7 @@ impl ObjectRef<()> {
             name,
             uri,
             object_type,
+            collection: None,
             subobjects: None,
             parent: None,
             marker: PhantomData,
@@ -171,6 +232,7 @@ impl<T> Clone for ObjectRef<T> {
             name: self.name.clone(),
             uri: self.uri.clone(),
             object_type: self.object_type.clone(),
+            collection: self.collection.clone(),
             subobjects: self.subobjects.clone(),
             parent: self.parent.clone(),
             marker: PhantomData,
@@ -371,10 +433,6 @@ impl Client<Ready> {
     /// the advertised template for each of them, substituting the primary object
     /// in the template and then storing those uris in the returned reference.
     ///
-    /// The resolved sub-objects map each sub-object workbench type to an [`AdtUri`]:
-    /// `FUGR/FF` -> `/sap/bc/adt/functions/groups/zgroup/fmodules`
-    /// `FUGR/I` -> `/sap/bc/adt/functions/groups/zgroup/includes`
-    ///
     /// Both typed and erased objects can use this path, they only differ in where
     /// the sub object descriptors come from (static vs descriptor).
     fn resolve_object_identity(
@@ -382,13 +440,18 @@ impl Client<Ready> {
         category: CategoryId,
         name: &str,
         subobjects: &[SubObjectDescriptor],
-    ) -> Result<(String, AdtUri, HashMap<GlobalWorkbenchType, AdtUri>), ObjectError> {
+    ) -> Result<(String, AdtUri, ResolvedCollection, SubObjectMapping), ObjectError> {
         let name = name.to_ascii_uppercase();
         let uri_name = name.to_ascii_lowercase();
         let collection = self.require_collection(category)?;
 
         // Base URI of the primary object
-        let uri = collection.target()?.append_segments([&uri_name])?;
+        let collection_target = collection.target()?;
+        let uri = collection_target.append_segments([&uri_name])?;
+        let resolved_collection = ResolvedCollection {
+            target: collection_target,
+            accepted_media_types: collection.accepted_media_types().to_vec(),
+        };
         let templates = collection.template_links();
 
         let mut resolved_subobjects = HashMap::new();
@@ -420,10 +483,20 @@ impl Client<Ready> {
 
             // query parameters are not expected / supported
             if query.is_empty() {
-                resolved_subobjects.insert(subobject.object_type().clone(), target);
+                resolved_subobjects.insert(
+                    subobject.object_type().clone(),
+                    ResolvedCollection {
+                        target,
+                        accepted_media_types: link
+                            .media_type()
+                            .map(str::to_owned)
+                            .into_iter()
+                            .collect(),
+                    },
+                );
             }
         }
-        Ok((name, uri, resolved_subobjects))
+        Ok((name, uri, resolved_collection, resolved_subobjects))
     }
 
     /// Resolves a primary object reference from its statically known collection.
@@ -432,13 +505,15 @@ impl Client<Ready> {
     /// required in order to resolve the base [`AdtUri`] of the object collection
     /// as well as locating and resolving any subobject relationship templates.
     pub fn object<T: PrimaryObjectType>(&self, name: &str) -> Result<ObjectRef<T>, ObjectError> {
-        let (name, uri, subobjects) = self.resolve_object_identity(
+        let (name, uri, collection, subobjects) = self.resolve_object_identity(
             T::CATEGORY,
             name,
             <T as super::private::PrimaryMetadata>::SUBOBJECTS,
         )?;
 
-        Ok(ObjectRef::new(name, uri).with_subobjects(subobjects))
+        Ok(ObjectRef::new(name, uri)
+            .with_collection(collection)
+            .with_subobjects(subobjects))
     }
 
     /// Resolves an object reference from a dynamically specified workbench type
@@ -467,9 +542,11 @@ impl Client<Ready> {
                 object_type: object_type.clone(),
             })?;
 
-        let (name, uri, subobjects) =
+        let (name, uri, collection, subobjects) =
             self.resolve_object_identity(category, name, descriptor.subobjects())?;
-        Ok(ObjectRef::erased(name, uri, object_type.clone()).with_subobjects(subobjects))
+        Ok(ObjectRef::erased(name, uri, object_type.clone())
+            .with_collection(collection)
+            .with_subobjects(subobjects))
     }
 }
 
@@ -489,8 +566,13 @@ impl<P: PrimaryObjectType> ObjectRef<P> {
         P: SubObject<C>,
     {
         let descriptor = <P as SubObject<C>>::DESCRIPTOR;
-        let uri = self.subobject_uri(&descriptor, name)?;
-        Ok(ObjectRef::new(name.to_ascii_uppercase(), uri).with_parent(self))
+        let collection = self.subobject_collection(&descriptor)?;
+        let uri = collection
+            .target
+            .append_segments([name.to_ascii_lowercase()])?;
+        Ok(ObjectRef::new(name.to_ascii_uppercase(), uri)
+            .with_collection(collection.clone())
+            .with_parent(self))
     }
 }
 
@@ -520,26 +602,29 @@ impl ObjectRef<()> {
                 child_type: child_type.clone(),
             })?;
 
-        let uri = self.subobject_uri(subobject, name)?;
-        Ok(ObjectRef::erased(name.to_ascii_uppercase(), uri, child_type.clone()).with_parent(self))
+        let collection = self.subobject_collection(subobject)?;
+        let uri = collection
+            .target
+            .append_segments([name.to_ascii_lowercase()])?;
+        Ok(
+            ObjectRef::erased(name.to_ascii_uppercase(), uri, child_type.clone())
+                .with_collection(collection.clone())
+                .with_parent(self),
+        )
     }
 }
 
 impl<T> ObjectRef<T> {
-    fn subobject_uri(
+    fn subobject_collection(
         &self,
         descriptor: &SubObjectDescriptor,
-        name: &str,
-    ) -> Result<AdtUri, ObjectError> {
-        let base = self
-            .subobjects
+    ) -> Result<&ResolvedCollection, ObjectError> {
+        self.subobjects
             .as_deref()
             .and_then(|subobjects| subobjects.get(descriptor.object_type()))
             .ok_or(ObjectError::MissingTemplate {
                 relation: descriptor.relation(),
-            })?;
-
-        Ok(base.append_segments([name.to_ascii_lowercase()])?)
+            })
     }
 }
 

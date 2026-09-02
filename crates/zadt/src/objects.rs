@@ -118,6 +118,10 @@ pub trait ObjectIdentity {
 #[doc(hidden)]
 pub trait AssignObjectIdentity: ObjectIdentity {
     fn assign_identity(&mut self, identity: &impl ObjectIdentity);
+
+    fn assign_reference<T>(&mut self, reference: &ObjectRef<T>) {
+        self.assign_identity(reference);
+    }
 }
 
 /// Selects the property storage used by an [`ObjectSnapshot`].

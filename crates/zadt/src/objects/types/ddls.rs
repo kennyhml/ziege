@@ -146,7 +146,7 @@ impl ToXml for DataDefinitionProperties {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, ObjectRef, ObjectType, Operation};
+    use crate::{AdtUri, AssignObjectIdentity, ObjectRef, ObjectType};
 
     const DATA_DEFINITION_XML: &str =
         include_str!("../../../tests/fixtures/data-definition-i-businesspartner.xml");
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn builds_the_handler_confirmed_sparse_creation_payload() {
-        let properties = DataDefinitionCreateProperties::builder()
+        let mut properties = DataDefinitionCreateProperties::builder()
             .description("Created Data Definition")
             .package("$TMP")
             .build()
@@ -174,8 +174,9 @@ mod tests {
             "Z_DATA_DEFINITION".to_owned(),
             AdtUri::parse("/sap/bc/adt/ddic/ddl/sources/z_data_definition").unwrap(),
         );
-        let request = reference.create(properties).encode().unwrap();
-        let body = std::str::from_utf8(request.body()).unwrap();
+        properties.assign_identity(&reference);
+        let body = properties.to_xml().unwrap();
+        let body = std::str::from_utf8(&body).unwrap();
 
         assert!(body.contains("<ddl:ddlSource"));
         assert!(body.contains("adtcore:name=\"Z_DATA_DEFINITION\""));

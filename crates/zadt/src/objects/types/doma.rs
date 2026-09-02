@@ -228,7 +228,7 @@ pub struct DomainFixedValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, ObjectRef, ObjectType, Operation};
+    use crate::{AdtUri, AssignObjectIdentity, ObjectRef, ObjectType};
 
     const DOMAIN_TRKORR_XML: &str = include_str!("../../../tests/fixtures/domain-trkorr.xml");
     const DOMAIN_XFELD_XML: &str = include_str!("../../../tests/fixtures/domain-xfeld.xml");
@@ -243,7 +243,7 @@ mod tests {
 
     #[test]
     fn builds_the_sparse_creation_payload() {
-        let properties = DomainCreateProperties::builder()
+        let mut properties = DomainCreateProperties::builder()
             .description("Created Domain")
             .package("$TMP")
             .build()
@@ -256,8 +256,9 @@ mod tests {
             "Z_DOMAIN".to_owned(),
             AdtUri::parse("/sap/bc/adt/ddic/domains/z_domain").unwrap(),
         );
-        let request = reference.create(properties).encode().unwrap();
-        let body = std::str::from_utf8(request.body()).unwrap();
+        properties.assign_identity(&reference);
+        let body = properties.to_xml().unwrap();
+        let body = std::str::from_utf8(&body).unwrap();
 
         assert!(body.contains("<doma:domain"));
         assert!(body.contains("adtcore:name=\"Z_DOMAIN\""));

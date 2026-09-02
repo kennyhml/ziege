@@ -30,7 +30,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let group = client.object::<FunctionGroup>(&group_name)?;
             // get the sub-object through the primary object with static checks
             let module = group.subobject::<FunctionModule>(&module_name)?;
-
             // the sub-object can now be treated like a regular object
             let snapshot = module.query().execute(&client).await?;
             println!("{snapshot:#?}");

@@ -272,7 +272,7 @@ impl CreateCodec {
         validate_object_type::<T>(reference)?;
         let mut payload: T::Payload =
             serde_json::from_value(payload).map_err(ObjectError::InvalidPropertiesJson)?;
-        payload.assign_identity(reference);
+        payload.assign_reference(reference);
         payload.to_xml()
     }
 }

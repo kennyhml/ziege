@@ -153,7 +153,7 @@ impl Source for Interface {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, ObjectRef, ObjectType, Operation};
+    use crate::{AdtUri, AssignObjectIdentity, ObjectRef, ObjectType};
 
     const INTERFACE_XML: &str =
         include_str!("../../../tests/fixtures/interface-if-adt-uri-mapper-v5.xml");
@@ -168,7 +168,7 @@ mod tests {
 
     #[test]
     fn builds_the_handler_confirmed_sparse_creation_payload() {
-        let properties = InterfaceCreateProperties::builder()
+        let mut properties = InterfaceCreateProperties::builder()
             .description("Created Interface")
             .package("$TMP")
             .build()
@@ -181,8 +181,9 @@ mod tests {
             "ZIF_EXAMPLE".to_owned(),
             AdtUri::parse("/sap/bc/adt/oo/interfaces/zif_example").unwrap(),
         );
-        let request = reference.create(properties).encode().unwrap();
-        let body = std::str::from_utf8(request.body()).unwrap();
+        properties.assign_identity(&reference);
+        let body = properties.to_xml().unwrap();
+        let body = std::str::from_utf8(&body).unwrap();
 
         assert!(body.contains("<intf:abapInterface"));
         assert!(body.contains("adtcore:name=\"ZIF_EXAMPLE\""));

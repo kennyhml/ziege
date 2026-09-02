@@ -361,13 +361,6 @@ impl Parse for ObjectTypeArguments {
                 "only primary objects can declare `subobjects(...)`",
             ));
         }
-        if collection.is_none() && capabilities.create.is_some() {
-            return Err(Error::new(
-                Span::call_site(),
-                "the `Create` capability currently requires a primary object collection",
-            ));
-        }
-
         if let Some(source_components) = capabilities.source_components
             && capabilities.source.is_none()
         {
@@ -690,6 +683,7 @@ fn expand_create_properties(input: DeriveInput) -> Result<TokenStream2> {
     let mut default_helpers = Vec::new();
     let mut name_identity = None;
     let mut object_type_identity = None;
+    let mut parent_context = None;
 
     for (field_index, field) in fields.into_iter().enumerate() {
         let mut marker = None;
@@ -724,6 +718,12 @@ fn expand_create_properties(input: DeriveInput) -> Result<TokenStream2> {
                 ));
             }
         }
+        if options.parent.is_some() && parent_context.replace(field_name.clone()).is_some() {
+            return Err(Error::new(
+                field_name.span(),
+                "duplicate `parent` creation field",
+            ));
+        }
 
         if options.optional.is_some()
             && let Some(span) = find_serde_option(&field.attrs, "skip_serializing_if")?
@@ -735,7 +735,7 @@ fn expand_create_properties(input: DeriveInput) -> Result<TokenStream2> {
         }
 
         let mut attrs = copied_attrs(&field.attrs);
-        if options.default.is_some() || options.optional.is_some() {
+        if options.default.is_some() || options.optional.is_some() || options.parent.is_some() {
             attrs = without_serde_option(attrs, "default")?;
         }
         if let Some(doc) = &options.doc {
@@ -766,7 +766,10 @@ fn expand_create_properties(input: DeriveInput) -> Result<TokenStream2> {
             Some(quote! {
                 #[serde(default = #helper_path)]
             })
-        } else if options.default.is_some() || options.optional.is_some() {
+        } else if options.default.is_some()
+            || options.optional.is_some()
+            || options.parent.is_some()
+        {
             Some(quote! {
                 #[serde(default)]
             })
@@ -806,6 +809,19 @@ fn expand_create_properties(input: DeriveInput) -> Result<TokenStream2> {
             "`CreateProperties` requires an `identity` field named `object_type`",
         )
     })?;
+    let assign_reference = parent_context.map(|parent| {
+        quote! {
+            fn assign_reference<T>(
+                &mut self,
+                reference: &crate::objects::ObjectRef<T>,
+            ) {
+                self.assign_identity(reference);
+                if let Some(parent) = reference.parent_reference() {
+                    self.#parent = parent;
+                }
+            }
+        }
+    });
 
     Ok(quote! {
         #(#default_helpers)*
@@ -849,6 +865,8 @@ fn expand_create_properties(input: DeriveInput) -> Result<TokenStream2> {
                 self.#name_identity = identity.object_name().to_owned();
                 self.#object_type_identity = identity.object_type().clone();
             }
+
+            #assign_reference
         }
     })
 }
@@ -908,6 +926,7 @@ fn parse_create_properties_arguments(attrs: &[Attribute]) -> Result<CreateProper
 struct FieldOptions {
     optional: Option<Span>,
     identity: Option<Span>,
+    parent: Option<Span>,
     default: Option<Span>,
     default_expression: Option<Expr>,
     each: Option<LitStr>,
@@ -933,6 +952,8 @@ impl FieldOptions {
                 set_marker(&mut options.optional, &meta, "optional")
             } else if meta.path.is_ident("identity") {
                 set_marker(&mut options.identity, &meta, "identity")
+            } else if meta.path.is_ident("parent") {
+                set_marker(&mut options.parent, &meta, "parent")
             } else if meta.path.is_ident("default") {
                 if options.default.is_some() {
                     return Err(meta.error("duplicate `for_create` option `default`"));
@@ -996,6 +1017,12 @@ fn validate_field_options(field: &Ident, ty: &Type, options: &FieldOptions) -> R
         return Err(Error::new(
             each.span(),
             "`optional` and `each` cannot be combined",
+        ));
+    }
+    if let (Some(_), Some(span)) = (options.parent, options.identity) {
+        return Err(Error::new(
+            span,
+            "`parent` and `identity` cannot be combined",
         ));
     }
     if let Some(span) = options.identity {
@@ -1099,11 +1126,11 @@ fn builder_attribute(options: &FieldOptions) -> TokenStream2 {
     if let Some(expression) = &options.default_expression {
         let expression = LitStr::new(&expression.to_token_stream().to_string(), expression.span());
         attributes.push(quote!(default = #expression));
-    } else if options.default.is_some() || options.optional.is_some() {
+    } else if options.default.is_some() || options.optional.is_some() || options.parent.is_some() {
         attributes.push(quote!(default));
     }
 
-    if options.identity.is_some() {
+    if options.identity.is_some() || options.parent.is_some() {
         attributes.push(quote!(setter(skip)));
     } else if options.optional.is_some() {
         attributes.push(quote!(setter(strip_option)));
@@ -1273,7 +1300,7 @@ mod tests {
                 properties = FunctionModuleProperties,
                 workbench_type = "FUGR/FF",
                 subobject,
-                capabilities(Source(properties.source_uri))
+                capabilities(Create(FunctionModuleCreateProperties), Source(properties.source_uri))
             },
             quote!(
                 pub struct FunctionModule;
@@ -1284,6 +1311,7 @@ mod tests {
 
         assert!(!expanded.contains("PrimaryObjectType for FunctionModule"));
         assert!(expanded.contains("ObjectAddressing :: Child"));
+        assert!(expanded.contains("impl crate :: objects :: Create for FunctionModule"));
     }
 
     #[test]
@@ -1309,17 +1337,6 @@ mod tests {
         .unwrap()
         .to_string();
         assert!(ambiguous.contains("cannot be both a primary object and a subobject"));
-
-        let nested_create = syn::parse2::<ObjectTypeArguments>(quote! {
-            properties = Properties,
-            workbench_type = "TEST/X",
-            subobject,
-            capabilities(Create(CreateProperties))
-        })
-        .err()
-        .unwrap()
-        .to_string();
-        assert!(nested_create.contains("`Create` capability currently requires"));
 
         let empty_relation = syn::parse2::<ObjectTypeArguments>(quote! {
             properties = Properties,
@@ -1356,6 +1373,8 @@ mod tests {
                 pub sources: Vec<Source>,
                 #[for_create(with = "wire")]
                 pub encoded: String,
+                #[for_create(parent)]
+                pub container: Reference,
                 pub ignored: bool,
             }
         })
@@ -1383,6 +1402,9 @@ mod tests {
             )
         );
         assert!(expanded.contains("fn assign_identity"));
+        assert!(expanded.contains("fn assign_reference"));
+        assert!(expanded.contains("reference . parent_reference ()"));
+        assert!(expanded.contains("self . container = parent"));
         assert!(!expanded.contains("impl crate :: objects :: PropertyModel"));
     }
 

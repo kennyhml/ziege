@@ -1,4 +1,4 @@
-use super::{AssignObjectIdentity, MediaTyped, ObjectType, PrimaryObjectType, ToXml};
+use super::{AssignObjectIdentity, MediaTyped, ObjectType, ToXml};
 use crate::{CategoryId, operation::TemplateLocator};
 
 /// Marks an object capable of being executed immediately (not a job).
@@ -52,7 +52,7 @@ pub trait SourceComponents: Source {
 pub trait Structure: ObjectType {}
 
 /// An object family that can be created through its collection resource.
-pub trait Create: PrimaryObjectType {
+pub trait Create: ObjectType {
     /// The sparse XML payload accepted during creation.
     type Payload: AssignObjectIdentity + ToXml + Send + Sync;
 

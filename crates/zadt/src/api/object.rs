@@ -5,17 +5,14 @@
 //! decoding because each representation produces an object snapshot.
 use super::transports::TRANSPORT_REQUEST_QUERY;
 use crate::{
-    Advertised, CategoryId, IfMatch, Locked, ObjectError, ObjectLock, ObjectSnapshot, SnapshotKind,
+    CompatibilityError, IfMatch, Locked, ObjectError, ObjectLock, ObjectSnapshot, SnapshotKind,
     TransportNumber, compatibility,
     error::{EncodeError, ResponseError},
     objects::{
         AssignObjectIdentity, Create, MediaTyped, ObjectIdentity, ObjectRef, ObjectType, ToXml,
         WorkbenchVersion, XmlConversion,
     },
-    operation::{
-        CollectionLocator, EncodedOperation, IfNoneMatch, Operation, OperationResponse, Owned,
-        Stateless,
-    },
+    operation::{EncodedOperation, IfNoneMatch, Operation, OperationResponse, Owned, Stateless},
     protocol::EntityTag,
 };
 use http::Method;
@@ -56,18 +53,29 @@ impl<T, P> ObjectCreation<T, P> {
     }
 
     /// Shared internal helper for both typed and erased paths.
-    fn build_request(
-        &self,
-        category: CategoryId,
-        body: Vec<u8>,
-    ) -> Result<EncodedOperation<Advertised>, EncodeError> {
-        // Mark the target collection that we require it to accept one
-        // of the creation media types we used. This is then validated
-        // when the target collection is resolved.
-        let mut target = CollectionLocator::new(category).target();
-        target.require_accepted_media_types(self.create_media_types);
+    fn build_request(&self, body: Vec<u8>) -> Result<EncodedOperation<Owned>, EncodeError> {
+        // We retain the resolved object collection for this purpose: during creation,
+        // we must use the base object path to POST to. We also need to know what
+        // media types that collection even accepts to ensure one of ours matches.
+        // The operation target can stay owned because all context is resolved.
+        let (target, accepted_media_types) = self.reference.collection()?;
+        let content_type = compatibility::select_accepted_media_type(
+            self.create_media_types,
+            accepted_media_types,
+        )
+        .ok_or_else(|| {
+            ObjectError::from(CompatibilityError::NoCompatibleMediaType {
+                supported: self
+                    .create_media_types
+                    .iter()
+                    .map(|media_type| (*media_type).to_owned())
+                    .collect(),
+                accepted: accepted_media_types.to_vec(),
+            })
+        })?;
 
-        let mut request = EncodedOperation::advertised(Method::POST, target);
+        let mut request = EncodedOperation::owned(Method::POST, target.clone());
+        request.set_content_type(content_type);
         request.set_accepts(self.response_media_types);
         request.set_body(body);
 
@@ -87,10 +95,10 @@ where
 {
     type Kind = Stateless;
     type Response = Option<ObjectSnapshot<T>>;
-    type Target = Advertised;
+    type Target = Owned;
 
     fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        self.build_request(T::CATEGORY, self.payload.to_xml()?)
+        self.build_request(self.payload.to_xml()?)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
@@ -106,20 +114,12 @@ where
 impl Operation for ObjectCreation<(), serde_json::Value> {
     type Kind = Stateless;
     type Response = Option<ObjectSnapshot<()>>;
-    type Target = Advertised;
+    type Target = Owned;
 
     fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
         let descriptor = self.reference.require_descriptor()?;
-
-        // Currently only primary object creation is supported
-        let category = descriptor
-            .category()
-            .ok_or_else(|| ObjectError::ParentObjectRequired {
-                object_type: self.reference.object_type().clone(),
-            })?;
-
         let payload = descriptor.creation_payload_to_xml(&self.reference, self.payload.clone())?;
-        self.build_request(category, payload)
+        self.build_request(payload)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
@@ -148,7 +148,7 @@ where
     pub fn create(&self, mut payload: T::Payload) -> ObjectCreation<T, T::Payload> {
         // Make sure identify matches the reference. In the erased path,
         // the same thing happens during the descriptor xml serialization.
-        payload.assign_identity(self);
+        payload.assign_reference(self);
 
         ObjectCreation {
             reference: self.clone(),
@@ -609,8 +609,9 @@ mod tests {
     use crate::{
         AbapLanguageVersion, AccessMode, AdtRequest, AdtResponse, AdtUri,
         AdvertisedObjectReference, Class, ClassCategory, ClassCreateProperties, ClassProperties,
-        ClassTemplate, Client, CompatibilityError, ObjectType, Package, Ready, Resolve, Stateful,
-        Transport,
+        ClassTemplate, Client, CompatibilityError, FunctionGroup, FunctionGroupInclude,
+        FunctionGroupIncludeCreateProperties, FunctionModule, FunctionModuleCreateProperties,
+        ObjectType, Package, Ready, Resolve, Stateful, Transport,
     };
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
@@ -633,14 +634,7 @@ mod tests {
     }
 
     fn reference(name: &str) -> ObjectRef<Class> {
-        ObjectRef::new(
-            name.to_owned(),
-            AdtUri::parse(&format!(
-                "/sap/bc/adt/oo/classes/{}",
-                name.to_ascii_lowercase()
-            ))
-            .unwrap(),
-        )
+        ready_client(DISCOVERY_XML).object(name).unwrap()
     }
 
     fn create_properties() -> ClassCreateProperties {
@@ -673,7 +667,11 @@ mod tests {
             typed_request.headers()[header::ACCEPT],
             ClassProperties::MEDIA_TYPES.join(", ")
         );
-        assert!(!typed_request.headers().contains_key(header::CONTENT_TYPE));
+        assert_eq!(
+            typed_request.headers()[header::CONTENT_TYPE],
+            ClassProperties::MEDIA_TYPES[0]
+        );
+        assert_eq!(typed_request.target().as_str(), "/sap/bc/adt/oo/classes");
         assert_eq!(typed_request.body(), runtime_request.body());
         let body = std::str::from_utf8(typed_request.body()).unwrap();
         assert!(body.contains("<class:abapClass"));
@@ -697,8 +695,9 @@ mod tests {
     #[test]
     fn creation_negotiates_the_preferred_advertised_media_type() {
         let client = ready_client(DISCOVERY_XML);
-        let typed = reference("ZZZTEST").create(create_properties());
-        let runtime = reference("ZZZTEST")
+        let reference = client.object::<Class>("ZZZTEST").unwrap();
+        let typed = reference.create(create_properties());
+        let runtime = reference
             .erase()
             .create(serde_json::to_value(create_properties()).unwrap())
             .unwrap();
@@ -724,17 +723,20 @@ mod tests {
             discovery = discovery.replace(&format!("<app:accept>{media_type}</app:accept>"), "");
         }
         let client = ready_client(discovery.as_bytes());
-        let operation = reference("ZZZTEST").create(create_properties());
+        let operation = client
+            .object::<Class>("ZZZTEST")
+            .unwrap()
+            .create(create_properties());
 
-        let Err(error) = client.resolve(operation.encode().unwrap()) else {
-            panic!("creation resolution should reject a collection without app:accept")
+        let Err(EncodeError::Object(ObjectError::Compatibility(error))) = operation.encode() else {
+            panic!("creation encoding should reject a collection without app:accept")
         };
 
         match error {
-            crate::ResolveError::Compatibility(CompatibilityError::NoCompatibleMediaType {
+            CompatibilityError::NoCompatibleMediaType {
                 supported,
                 accepted,
-            }) => {
+            } => {
                 assert_eq!(
                     supported,
                     Class::CREATE_MEDIA_TYPES
@@ -761,20 +763,117 @@ mod tests {
                 "",
             );
         let client = ready_client(discovery.as_bytes());
-        let operation = reference("ZZZTEST").create(create_properties());
+        let operation = client
+            .object::<Class>("ZZZTEST")
+            .unwrap()
+            .create(create_properties());
 
-        let Err(error) = client.resolve(operation.encode().unwrap()) else {
+        let Err(error) = operation.encode() else {
             panic!("a V4 creation payload must not be advertised as V2")
         };
 
         assert!(matches!(
             error,
-            crate::ResolveError::Compatibility(CompatibilityError::NoCompatibleMediaType {
+            EncodeError::Object(ObjectError::Compatibility(
+                CompatibilityError::NoCompatibleMediaType {
                 ref supported,
                 ref accepted,
-            }) if supported == Class::CREATE_MEDIA_TYPES
+            })) if supported == Class::CREATE_MEDIA_TYPES
                 && accepted == &[ClassProperties::MEDIA_TYPES[2].to_owned()]
         ));
+    }
+
+    #[test]
+    fn child_reference_retains_its_resolved_collection() {
+        let client = ready_client(DISCOVERY_XML);
+        let group = client.object::<FunctionGroup>("Z_TEST_GROUP").unwrap();
+        let module = group.subobject::<FunctionModule>("ZZZZFUNC").unwrap();
+
+        let (target, accepted_media_types) = module.collection().unwrap();
+        assert_eq!(
+            target.as_str(),
+            "/sap/bc/adt/functions/groups/z_test_group/fmodules"
+        );
+        assert_eq!(
+            accepted_media_types,
+            ["application/vnd.sap.adt.functions.fmodules.v3+xml"]
+        );
+    }
+
+    #[test]
+    fn typed_and_runtime_include_creation_use_the_parent_collection() {
+        let client = ready_client(DISCOVERY_XML);
+        let group = client.object::<FunctionGroup>("ZGROUP123").unwrap();
+        let include = group
+            .subobject::<FunctionGroupInclude>("LZGROUP123RRR")
+            .unwrap();
+        let typed = include.create(
+            FunctionGroupIncludeCreateProperties::builder()
+                .description("zttfart")
+                .build()
+                .unwrap(),
+        );
+        let runtime = include
+            .erase()
+            .create(serde_json::json!({ "@adtcore:description": "zttfart" }))
+            .unwrap();
+
+        let typed = typed.encode().unwrap();
+        let runtime = runtime.encode().unwrap();
+        assert_eq!(
+            typed.target().as_str(),
+            "/sap/bc/adt/functions/groups/zgroup123/includes"
+        );
+        assert_eq!(
+            typed.headers()[header::CONTENT_TYPE],
+            "application/vnd.sap.adt.functions.fincludes.v2+xml"
+        );
+        assert_eq!(typed.body(), runtime.body());
+        let body = std::str::from_utf8(typed.body()).unwrap();
+        assert!(body.contains("<adtcore:containerRef"));
+        assert!(body.contains("adtcore:name=\"ZGROUP123\""));
+        assert!(body.contains("adtcore:type=\"FUGR/F\""));
+        assert!(body.contains("adtcore:uri=\"/sap/bc/adt/functions/groups/zgroup123\""));
+    }
+
+    #[test]
+    fn typed_and_runtime_function_module_creation_use_the_parent_collection() {
+        let client = ready_client(DISCOVERY_XML);
+        let group = client.object::<FunctionGroup>("ZGROUP123").unwrap();
+        let module = group.subobject::<FunctionModule>("ZFTFART").unwrap();
+        let typed = module.create(
+            FunctionModuleCreateProperties::builder()
+                .description("tfatart")
+                .build()
+                .unwrap(),
+        );
+        let runtime = module
+            .erase()
+            .create(serde_json::json!({ "@adtcore:description": "tfatart" }))
+            .unwrap();
+
+        let typed = typed.encode().unwrap();
+        let runtime = runtime.encode().unwrap();
+        assert_eq!(
+            typed.target().as_str(),
+            "/sap/bc/adt/functions/groups/zgroup123/fmodules"
+        );
+        assert_eq!(
+            typed.headers()[header::CONTENT_TYPE],
+            "application/vnd.sap.adt.functions.fmodules.v3+xml"
+        );
+        assert_eq!(typed.body(), runtime.body());
+        let body = std::str::from_utf8(typed.body()).unwrap();
+        assert!(body.contains("<fmodule:abapFunctionModule"));
+        assert!(body.contains("adtcore:description=\"tfatart\""));
+        assert!(body.contains("adtcore:name=\"ZFTFART\""));
+        assert!(body.contains("adtcore:type=\"FUGR/FF\""));
+        assert!(body.contains("<adtcore:containerRef"));
+        assert!(body.contains("adtcore:name=\"ZGROUP123\""));
+        assert!(body.contains("adtcore:type=\"FUGR/F\""));
+        assert!(body.contains("adtcore:uri=\"/sap/bc/adt/functions/groups/zgroup123\""));
+        assert!(!body.contains("fmodule:processingType"));
+        assert!(!body.contains("fmodule:releaseState"));
     }
 
     #[test]

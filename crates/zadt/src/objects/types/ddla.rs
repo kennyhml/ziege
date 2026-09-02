@@ -122,7 +122,7 @@ impl ToXml for AnnotationDefinitionProperties {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, ObjectRef, ObjectType, Operation};
+    use crate::{AdtUri, AssignObjectIdentity, ObjectRef, ObjectType};
 
     const ANNOTATION_DEFINITION_XML: &str =
         include_str!("../../../tests/fixtures/annotation-definition-ui.xml");
@@ -137,7 +137,7 @@ mod tests {
 
     #[test]
     fn builds_the_sparse_creation_payload() {
-        let properties = AnnotationDefinitionCreateProperties::builder()
+        let mut properties = AnnotationDefinitionCreateProperties::builder()
             .description("Created Annotation Definition")
             .package("$TMP")
             .build()
@@ -149,8 +149,9 @@ mod tests {
             "Z_ANNOTATION_DEFINITION".to_owned(),
             AdtUri::parse("/sap/bc/adt/ddic/ddla/sources/z_annotation_definition").unwrap(),
         );
-        let request = reference.create(properties).encode().unwrap();
-        let body = std::str::from_utf8(request.body()).unwrap();
+        properties.assign_identity(&reference);
+        let body = properties.to_xml().unwrap();
+        let body = std::str::from_utf8(&body).unwrap();
 
         assert!(body.contains("<ddla:ddlaSource"));
         assert!(body.contains("adtcore:name=\"Z_ANNOTATION_DEFINITION\""));

@@ -130,7 +130,7 @@ impl ToXml for MetadataExtensionProperties {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, ObjectRef, ObjectType, Operation};
+    use crate::{AdtUri, AssignObjectIdentity, ObjectRef, ObjectType};
 
     const METADATA_EXTENSION_XML: &str =
         include_str!("../../../tests/fixtures/metadata-extension-c-mdoapplicationscope.xml");
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn builds_a_sparse_payload_for_the_eclipse_confirmed_creation_collection() {
-        let properties = MetadataExtensionCreateProperties::builder()
+        let mut properties = MetadataExtensionCreateProperties::builder()
             .description("Created Metadata Extension")
             .package("$TMP")
             .build()
@@ -158,8 +158,9 @@ mod tests {
             "Z_METADATA_EXTENSION".to_owned(),
             AdtUri::parse("/sap/bc/adt/ddic/ddlx/sources/z_metadata_extension").unwrap(),
         );
-        let request = reference.create(properties).encode().unwrap();
-        let body = std::str::from_utf8(request.body()).unwrap();
+        properties.assign_identity(&reference);
+        let body = properties.to_xml().unwrap();
+        let body = std::str::from_utf8(&body).unwrap();
 
         assert!(body.contains("<ddlx:ddlxSource"));
         assert!(body.contains("adtcore:name=\"Z_METADATA_EXTENSION\""));

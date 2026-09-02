@@ -130,7 +130,7 @@ impl ToXml for AccessControlProperties {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, ObjectRef, ObjectType, Operation};
+    use crate::{AdtUri, AssignObjectIdentity, ObjectRef, ObjectType};
 
     const ACCESS_CONTROL_XML: &str =
         include_str!("../../../tests/fixtures/access-control-sdsh-cds-domain-val-dcl.xml");
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn builds_the_handler_confirmed_sparse_creation_payload() {
-        let properties = AccessControlCreateProperties::builder()
+        let mut properties = AccessControlCreateProperties::builder()
             .description("Created Access Control")
             .package("$TMP")
             .build()
@@ -158,8 +158,9 @@ mod tests {
             "Z_ACCESS_CONTROL".to_owned(),
             AdtUri::parse("/sap/bc/adt/acm/dcl/sources/z_access_control").unwrap(),
         );
-        let request = reference.create(properties).encode().unwrap();
-        let body = std::str::from_utf8(request.body()).unwrap();
+        properties.assign_identity(&reference);
+        let body = properties.to_xml().unwrap();
+        let body = std::str::from_utf8(&body).unwrap();
 
         assert!(body.contains("<dcl:dclSource"));
         assert!(body.contains("adtcore:name=\"Z_ACCESS_CONTROL\""));

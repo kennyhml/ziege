@@ -145,6 +145,9 @@ pub enum ObjectError {
     #[error("object type `{object_type}` requires a parent object")]
     ParentObjectRequired { object_type: GlobalWorkbenchType },
 
+    #[error("object reference for type `{object_type}` has no resolved containing collection")]
+    MissingCollectionContext { object_type: GlobalWorkbenchType },
+
     #[error("invalid parent object for type `{object_type}`: {reason}")]
     InvalidParentObject {
         object_type: GlobalWorkbenchType,

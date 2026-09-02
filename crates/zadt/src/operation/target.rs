@@ -85,11 +85,6 @@ impl AdvertisedCollection {
         self.path_segments.push(segment.into());
     }
 
-    /// Requires that the collection accepts any of the given media types.
-    pub(crate) fn require_accepted_media_types(&mut self, media_types: &'static [&'static str]) {
-        self.accepted_media_types = media_types;
-    }
-
     /// Internal helper to resolve the collection against a client that holds
     /// discovery data and check whether the required media type is accepted.
     fn resolve(self, client: &Client<Ready>) -> Result<ResolvedTarget, ResolveError> {

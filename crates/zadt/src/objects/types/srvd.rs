@@ -150,7 +150,7 @@ impl ToXml for ServiceDefinitionProperties {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, ObjectRef, ObjectType, Operation};
+    use crate::{AdtUri, AssignObjectIdentity, ObjectRef, ObjectType};
 
     const SERVICE_DEFINITION_XML: &str =
         include_str!("../../../tests/fixtures/service-definition-managedistributions.xml");
@@ -165,7 +165,7 @@ mod tests {
 
     #[test]
     fn builds_the_sparse_creation_payload() {
-        let properties = ServiceDefinitionCreateProperties::builder()
+        let mut properties = ServiceDefinitionCreateProperties::builder()
             .description("Created Service Definition")
             .package("$TMP")
             .build()
@@ -179,8 +179,9 @@ mod tests {
             "Z_SERVICE_DEFINITION".to_owned(),
             AdtUri::parse("/sap/bc/adt/ddic/srvd/sources/z_service_definition").unwrap(),
         );
-        let request = reference.create(properties).encode().unwrap();
-        let body = std::str::from_utf8(request.body()).unwrap();
+        properties.assign_identity(&reference);
+        let body = properties.to_xml().unwrap();
+        let body = std::str::from_utf8(&body).unwrap();
 
         assert!(body.contains("<srvd:srvdSource"));
         assert!(body.contains("adtcore:name=\"Z_SERVICE_DEFINITION\""));

@@ -44,8 +44,13 @@ pub use doma::{
 };
 pub use dtel::{DataElement, DataElementDefinition, DataElementProperties};
 pub use fugr::{
-    FunctionGroup, FunctionGroupInclude, FunctionGroupIncludeProperties, FunctionGroupProperties,
-    FunctionModule, FunctionModuleProperties,
+    FunctionGroup, FunctionGroupCreateProperties, FunctionGroupCreatePropertiesBuilder,
+    FunctionGroupCreatePropertiesBuilderError, FunctionGroupInclude,
+    FunctionGroupIncludeCreateProperties, FunctionGroupIncludeCreatePropertiesBuilder,
+    FunctionGroupIncludeCreatePropertiesBuilderError, FunctionGroupIncludeProperties,
+    FunctionGroupProperties, FunctionModule, FunctionModuleCreateProperties,
+    FunctionModuleCreatePropertiesBuilder, FunctionModuleCreatePropertiesBuilderError,
+    FunctionModuleProperties,
 };
 pub use intf::{
     Interface, InterfaceCreateProperties, InterfaceCreatePropertiesBuilder,
