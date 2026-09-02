@@ -458,7 +458,7 @@ mod tests {
                 ProgramProperties::MEDIA_TYPES[0],
             ))
             .unwrap();
-        let request = program.revalidate().unwrap().encode().unwrap();
+        let request = program.revalidation().unwrap().encode().unwrap();
 
         assert_eq!(request.headers()[header::IF_NONE_MATCH], "program-etag");
         assert_eq!(

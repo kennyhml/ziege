@@ -301,7 +301,7 @@ impl<T: SnapshotKind> ObjectSnapshot<T> {
     /// The response can then be used to check whether this snapshot is
     /// still the latest server state or, if not, replace the current
     /// snapshot.
-    pub fn revalidate(&self) -> Option<IfNoneMatch<ObjectQuery<T>>> {
+    pub fn revalidation(&self) -> Option<IfNoneMatch<ObjectQuery<T>>> {
         let etag = self.etag()?.clone();
         Some(
             self.reference()

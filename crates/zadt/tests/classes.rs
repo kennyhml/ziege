@@ -112,7 +112,7 @@ async fn repository_object_properties_forward_through_the_typed_query() {
     let properties_json = properties.properties().unwrap();
     assert_eq!(properties_json["@adtcore:name"], "CL_ADT_URI_MAPPER");
     assert_eq!(properties.etag().map(EntityTag::as_str), Some("class-etag"));
-    let revalidation = properties.revalidate().unwrap().encode().unwrap();
+    let revalidation = properties.revalidation().unwrap().encode().unwrap();
     assert_eq!(
         revalidation.headers()[http::header::IF_NONE_MATCH],
         "class-etag"
