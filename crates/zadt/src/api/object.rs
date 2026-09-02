@@ -318,16 +318,6 @@ impl<T: SnapshotKind> ObjectSnapshot<T> {
 /// this operation. Source code updates use the corresponding [`crate::SourceRef`]
 /// operations instead.
 ///
-/// With a pessimistic locking approach using an object lock, it is technically
-/// possible to execute this operation on an [`ObjectRef<T>`] because its location
-/// is known and the lock proves its existence.
-///
-/// However, the API currently requires some way to get a supported content type
-/// for the update that the system can accept. This is not an issue for
-/// [`ObjectSnapshot<T>`] because it carries the media type it was originally
-/// queried with. Otherwise, we would just be sending some content type and
-/// hoping the server accepts it.
-///
 /// Successful execution decodes a new snapshot when ADT returns a response
 /// representation. An empty success response returns `None`.
 #[derive(Debug)]

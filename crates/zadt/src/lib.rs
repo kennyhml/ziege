@@ -23,6 +23,12 @@ pub use api::activation::{
     ObjectCheckRun, SupportedCheckReporter, SupportedCheckReporters,
 };
 pub use api::classes::{ClassRun, ClassRunResult};
+pub use api::deletion::{
+    DeletionCheck, DeletionCheckObject, DeletionCheckObjectResult, DeletionCheckRequest,
+    DeletionCheckResponse, DeletionLockingTransport, DeletionLockingTransportProperties,
+    DeletionMessage, DeletionObject, DeletionObjectResult, DeletionRequest, DeletionResult,
+    ObjectDeletion,
+};
 pub use api::discovery::{
     Capabilities, Category, CategoryId, Collection, CoreDiscoveryQuery, DiscoveryQuery,
     TemplateLink, Workspace,

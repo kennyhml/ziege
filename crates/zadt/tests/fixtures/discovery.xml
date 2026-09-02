@@ -136,6 +136,23 @@
         </app:collection>
     </app:workspace>
     <app:workspace>
+        <atom:title>Deletion</atom:title>
+        <app:collection href="/sap/bc/adt/deletion/delete">
+            <atom:title>Deletion</atom:title>
+            <app:accept>application/vnd.sap.adt.deletion.request.v1+xml</app:accept>
+            <atom:category
+                term="delete"
+                scheme="http://www.sap.com/adt/categories/deletion" />
+        </app:collection>
+        <app:collection href="/sap/bc/adt/deletion/check">
+            <atom:title>Deletion check</atom:title>
+            <app:accept>application/vnd.sap.adt.deletion.check.request.v1+xml</app:accept>
+            <atom:category
+                term="check"
+                scheme="http://www.sap.com/adt/categories/deletion" />
+        </app:collection>
+    </app:workspace>
+    <app:workspace>
         <atom:title>Repository Information</atom:title>
         <app:collection href="/sap/bc/adt/repository/informationsystem/virtualfolders/contents">
             <atom:title>Virtual Folders Contents</atom:title>

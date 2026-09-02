@@ -19,6 +19,10 @@ name = "subobjects"
 required-features = ["reqwest"]
 
 [[example]]
+name = "deletion"
+required-features = ["reqwest"]
+
+[[example]]
 name = "users"
 required-features = ["reqwest"]
 
