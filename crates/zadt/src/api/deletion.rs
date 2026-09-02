@@ -122,6 +122,34 @@ impl Operation for ObjectDeletion {
     }
 }
 
+impl<T> ObjectRef<T> {
+    /// Constructs a deletion request containing this local object.
+    pub fn deletion(&self) -> ObjectDeletion {
+        let mut deletion = ObjectDeletion::new();
+        deletion.push_object(self);
+        deletion
+    }
+
+    /// Constructs a deletion request recorded in the supplied transport.
+    pub fn deletion_with_transport(&self, transport: impl Into<TransportNumber>) -> ObjectDeletion {
+        let mut deletion = ObjectDeletion::new();
+        deletion.push_object(DeletionObject::new(self).transport(transport));
+        deletion
+    }
+}
+
+impl<T: SnapshotKind> ObjectSnapshot<T> {
+    /// Constructs a deletion request containing this local object.
+    pub fn deletion(&self) -> ObjectDeletion {
+        self.reference().deletion()
+    }
+
+    /// Constructs a deletion request recorded in the supplied transport.
+    pub fn deletion_with_transport(&self, transport: impl Into<TransportNumber>) -> ObjectDeletion {
+        self.reference().deletion_with_transport(transport)
+    }
+}
+
 #[derive(Debug, Default, Serialize)]
 #[serde(rename = "del:checkRequest")]
 pub struct DeletionCheckRequest {
@@ -237,8 +265,8 @@ impl DeletionObject {
 
     /// Records this object's deletion in the supplied transport request.
     #[must_use]
-    pub fn transport(mut self, transport: impl Into<String>) -> Self {
-        self.transport_number = transport.into();
+    pub fn transport(mut self, transport: impl Into<TransportNumber>) -> Self {
+        self.transport_number = transport.into().into();
         self
     }
 }
@@ -446,10 +474,8 @@ mod tests {
     fn object_deletion_encodes_local_and_transported_objects() {
         let local = class_reference("ZLOCAL");
         let transported = class_reference("ZTRANSPORTED");
-        let mut deletion = ObjectDeletion::new();
-        deletion
-            .push_object(&local)
-            .push_object(DeletionObject::new(&transported).transport("A4HK900148"));
+        let mut deletion = local.deletion();
+        deletion.push_object(DeletionObject::new(&transported).transport("A4HK900148"));
 
         let request = deletion.encode().unwrap();
 

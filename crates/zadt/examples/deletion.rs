@@ -2,7 +2,7 @@ mod common;
 
 use std::{env, error::Error, io};
 
-use zadt::{Class, Client, DeletionObject, ObjectDeletion, Operation, TransportNumber};
+use zadt::{Class, Client, Operation, TransportNumber};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -43,14 +43,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    // Deletion requires a transport if the object is transportable
-    let object = match transport {
-        Some(transport) => DeletionObject::new(&reference).transport(transport),
-        None => DeletionObject::new(&reference),
+    // Deletion requires a transport if the object is transportable.
+    let deletion = match transport {
+        Some(transport) => reference.deletion_with_transport(transport),
+        None => reference.deletion(),
     };
 
-    let mut deletion = ObjectDeletion::new();
-    deletion.push_object(object);
     let deleted = deletion.execute(&client).await?;
     println!("delete: {deleted:#?}");
 
