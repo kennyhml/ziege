@@ -1,17 +1,26 @@
 //! Represents the `/sap/bc/adt/deletion` workspace which contains
 //! bulk object deletion and deletion check runs. Objects are not
-//! deleted by sending a DELETE to the object uri.
-
+//! deleted by sending a DELETE to the object uri!
 use http::{Method, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AdtUri, Advertised, CategoryId, EncodeError, EncodedOperation, GlobalWorkbenchType,
-    ObjectError, ObjectRef, ObjectSnapshot, Operation, OperationResponse, ResponseError,
-    SnapshotKind, Stateless, TransportNumber, User, operation::CollectionLocator,
+    AdtUri, Advertised, AdvertisedLink, CategoryId, EncodeError, EncodedOperation,
+    GlobalWorkbenchType, ObjectError, ObjectRef, ObjectSnapshot, Operation, OperationResponse,
+    ResponseError, SnapshotKind, Stateless, TransportNumber, User, operation::CollectionLocator,
 };
 
 /// Checks whether one or more repository objects can be deleted.
+///
+/// For each object, it is generally enough to pass the object [`AdtUri`] to
+/// the server for identification. If the object is currently locked, the
+/// lock handle must also be included to avoid locking conflicts.
+///
+/// The response informs us whether an object can be deleted and any included
+/// objects that may have to be deleted with it, as is the case for function
+/// modules inside function groups, for instance.
+///
+/// Backend handler: `CL_ADT_DELETION_CHECK_RES`
 #[derive(Debug, Default)]
 pub struct DeletionCheck {
     payload: DeletionCheckRequest,
@@ -58,7 +67,9 @@ impl Operation for DeletionCheck {
 }
 
 impl<T> ObjectRef<T> {
-    /// Constructs a deletion check containing this object.
+    /// Constructs a [`DeletionCheck`] containing this object.
+    ///
+    /// Other objects may be added to the check.
     pub fn deletion_check(&self) -> DeletionCheck {
         let mut check = DeletionCheck::new();
         check.push_object(self);
@@ -67,13 +78,26 @@ impl<T> ObjectRef<T> {
 }
 
 impl<T: SnapshotKind> ObjectSnapshot<T> {
-    /// Constructs a deletion check containing this object.
+    /// Constructs a [`DeletionCheck`] containing this object.
+    ///
+    /// Other objects may be added to the check.
     pub fn deletion_check(&self) -> DeletionCheck {
         self.reference().deletion_check()
     }
 }
 
-/// Deletes one or more repository objects through the ADT deletion workspace.
+/// Deletes one or more repository objects.
+///
+/// Just like in an [`DeletionCheck`], an [`AdtUri`] is enough to identify
+/// the objects to be deleted. However, for transportable objects, a transport
+/// request must be assigned as a deletion is also a development change that
+/// requires recording.
+///
+/// The backend returns a `200 OK` in any case. Whether an object was actually
+/// deleted is determined by the `is_deleted` result. Contained messages can
+/// provide information to troubleshoot when needed.
+///
+/// Backend handler: `CL_ADT_DELETION_RESOURCE`
 #[derive(Debug, Default)]
 pub struct ObjectDeletion {
     payload: DeletionRequest,
@@ -283,22 +307,123 @@ impl<T> From<&ObjectRef<T>> for DeletionObject {
 /// The result for one checked object.
 #[derive(Debug, Deserialize)]
 pub struct DeletionCheckObjectResult {
+    /// Strong references from objects outside the proposed deletion set.
     #[serde(rename = "@del:externalStrongReferences")]
     pub external_strong_references: i32,
+
+    /// Weak references from objects outside the proposed deletion set.
     #[serde(rename = "@del:externalWeakReferences")]
     pub external_weak_references: i32,
+
     #[serde(rename = "@del:isDeletable")]
     pub is_deletable: bool,
+
     #[serde(rename = "@adtcore:uri")]
     pub uri: AdtUri,
+
     #[serde(rename = "@adtcore:type")]
     pub object_type: GlobalWorkbenchType,
+
     #[serde(rename = "@adtcore:name")]
     pub name: String,
+
     #[serde(rename = "@adtcore:packageName")]
     pub package_name: Option<String>,
+
+    #[serde(rename = "@adtcore:description")]
+    pub description: Option<String>,
+
+    #[serde(rename = "@adtcore:parentUri")]
+    pub parent_uri: Option<String>,
+
+    /// User currently locking the object, when the lock check failed.
+    #[serde(rename = "del:lockUser", default)]
+    pub lock_user: Option<User>,
+
     #[serde(rename = "del:lockingTransport")]
     pub locking_transport: DeletionLockingTransport,
+
+    #[serde(rename = "del:message", default)]
+    pub messages: Vec<DeletionMessage>,
+
+    /// Relationships to other objects in the proposed deletion set.
+    #[serde(rename = "del:usage", default)]
+    pub usages: Vec<DeletionUsage>,
+
+    /// Objects that the backend associates with this deletion candidate.
+    #[serde(rename = "del:includedObject", default)]
+    pub included_objects: Vec<DeletionIncludedObject>,
+}
+
+/// A repository usage between objects in the proposed deletion set.
+#[derive(Debug, Deserialize)]
+pub struct DeletionUsage {
+    /// Backend-defined relationship degree, such as `strong` or `weak`.
+    #[serde(rename = "@del:degree")]
+    pub degree: String,
+
+    /// Whether the referencing object is outside the proposed deletion set.
+    #[serde(rename = "@del:isExternal")]
+    pub is_external: bool,
+
+    #[serde(rename = "@adtcore:uri")]
+    pub uri: AdtUri,
+
+    #[serde(rename = "@adtcore:type")]
+    pub object_type: GlobalWorkbenchType,
+
+    #[serde(rename = "@adtcore:name")]
+    pub name: String,
+
+    #[serde(rename = "@adtcore:packageName")]
+    pub package_name: Option<String>,
+
+    #[serde(rename = "@adtcore:description")]
+    pub description: Option<String>,
+
+    #[serde(rename = "@adtcore:parentUri")]
+    pub parent_uri: Option<String>,
+}
+
+/// An object included by the backend when checking a deletion candidate.
+#[derive(Debug, Deserialize)]
+pub struct DeletionIncludedObject {
+    /// Whether this object may be deleted independently from its parent.
+    #[serde(rename = "@del:canBeDeletedWithoutParent")]
+    pub can_be_deleted_without_parent: bool,
+
+    /// Whether deleting the parent also requires deleting this object.
+    #[serde(rename = "@del:mustBeDeletedWithParent")]
+    pub must_be_deleted_with_parent: bool,
+
+    #[serde(rename = "@del:isDeletable")]
+    pub is_deletable: bool,
+
+    #[serde(rename = "@adtcore:uri")]
+    pub uri: AdtUri,
+
+    #[serde(rename = "@adtcore:type")]
+    pub object_type: GlobalWorkbenchType,
+
+    #[serde(rename = "@adtcore:name")]
+    pub name: String,
+
+    #[serde(rename = "@adtcore:packageName")]
+    pub package_name: Option<String>,
+
+    #[serde(rename = "@adtcore:description")]
+    pub description: Option<String>,
+
+    #[serde(rename = "@adtcore:parentUri")]
+    pub parent_uri: Option<String>,
+
+    /// User currently locking the included object, when available.
+    #[serde(rename = "del:lockUser", default)]
+    pub lock_user: Option<User>,
+
+    #[serde(rename = "del:lockingTransport")]
+    pub locking_transport: DeletionLockingTransport,
+
     #[serde(rename = "del:message", default)]
     pub messages: Vec<DeletionMessage>,
 }
@@ -351,12 +476,20 @@ pub struct DeletionLockingTransport {
     pub recording: bool,
     #[serde(rename = "del:result")]
     pub result: String,
+
+    /// Messages returned by the CTS transport check.
+    #[serde(rename = "del:message", default)]
+    pub messages: Vec<DeletionTransportMessage>,
+
     #[serde(rename = "del:lockingTransport")]
     pub properties: DeletionLockingTransportProperties,
     #[serde(rename = "del:transportLayer")]
     pub transport_layer: String,
 }
 
+/// WARN: At least on ABAP Cloud Trial 2025, this struct seems to be
+/// bugged. The status and type is encoded into the owner while the
+/// rest of the properties are part of the description.
 #[derive(Debug, Deserialize)]
 pub struct DeletionLockingTransportProperties {
     #[serde(rename = "del:trkorr")]
@@ -365,6 +498,16 @@ pub struct DeletionLockingTransportProperties {
     pub owner: User,
     #[serde(rename = "del:description")]
     pub description: String,
+}
+
+/// A message returned by the CTS transport check.
+#[derive(Debug, Deserialize)]
+pub struct DeletionTransportMessage {
+    #[serde(rename = "del:severity")]
+    pub severity: String,
+
+    #[serde(rename = "del:text")]
+    pub text: String,
 }
 
 /// Transport locking a checked object
@@ -376,6 +519,10 @@ pub struct DeletionMessage {
     pub message_type: String,
     #[serde(rename = "del:text")]
     pub text: String,
+
+    /// Related resources such as a message long text.
+    #[serde(rename = "atom:link", default)]
+    pub links: Vec<AdvertisedLink>,
 }
 
 #[cfg(test)]
@@ -417,6 +564,57 @@ mod tests {
     <del:message del:priority="0" del:type="S">
       <del:text/>
     </del:message>
+  </del:object>
+</del:checkResponse>"#;
+
+    const CHECK_RESPONSE_WITH_RELATIONSHIPS: &str = r#"<?xml version="1.0" encoding="UTF-8"?><del:checkResponse xmlns:del="http://www.sap.com/adt/deletion">
+  <del:object xmlns:adtcore="http://www.sap.com/adt/core" del:externalStrongReferences="0" del:externalWeakReferences="0" del:isDeletable="true" adtcore:uri="/sap/bc/adt/oo/classes/zparent" adtcore:type="CLAS/OC" adtcore:name="ZPARENT" adtcore:packageName="ZPACKAGE">
+    <del:lockUser>LOCK_OWNER</del:lockUser>
+    <del:lockingTransport>
+      <del:recording>true</del:recording>
+      <del:result/>
+      <del:message><del:severity>W</del:severity><del:text>Transport warning</del:text></del:message>
+      <del:lockingTransport><del:trkorr/><del:owner/><del:description/></del:lockingTransport>
+      <del:transportLayer>ZDEV</del:transportLayer>
+    </del:lockingTransport>
+    <del:message del:priority="1" del:type="W">
+      <del:text>Related long text</del:text>
+      <atom:link xmlns:atom="http://www.w3.org/2005/Atom" href="/sap/bc/adt/longtexts/1" rel="alternate" type="text/html"/>
+    </del:message>
+    <del:usage del:degree="weak" del:isExternal="false" adtcore:uri="/sap/bc/adt/oo/classes/zchild" adtcore:type="CLAS/OC" adtcore:name="ZCHILD" adtcore:packageName="ZPACKAGE"/>
+  </del:object>
+</del:checkResponse>"#;
+
+    const CHECK_RESPONSE_WITH_INCLUDED_OBJECT: &str = r#"<?xml version="1.0" encoding="UTF-8"?><del:checkResponse xmlns:del="http://www.sap.com/adt/deletion">
+  <del:object xmlns:adtcore="http://www.sap.com/adt/core" del:externalStrongReferences="0" del:externalWeakReferences="0" del:isDeletable="true" adtcore:uri="/sap/bc/adt/functions/groups/zgroup123" adtcore:type="FUGR/F" adtcore:name="ZGROUP123" adtcore:packageName="$TMP">
+    <del:lockingTransport>
+      <del:recording>false</del:recording>
+      <del:result/>
+      <del:lockingTransport>
+        <del:trkorr/>
+        <del:owner/>
+        <del:description/>
+      </del:lockingTransport>
+      <del:transportLayer/>
+    </del:lockingTransport>
+    <del:message del:priority="0" del:type="S">
+      <del:text/>
+    </del:message>
+    <del:includedObject del:canBeDeletedWithoutParent="true" del:mustBeDeletedWithParent="true" del:isDeletable="true" adtcore:uri="/sap/bc/adt/functions/groups/zgroup123/fmodules/zftftr" adtcore:type="FUGR/FF" adtcore:name="ZFTFTR" adtcore:packageName="$TMP">
+      <del:lockingTransport>
+        <del:recording>false</del:recording>
+        <del:result/>
+        <del:lockingTransport>
+          <del:trkorr/>
+          <del:owner/>
+          <del:description/>
+        </del:lockingTransport>
+        <del:transportLayer/>
+      </del:lockingTransport>
+      <del:message del:priority="0" del:type="W">
+        <del:text>ZFTFTR does not exist</del:text>
+      </del:message>
+    </del:includedObject>
   </del:object>
 </del:checkResponse>"#;
 
@@ -564,6 +762,52 @@ mod tests {
         assert_eq!(message.priority, 0);
         assert_eq!(message.message_type, "S");
         assert!(message.text.is_empty());
+    }
+
+    #[test]
+    fn deserializes_deletion_relationships_and_extended_messages() {
+        let response: DeletionCheckResponse =
+            serde_xml_rs::from_str(CHECK_RESPONSE_WITH_RELATIONSHIPS).unwrap();
+
+        let object = &response.objects[0];
+        assert_eq!(object.lock_user.as_ref().unwrap().as_str(), "LOCK_OWNER");
+        assert_eq!(object.locking_transport.messages.len(), 1);
+        assert_eq!(
+            object.locking_transport.messages[0].text,
+            "Transport warning"
+        );
+        assert_eq!(object.messages[0].links.len(), 1);
+        assert_eq!(
+            object.messages[0].links[0].relation.as_deref(),
+            Some("alternate")
+        );
+
+        assert_eq!(object.usages.len(), 1);
+        assert_eq!(object.usages[0].degree, "weak");
+        assert!(!object.usages[0].is_external);
+        assert_eq!(object.usages[0].name, "ZCHILD");
+
+        assert!(object.included_objects.is_empty());
+    }
+
+    #[test]
+    fn deserializes_an_included_function_module() {
+        let response: DeletionCheckResponse =
+            serde_xml_rs::from_str(CHECK_RESPONSE_WITH_INCLUDED_OBJECT).unwrap();
+
+        let object = &response.objects[0];
+        assert_eq!(object.object_type.as_str(), "FUGR/F");
+        assert_eq!(object.included_objects.len(), 1);
+        let included = &object.included_objects[0];
+        assert!(included.can_be_deleted_without_parent);
+        assert!(included.must_be_deleted_with_parent);
+        assert!(included.is_deletable);
+        assert_eq!(included.object_type.as_str(), "FUGR/FF");
+        assert_eq!(included.name, "ZFTFTR");
+        assert_eq!(included.package_name.as_deref(), Some("$TMP"));
+        assert_eq!(included.messages.len(), 1);
+        assert_eq!(included.messages[0].message_type, "W");
+        assert_eq!(included.messages[0].text, "ZFTFTR does not exist");
     }
 
     #[test]

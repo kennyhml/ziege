@@ -25,9 +25,9 @@ pub use api::activation::{
 pub use api::classes::{ClassRun, ClassRunResult};
 pub use api::deletion::{
     DeletionCheck, DeletionCheckObject, DeletionCheckObjectResult, DeletionCheckRequest,
-    DeletionCheckResponse, DeletionLockingTransport, DeletionLockingTransportProperties,
-    DeletionMessage, DeletionObject, DeletionObjectResult, DeletionRequest, DeletionResult,
-    ObjectDeletion,
+    DeletionCheckResponse, DeletionIncludedObject, DeletionLockingTransport,
+    DeletionLockingTransportProperties, DeletionMessage, DeletionObject, DeletionObjectResult,
+    DeletionRequest, DeletionResult, DeletionTransportMessage, DeletionUsage, ObjectDeletion,
 };
 pub use api::discovery::{
     Capabilities, Category, CategoryId, Collection, CoreDiscoveryQuery, DiscoveryQuery,
