@@ -113,9 +113,9 @@ mod tests {
     use super::*;
     use crate::api::run::PROFILER_ID_QUERY;
     use crate::{
-        AdtRequest, AdtResponse, AdtUri, Client, CompatibilityError, EntityTag, Include,
-        IncludeProperties, MediaTyped, ObjectError, ObjectQuery, OperationError, ProgramProperties,
-        Ready, ResolveError, Revalidation, Transport, WorkbenchVersion,
+        AdtRequest, AdtResponse, AdtUri, Client, CompatibilityError, ConditionalResult, EntityTag,
+        Include, IncludeProperties, MediaTyped, ObjectError, ObjectQuery, OperationError,
+        ProgramProperties, Ready, ResolveError, Transport, WorkbenchVersion,
     };
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
@@ -448,7 +448,7 @@ mod tests {
             ))
             .unwrap();
 
-        assert!(matches!(response, Revalidation::Modified(_)));
+        assert!(matches!(response, ConditionalResult::Modified(_)));
     }
 
     #[test]
@@ -513,7 +513,7 @@ mod tests {
             .if_none_match(EntityTag::from_static("include-etag"))
             .decode(operation_response(response))
             .unwrap();
-        assert!(matches!(&response, Revalidation::NotModified { .. }));
+        assert!(matches!(&response, ConditionalResult::NotModified { .. }));
         assert_eq!(response.not_modified_etag(), Some("include-etag"));
         assert!(response.as_modified().is_none());
     }

@@ -3,9 +3,9 @@
 //! Typed operations use concrete property models, while erased operations use
 //! runtime descriptors to convert properties. The operations share response
 //! decoding because each representation produces an object snapshot.
-use super::{locking::LOCK_HANDLE_QUERY, transports::TRANSPORT_REQUEST_QUERY};
+use super::transports::TRANSPORT_REQUEST_QUERY;
 use crate::{
-    Advertised, CategoryId, IfMatch, ObjectError, ObjectLock, ObjectSnapshot, SnapshotKind,
+    Advertised, CategoryId, IfMatch, Locked, ObjectError, ObjectLock, ObjectSnapshot, SnapshotKind,
     TransportNumber, compatibility,
     error::{EncodeError, ResponseError},
     objects::{
@@ -14,7 +14,7 @@ use crate::{
     },
     operation::{
         CollectionLocator, EncodedOperation, IfNoneMatch, Operation, OperationResponse, Owned,
-        Stateful, Stateless,
+        Stateless,
     },
     protocol::EntityTag,
 };
@@ -318,10 +318,20 @@ impl<T: SnapshotKind> ObjectSnapshot<T> {
 /// this operation. Source code updates use the corresponding [`crate::SourceRef`]
 /// operations instead.
 ///
+/// With a pessimistic locking approach using an object lock, it is technically
+/// possible to execute this operation on an [`ObjectRef<T>`] because its location
+/// is known and the lock proves its existence.
+///
+/// However, the API currently requires some way to get a supported content type
+/// for the update that the system can accept. This is not an issue for
+/// [`ObjectSnapshot<T>`] because it carries the media type it was originally
+/// queried with. Otherwise, we would just be sending some content type and
+/// hoping the server accepts it.
+///
 /// Successful execution decodes a new snapshot when ADT returns a response
 /// representation. An empty success response returns `None`.
 #[derive(Debug)]
-pub struct ObjectUpdate<T, S = ()> {
+pub struct ObjectUpdate<T> {
     /// A reference to the object to be updated
     resource: ObjectRef<T>,
     /// The new, already encoded properties
@@ -330,11 +340,9 @@ pub struct ObjectUpdate<T, S = ()> {
     media_type: &'static str,
     /// A transport request to assign the changes to
     transport_request: Option<TransportNumber>,
-    /// The concurrency control used by this update.
-    state: S,
 }
 
-impl<T, S> ObjectUpdate<T, S> {
+impl<T> ObjectUpdate<T> {
     /// Records this update in the supplied transport request.
     ///
     /// For a locked update, this replaces the transport request inherited from
@@ -358,6 +366,7 @@ impl<T, S> ObjectUpdate<T, S> {
     }
 }
 
+// typed implementation
 impl<T> Operation for ObjectUpdate<T>
 where
     T: ObjectType,
@@ -380,6 +389,7 @@ where
     }
 }
 
+// erased implementation
 impl Operation for ObjectUpdate<()> {
     type Response = Option<ObjectSnapshot<()>>;
     type Kind = Stateless;
@@ -399,54 +409,19 @@ impl Operation for ObjectUpdate<()> {
     }
 }
 
-impl<T> Operation for ObjectUpdate<T, ObjectLock>
-where
-    T: ObjectType,
-{
-    type Response = Option<ObjectSnapshot<T>>;
-    type Kind = Stateful;
-    type Target = Owned;
-
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut request = self.build_request();
-        request.push_query(LOCK_HANDLE_QUERY, self.state.handle());
-        if let Some(user_session) = self.state.user_session() {
-            request.bind_user_session(user_session);
-        }
-        Ok(request)
-    }
-
-    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        response.require_success()?;
-
-        if response.body().is_empty() {
-            return Ok(None);
-        }
-        ObjectSnapshot::<T>::decode(&self.resource, response).map(Some)
+impl<T> Locked<ObjectUpdate<T>> {
+    /// Assigns a transport request to record the update in.
+    #[must_use]
+    pub fn transport(self, transport: impl Into<TransportNumber>) -> Self {
+        self.map_inner(|o| o.transport_request = Some(transport.into()))
     }
 }
 
-impl Operation for ObjectUpdate<(), ObjectLock> {
-    type Response = Option<ObjectSnapshot<()>>;
-    type Kind = Stateful;
-    type Target = Owned;
-
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut request = self.build_request();
-        request.push_query(LOCK_HANDLE_QUERY, self.state.handle());
-        if let Some(user_session) = self.state.user_session() {
-            request.bind_user_session(user_session);
-        }
-        Ok(request)
-    }
-
-    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        response.require_success()?;
-
-        if response.body().is_empty() {
-            return Ok(None);
-        }
-        ObjectSnapshot::<()>::decode(&self.resource, response).map(Some)
+impl<T> IfMatch<ObjectUpdate<T>> {
+    /// Assigns a transport request to record the update in.
+    #[must_use]
+    pub fn transport(self, transport: impl Into<TransportNumber>) -> Self {
+        self.map_inner(|o| o.transport_request = Some(transport.into()))
     }
 }
 
@@ -460,7 +435,7 @@ impl<T: ObjectType> ObjectSnapshot<T> {
         properties: T::Properties,
     ) -> Result<IfMatch<ObjectUpdate<T>>, ObjectError> {
         let etag = self.etag().ok_or(ObjectError::MissingEntityTag)?.clone();
-        self.update(properties, ())
+        self.update(properties)
             .map(|operation| IfMatch::new(operation, etag))
     }
 
@@ -470,20 +445,15 @@ impl<T: ObjectType> ObjectSnapshot<T> {
     /// session and transport request are retained by the returned operation.
     pub fn update_with_lock(
         &self,
-        lock: &ObjectLock,
+        lock: ObjectLock,
         properties: T::Properties,
-    ) -> Result<ObjectUpdate<T, ObjectLock>, ObjectError> {
-        lock.validate_modification_for(self.reference())?;
-        let mut update = self.update(properties, lock.clone())?;
+    ) -> Result<Locked<ObjectUpdate<T>>, ObjectError> {
+        let mut update = self.update(properties)?;
         update.transport_request = lock.transport_request().cloned();
-        Ok(update)
+        Locked::try_new(update, lock, self.reference())
     }
 
-    fn update<S>(
-        &self,
-        mut properties: T::Properties,
-        state: S,
-    ) -> Result<ObjectUpdate<T, S>, ObjectError> {
+    fn update(&self, mut properties: T::Properties) -> Result<ObjectUpdate<T>, ObjectError> {
         properties.assign_identity(self.reference());
 
         let media_type =
@@ -495,7 +465,6 @@ impl<T: ObjectType> ObjectSnapshot<T> {
             media_type,
             body: properties.to_xml()?,
             transport_request: None,
-            state,
         })
     }
 }
@@ -511,7 +480,7 @@ impl ObjectSnapshot<()> {
         properties: serde_json::Value,
     ) -> Result<IfMatch<ObjectUpdate<()>>, ObjectError> {
         let etag = self.etag().ok_or(ObjectError::MissingEntityTag)?.clone();
-        self.update(properties, ())
+        self.update(properties)
             .map(|operation| IfMatch::new(operation, etag))
     }
 
@@ -522,21 +491,16 @@ impl ObjectSnapshot<()> {
     /// JSON conversion and XML encoding occur during construction and can fail.
     pub fn update_with_lock(
         &self,
-        lock: &ObjectLock,
+        lock: ObjectLock,
         properties: serde_json::Value,
-    ) -> Result<ObjectUpdate<(), ObjectLock>, ObjectError> {
-        lock.validate_modification_for(self.reference())?;
-        let mut update = self.update(properties, lock.clone())?;
+    ) -> Result<Locked<ObjectUpdate<()>>, ObjectError> {
+        let mut update = self.update(properties)?;
         update.transport_request = lock.transport_request().cloned();
-        Ok(update)
+        Locked::try_new(update, lock, self.reference())
     }
 
     /// Shared helper to build the core update operation for erased objects.
-    fn update<S>(
-        &self,
-        properties: serde_json::Value,
-        state: S,
-    ) -> Result<ObjectUpdate<(), S>, ObjectError> {
+    fn update(&self, properties: serde_json::Value) -> Result<ObjectUpdate<()>, ObjectError> {
         let descriptor = self.reference().require_descriptor()?;
 
         // Select media type through the descriptor
@@ -560,7 +524,6 @@ impl ObjectSnapshot<()> {
             media_type,
             body,
             transport_request: None,
-            state,
         })
     }
 }
@@ -642,10 +605,12 @@ mod tests {
     use http::{HeaderMap, HeaderValue, StatusCode, header};
 
     use super::*;
+    use crate::api::locking::LOCK_HANDLE_QUERY;
     use crate::{
         AbapLanguageVersion, AccessMode, AdtRequest, AdtResponse, AdtUri,
         AdvertisedObjectReference, Class, ClassCategory, ClassCreateProperties, ClassProperties,
-        ClassTemplate, Client, CompatibilityError, ObjectType, Package, Ready, Resolve, Transport,
+        ClassTemplate, Client, CompatibilityError, ObjectType, Package, Ready, Resolve, Stateful,
+        Transport,
     };
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
@@ -993,7 +958,7 @@ mod tests {
         runtime_properties["@adtcore:type"] = "DEVC/K".into();
         runtime_properties["@adtcore:version"] = "inactive".into();
         let runtime_update = runtime_snapshot
-            .update_with_lock(&lock, runtime_properties)
+            .update_with_lock(lock, runtime_properties)
             .unwrap();
         fn assert_stateful<O: Operation<Kind = Stateful>>(_: &O) {}
         assert_stateful(&runtime_update);
@@ -1076,8 +1041,9 @@ mod tests {
             AccessMode::Modify,
             "A4HK900001",
         );
+        let lock_session = lock.user_session();
         let request = snapshot
-            .update_with_lock(&lock, properties)
+            .update_with_lock(lock.clone(), properties)
             .unwrap()
             .encode()
             .unwrap();
@@ -1093,9 +1059,11 @@ mod tests {
                 .query()
                 .contains(&(TRANSPORT_REQUEST_QUERY.to_owned(), "A4HK900001".to_owned()))
         );
+        let (_, bound_session) = request.into_parts();
+        assert_eq!(bound_session, lock_session);
 
         let request = snapshot
-            .update_with_lock(&lock, snapshot.properties().clone())
+            .update_with_lock(lock, snapshot.properties().clone())
             .unwrap()
             .transport("A4HK900002")
             .encode()
@@ -1113,7 +1081,7 @@ mod tests {
 
         let show_lock = ObjectLock::for_test(reference.erase(), AccessMode::Show);
         let error = snapshot
-            .update_with_lock(&show_lock, snapshot.properties().clone())
+            .update_with_lock(show_lock, snapshot.properties().clone())
             .unwrap_err();
         assert!(matches!(error, ObjectError::ObjectLockNotModifiable));
     }

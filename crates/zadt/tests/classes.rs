@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Class, ClassProperties, Client, EntityTag, Logon, MediaTyped, ObjectSnapshot, Operation, Ready,
-    ReqwestTransport, Revalidation, WorkbenchVersion,
+    Class, ClassProperties, Client, ConditionalResult, EntityTag, Logon, MediaTyped,
+    ObjectSnapshot, Operation, Ready, ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -309,7 +309,7 @@ async fn class_properties_query_returns_not_modified_for_a_current_etag() {
         .await
         .unwrap();
 
-    assert!(matches!(response, Revalidation::NotModified { .. }));
+    assert!(matches!(response, ConditionalResult::NotModified { .. }));
     assert_eq!(
         response.not_modified_etag(),
         Some("20180326130103001000061")

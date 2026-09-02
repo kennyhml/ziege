@@ -97,9 +97,10 @@ pub use objects::{
 };
 pub use operation::{
     Advertised, AdvertisedCollection, AdvertisedTarget, AdvertisedTemplate, BatchError, BatchKey,
-    BatchOperation, BatchResponses, Batched, DiscoveryDocument, EncodedOperation, Execute, IfMatch,
-    IfNoneMatch, Operation, OperationContext, OperationKind, OperationResponse, OperationTarget,
-    Owned, PreconditionResult, Resolve, ResolvedOperation, Revalidation, Stateful, Stateless,
+    BatchOperation, BatchResponses, Batched, ConditionalResult, DiscoveryDocument,
+    EncodedOperation, Execute, IfMatch, IfNoneMatch, Locked, Operation, OperationContext,
+    OperationKind, OperationResponse, OperationTarget, Owned, PreconditionResult, Resolve,
+    ResolvedOperation, Stateful, Stateless,
 };
 pub use protocol::{AdtRequest, AdtResponse, EntityTag, PostAction};
 pub use resource::{

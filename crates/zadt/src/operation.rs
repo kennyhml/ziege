@@ -15,7 +15,7 @@ mod encoded;
 mod target;
 
 pub use batch::{BatchError, BatchKey, BatchOperation, BatchResponses, Batched};
-pub use concurrency::{IfMatch, IfNoneMatch, PreconditionResult, Revalidation};
+pub use concurrency::{ConditionalResult, IfMatch, IfNoneMatch, Locked, PreconditionResult};
 use encoded::EncodedTarget;
 pub use encoded::{Advertised, EncodedOperation, OperationTarget, Owned};
 pub use target::{AdvertisedCollection, AdvertisedTarget, AdvertisedTemplate, DiscoveryDocument};

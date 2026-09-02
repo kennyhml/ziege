@@ -1,13 +1,16 @@
-//! HTTP conditional requests based on entity tags.
+//! Optimistic and pessimistic concurrency-control decorators.
 
 use http::{StatusCode, header};
 
 use super::{Operation, OperationResponse};
-use crate::{EncodeError, EncodedOperation, EntityTag, ResponseError};
+use crate::{
+    EncodeError, EncodedOperation, EntityTag, ObjectError, ObjectLock, ObjectRef, ResponseError,
+    Stateful, Stateless, api::locking,
+};
 
 /// The outcome of a request using a cache validator such as `If-None-Match`.
 #[derive(Clone, Debug)]
-pub enum Revalidation<T> {
+pub enum ConditionalResult<T> {
     /// The resource changed and a new representation was returned.
     Modified(T),
 
@@ -32,7 +35,7 @@ impl<O> Operation for IfNoneMatch<O>
 where
     O: Operation,
 {
-    type Response = Revalidation<O::Response>;
+    type Response = ConditionalResult<O::Response>;
     type Kind = O::Kind;
     type Target = O::Target;
 
@@ -44,16 +47,16 @@ where
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         if response.status() == StatusCode::NOT_MODIFIED {
-            return Ok(Revalidation::NotModified {
+            return Ok(ConditionalResult::NotModified {
                 etag: response.entity_tag(),
             });
         }
 
-        self.inner.decode(response).map(Revalidation::Modified)
+        self.inner.decode(response).map(ConditionalResult::Modified)
     }
 }
 
-impl<T> Revalidation<T> {
+impl<T> ConditionalResult<T> {
     /// Borrows the returned representation when the resource was modified.
     pub fn as_modified(&self) -> Option<&T> {
         match self {
@@ -100,6 +103,11 @@ impl<O> IfMatch<O> {
     pub(crate) fn new(inner: O, etag: EntityTag) -> Self {
         Self { inner, etag }
     }
+
+    pub(crate) fn map_inner(mut self, map: impl FnOnce(&mut O)) -> Self {
+        map(&mut self.inner);
+        self
+    }
 }
 
 impl<O> Operation for IfMatch<O>
@@ -125,5 +133,63 @@ where
             });
         }
         self.inner.decode(response).map(PreconditionResult::Success)
+    }
+}
+
+/// Pessimistic concurrency control decorator via object locks.
+///
+/// This turns the operation into a [`Stateful`] operation unconditionally,
+/// because object locks are only valid in the [`crate::UserSession`] they were
+/// created in.
+///
+/// The decorator validates that the passed lock is valid for modifications
+/// on the passed reference during construction. This is merely an internal
+/// helper so that validation cannot be omitted. It is still possible to validate
+/// the wrong object against the real operation target if the call site is
+/// not cautious.
+///
+/// See [`IfMatch`] as alternative for optimistic concurrency control.
+#[derive(Debug)]
+pub struct Locked<O> {
+    inner: O,
+    lock: ObjectLock,
+}
+
+impl<O> Locked<O> {
+    pub(crate) fn try_new<T>(
+        inner: O,
+        lock: ObjectLock,
+        target: &ObjectRef<T>,
+    ) -> Result<Self, ObjectError> {
+        lock.validate_modification_for(target)?;
+
+        Ok(Self { inner, lock })
+    }
+
+    pub(crate) fn map_inner(mut self, map: impl FnOnce(&mut O)) -> Self {
+        map(&mut self.inner);
+        self
+    }
+}
+
+impl<O> Operation for Locked<O>
+where
+    O: Operation<Kind = Stateless>,
+{
+    type Kind = Stateful;
+    type Response = O::Response;
+    type Target = O::Target;
+
+    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+        let mut request = self.inner.encode()?;
+        request.push_query(locking::LOCK_HANDLE_QUERY, self.lock.handle());
+        if let Some(user_session) = self.lock.user_session() {
+            request.bind_user_session(user_session);
+        }
+        Ok(request)
+    }
+
+    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+        self.inner.decode(response)
     }
 }

@@ -207,7 +207,7 @@ async fn package_properties_update_returns_none_for_an_empty_response() {
         .await
         .unwrap();
     let result = package
-        .update_with_lock(&object_lock, updated_properties)
+        .update_with_lock(object_lock.clone(), updated_properties)
         .unwrap()
         .execute(&session)
         .await

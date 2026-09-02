@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    AccessMode, Client, EntityTag, Include, IncludeProperties, Logon, MediaTyped, Operation,
-    Program, ProgramProperties, Ready, ReqwestTransport, Revalidation, WorkbenchVersion,
+    AccessMode, Client, ConditionalResult, EntityTag, Include, IncludeProperties, Logon,
+    MediaTyped, Operation, Program, ProgramProperties, Ready, ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -401,7 +401,7 @@ async fn program_properties_query_returns_not_modified_for_a_current_etag() {
 
     assert!(matches!(
         &response,
-        Revalidation::NotModified {
+        ConditionalResult::NotModified {
             etag: Some(etag)
         } if etag == "202607251959580008"
     ));

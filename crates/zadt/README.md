@@ -1,11 +1,11 @@
 # zadt
 
-ABAP Development Tools protocol for the Ziege framework.
+ABAP Development Tools protocol for ziege.
 
 ## Background
 
 ABAP Development Tools are more than an Eclipse plugin. The application server
-exposes an HTTP API for working with repository objects stored on the system.
+exposes it as an API for working with repository objects stored on the system.
 ZADT provides typed operations and runtime dispatch for that API.
 
 ## Getting started
@@ -20,7 +20,7 @@ let class = client.object::<Class>("ZCL_DEMO")?;
 
 Only primary object types can be constructed directly from a discovery
 collection. Subobjects are constructed through a parent reference and the URI
-templates advertised by that parent's collection:
+templates advertised by that parents collection:
 
 ```rust,ignore
 let group = client.object::<FunctionGroup>("Z_GROUP")?;
@@ -41,168 +41,38 @@ let class = class.query().execute(&client).await?;
 let source = class.source()?.query().execute(&client).await?;
 ```
 
-ADT identities are represented as resource handles. Handles expose operations
-naturally associated with their context, while operation values remain independently
-composable and executable.
+ADT identities are represented as resource handles, such as `SourceRef`. Handles expose operations
+naturally associated with their context, while operation values remain independently composable 
+and executable. The API also makes a clean split between creating operations and executing them,
+which allows a large portion of the API to remain sync.
 
-`Class` is a nominal object-family marker. Loaded classes use
-`ObjectSnapshot<Class>`, which contains `ClassProperties` and the response metadata.
-Static capabilities come from traits such as `Source` implemented by the marker.
-Loaded properties determine which concrete source resources are available, letting
-ZAFF project modern and legacy class layouts without guessing paths.
+### Shapshots
+Because of the remote nature of the development system, a fetched representation of some development
+object locally can make no guarantees that it is the most up-to-date version on the system. That would
+require all fetched objects to be locked at all times. Because of this, an `ObjectRef<T>.query()` returns
+an `ObjectSnapshot<T>` which includes the etag, workbench version and properties. It is merely a snapshot
+of the object at the time of querying it - not a domain model! Some operations can only dispatch through
+the snapshot because they require the advertised relations of the object to resolve. For instance, not all
+global classes have a testclasses include so simply constructing a `/sap/bc/adt/oo/classes/zcl_demo/source/testclasses`
+operation is flawed because we make an assumption that the resource **has** the include and that its at that
+specific location - if the location changed, our code would break.
 
-`ObjectType` contains the common property and Workbench-type contract used by
-all exact object references. `PrimaryObjectType` adds top-level collection
-addressing, while `SubObjects<C>` records the parent-child combinations accepted
-by the typed API. Once any object has a concrete `ObjectRef`, ordinary query,
-lock, update, source, and activation operations continue to use the common
-`ObjectType` contract.
+As you may have noticed, this is a trade-off between efficiency and correctness. Making an assumption about 
+the location could be correct almost all of the time and avoid an extra round-trip. But it is a case where
+'look before you leap' is better suited than 'easier to ask for forgiveness than permission' in python terms.
+It sets the API up to be more compatible and uses HATEOAS as it was intended.
 
-### Object model and capabilities
+### Descriptors
+The API has two fundamental ways of using it. Through a typed object reference `ObjectRef<T>`, the compiler
+knows what operatinos are valid for a reference such as `ObjectRef<Class>` or `ObjectSnapshot<Class>` for that
+matter. It also knows associated properties and sub-objects and adds many compile time guarantees.
 
-```mermaid
----
-config:
-  theme: base
-  themeVariables:
-    fontFamily: Inter, ui-sans-serif, system-ui, sans-serif
-    lineColor: '#64748b'
-    textColor: '#0f172a'
-    clusterBkg: '#ffffff'
-    clusterBorder: '#cbd5e1'
-  flowchart:
-    curve: stepAfter
-    padding: 14
-    nodeSpacing: 24
-    rankSpacing: 42
-  layout: elk
----
-flowchart TB
-    subgraph DEFINITION["Object declaration"]
-        direction TB
-        DECLARATION["<strong>Type declaration</strong><br>#[object_type(<br>properties = ClassProperties,<br>capabilities(Source, Run, ...)<br>)]<br>pub struct Class;"]
-        FAMILY["Generated Class family<br>ObjectType<br>ClassProperties + XmlConversion / MediaTyped"]
-
-        subgraph MARKERS["Marker traits"]
-            direction LR
-            PRIMARY["PrimaryObjectType"]
-            RUN["ImmediateRun"]
-        end
-
-        DECLARATION --> FAMILY
-        FAMILY --> PRIMARY
-        FAMILY --> RUN
-    end
-
-    subgraph BOUNDS["Static API requirements"]
-        direction LR
-        CREATE["create()<br>T: Create"]
-        SOURCE["source()<br>T: Source"]
-        IDENTITY["lock() / activation()<br>no family capability bound"]
-    end
-
-    subgraph SURFACES["Generated API"]
-        direction LR
-
-        subgraph STATIC["Static dispatch"]
-            direction TB
-            CAPABILITIES["Capability implementations<br>Source / Create / Structure / ImmediateRun"]
-            TYPED_CALL["ObjectRef&lt;Class&gt;<br>direct static call"]
-        end
-
-        subgraph DYNAMIC["Dynamic dispatch"]
-            direction TB
-            DESCRIPTOR["Class::DESCRIPTOR<br>ObjectTypeDescriptor"]
-            REGISTRY["OBJECT_TYPES registry<br>concrete descriptor table"]
-            RUNTIME_CALL["ObjectSnapshot&lt;()&gt;<br>descriptor function pointers"]
-        end
-    end
-
-    subgraph RESULTS["Type-state-specific results"]
-        direction LR
-        TYPED_OBJECT["ObjectSnapshot&lt;Class&gt;<br>ClassProperties"]
-        RUNTIME_OBJECT["ObjectSnapshot&lt;()&gt;<br>type-erased properties"]
-    end
-
-    subgraph EXECUTION["Shared execution layer"]
-        direction LR
-        EXECUTOR["Client or UserSession"]
-        ENCODED["EncodedOperation&lt;Owned / Advertised&gt;"]
-        REQUEST["AdtRequest"]
-        TRANSPORT["Transport"]
-        SAP["SAP ADT API"]
-    end
-
-    FAMILY --> BOUNDS
-    FAMILY --> CAPABILITIES
-    FAMILY --> DESCRIPTOR
-
-    CREATE --> CAPABILITIES
-    SOURCE --> CAPABILITIES
-    IDENTITY --> TYPED_CALL
-    PRIMARY --> CAPABILITIES
-    RUN --> CAPABILITIES
-    CAPABILITIES -->|exposes methods on| TYPED_CALL
-
-    DESCRIPTOR -->|registered in| REGISTRY
-    REGISTRY -->|selected by Workbench type| RUNTIME_CALL
-    DESCRIPTOR -->|forwards to static trait implementations| CAPABILITIES
-
-    TYPED_CALL --> LOGIC["Shared typed methods<br>operation encoding<br>relation resolution<br>response decoding"]
-    RUNTIME_CALL -->|adapter downcasts properties to ClassProperties| LOGIC
-    LOGIC -->|typed caller preserves T| TYPED_OBJECT
-    LOGIC -->|descriptor erases properties| RUNTIME_OBJECT
-
-    ENCODED --> EXECUTOR
-    EXECUTOR -->|resolves target| REQUEST
-    REQUEST --> TRANSPORT
-    TRANSPORT --> SAP
-    LOGIC --> ENCODED
-
-    DECLARATION@{ shape: event }
-    FAMILY@{ shape: rounded }
-    LOGIC@{ shape: rounded }
-
-    classDef declaration fill:#1e293b,color:#ffffff,stroke:#475569,stroke-width:2px
-    classDef accent fill:#f1f5f9,color:#0f172a,stroke:#64748b,stroke-width:1.5px
-    classDef node fill:#ffffff,color:#0f172a,stroke:#94a3b8
-    classDef muted fill:#f8fafc,color:#334155,stroke:#94a3b8
-    classDef backend fill:#334155,color:#ffffff,stroke:#475569,stroke-width:2px
-
-    class DECLARATION declaration
-    class FAMILY,PRIMARY,RUN accent
-    class CREATE,SOURCE,IDENTITY,CAPABILITIES,TYPED_CALL,DESCRIPTOR,REGISTRY,RUNTIME_CALL node
-    class TYPED_OBJECT,RUNTIME_OBJECT,LOGIC,ENCODED,REQUEST,EXECUTOR,TRANSPORT muted
-    class SAP backend
-
-    style DEFINITION fill:#f8fafc,stroke:#cbd5e1,color:#334155
-    style BOUNDS fill:#ffffff,stroke:#cbd5e1,color:#334155
-    style MARKERS fill:#ffffff,stroke:#cbd5e1,color:#334155
-    style STATIC fill:#ffffff,stroke:#cbd5e1,color:#334155
-    style DYNAMIC fill:#ffffff,stroke:#cbd5e1,color:#334155
-    style SURFACES fill:#ffffff,stroke:#cbd5e1,color:#334155
-    style RESULTS fill:#ffffff,stroke:#cbd5e1,color:#334155
-    style EXECUTION fill:#ffffff,stroke:#cbd5e1,color:#334155
-```
-
-The typed path exposes only methods supported by the marker's capability traits.
-The runtime path starts from the exact Workbench type stored in `ObjectRef<()>`,
-selects a descriptor from the registry, and downcasts the internally type-erased
-properties through the same concrete marker and property type. Both paths call the
-same typed methods, produce the same transport-neutral requests, and use the same
-executors.
-
-### Runtime descriptors
-
-Runtime object types use `ObjectRef<()>`. A modeled runtime reference can load an
-`ObjectSnapshot<()>` with concrete type-erased properties. ZADT selects a registered
-descriptor from the exact Workbench type and validates capabilities at runtime.
-Consumers export JSON with `ObjectSnapshot<()>::properties` and submit edited JSON to
-`ObjectSnapshot<()>::update`. Loaded snapshots remain immutable, and internal capability
-dispatch does not convert properties through JSON.
-
-Typed operations dispatch through Rust traits. Runtime operations dispatch through
-descriptors and return explicit errors when an object type does not support an operation.
+To handle objects more dynamically, for example when a workbench type and name is provided in a code editor
+or a command line interface, a seperate, descriptor backed type erased path exists, namely `ObjectRef<()>` and
+`ObjectSnapshot<()>`. These object references can make no static guarantees about their operations. Operations
+that are not always valid (such as updating or creating an object) are turned into results with an unsupported
+error that can only be caught at runtime. Internally, they all still use the underlying static capabilities
+erased through a common set of type monomorphized function pointers - similar to a vtable.
 
 ### Transport
 
