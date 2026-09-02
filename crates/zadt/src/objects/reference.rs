@@ -4,8 +4,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use stduritemplate::Value;
 
 use super::{
-    GlobalWorkbenchType, ObjectIdentity, ObjectType, PrimaryObjectType, SubObjectDescriptor,
-    SubObjects, descriptors,
+    GlobalWorkbenchType, ObjectIdentity, ObjectType, PrimaryObjectType, SubObject,
+    SubObjectDescriptor, descriptors,
 };
 use crate::{
     CategoryId,
@@ -438,16 +438,10 @@ impl<P: PrimaryObjectType> ObjectRef<P> {
     pub fn subobject<C>(&self, name: &str) -> Result<ObjectRef<C>, ObjectError>
     where
         C: ObjectType,
-        P: SubObjects<C>,
+        P: SubObject<C>,
     {
-        let descriptor = <P as super::private::PrimaryMetadata>::SUBOBJECTS
-            .iter()
-            .find(|descriptor| descriptor.object_type() == &C::WORKBENCH_TYPE)
-            .ok_or_else(|| ObjectError::UnsupportedSubObjectType {
-                parent_type: self.object_type().clone(),
-                child_type: C::WORKBENCH_TYPE,
-            })?;
-        let uri = self.subobject_uri(descriptor, name)?;
+        let descriptor = <P as SubObject<C>>::DESCRIPTOR;
+        let uri = self.subobject_uri(&descriptor, name)?;
         Ok(ObjectRef::new(name.to_ascii_uppercase(), uri).with_parent(self))
     }
 }
@@ -468,11 +462,14 @@ impl ObjectRef<()> {
                 parent_type: self.object_type().clone(),
                 child_type: child_type.clone(),
             })?;
+
+        // make sure we support the sub-object
         descriptors::object_type_descriptor(child_type).ok_or_else(|| {
             ObjectError::UnsupportedObjectType {
                 object_type: child_type.clone(),
             }
         })?;
+
         let uri = self.subobject_uri(subobject, name)?;
         Ok(ObjectRef::erased(name.to_ascii_uppercase(), uri, child_type.clone()).with_parent(self))
     }
@@ -491,6 +488,7 @@ impl<T> ObjectRef<T> {
             .ok_or(ObjectError::MissingTemplate {
                 relation: descriptor.relation(),
             })?;
+
         Ok(base.append_segments([name.to_ascii_lowercase()])?)
     }
 }

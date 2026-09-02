@@ -11,7 +11,7 @@ mod workbench;
 
 pub use capabilities::{Create, Source, SourceComponents, Structure};
 pub(crate) use capabilities::{ImmediateRun, RunCapability};
-pub(crate) use descriptors::SubObjectDescriptor;
+pub use descriptors::SubObjectDescriptor;
 pub use reference::{AdvertisedObjectReference, ObjectRef, ObjectReferences};
 pub(crate) use snapshot::ErasedProperties;
 pub use snapshot::ObjectSnapshot;
@@ -46,7 +46,11 @@ pub trait PrimaryObjectType: ObjectType + private::PrimaryMetadata {
 }
 
 /// Declares that an object has sub-objects of type `C`
-pub trait SubObjects<C: ObjectType>: PrimaryObjectType {}
+pub trait SubObject<C: ObjectType>: PrimaryObjectType {
+    /// Runtime metadata for this parent-child relationship.
+    #[doc(hidden)]
+    const DESCRIPTOR: SubObjectDescriptor;
+}
 
 /// An XML payload and the namespaces required to encode it through Serde.
 pub trait ToXml: Serialize {

@@ -398,6 +398,7 @@ pub(crate) fn supports_subobject(
 }
 
 /// Runtime metadata for one statically declared parent-child relationship.
+#[doc(hidden)]
 #[derive(Clone, Debug)]
 pub struct SubObjectDescriptor {
     object_type: GlobalWorkbenchType,

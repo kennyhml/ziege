@@ -143,22 +143,25 @@ fn expand_object_type_item(
     });
     let addressing_impl = if let Some((scheme, term)) = &collection {
         let subobject_descriptors = subobjects.iter().map(|subobject| {
-            let object = &subobject.object;
-            let relation = &subobject.relation;
-            let parent_variable = &subobject.parent_variable;
+            let child = &subobject.object;
             quote! {
-                crate::objects::SubObjectDescriptor::new(
-                    <#object as crate::objects::ObjectType>::WORKBENCH_TYPE,
-                    #relation,
-                    #parent_variable,
-                )
+                <#object as crate::objects::SubObject<#child>>::DESCRIPTOR
             }
         });
         let subobject_impls = subobjects.iter().map(|subobject| {
             let child = &subobject.object;
+            let relation = &subobject.relation;
+            let parent_variable = &subobject.parent_variable;
             quote! {
                 #(#conditional_attrs)*
-                impl crate::objects::SubObjects<#child> for #object {}
+                impl crate::objects::SubObject<#child> for #object {
+                    const DESCRIPTOR: crate::objects::SubObjectDescriptor =
+                        crate::objects::SubObjectDescriptor::new(
+                            <#child as crate::objects::ObjectType>::WORKBENCH_TYPE,
+                            #relation,
+                            #parent_variable,
+                        );
+                }
             }
         });
         quote! {
@@ -1252,11 +1255,11 @@ mod tests {
 
         assert!(
             expanded.contains(
-                "impl crate :: objects :: SubObjects < FunctionModule > for FunctionGroup"
+                "impl crate :: objects :: SubObject < FunctionModule > for FunctionGroup"
             )
         );
         assert!(expanded.contains(
-            "impl crate :: objects :: SubObjects < FunctionGroupInclude > for FunctionGroup"
+            "impl crate :: objects :: SubObject < FunctionGroupInclude > for FunctionGroup"
         ));
         assert!(expanded.contains("SubObjectDescriptor :: new"));
         assert!(expanded.contains("\"functionmodules\""));

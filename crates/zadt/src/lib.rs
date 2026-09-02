@@ -92,8 +92,8 @@ pub use objects::{
     PackageUseAccess, PrimaryObjectType, Program, ProgramProperties, ServiceDefinition,
     ServiceDefinitionCreateProperties, ServiceDefinitionCreatePropertiesBuilder,
     ServiceDefinitionCreatePropertiesBuilderError, ServiceDefinitionProperties, SnapshotKind,
-    Source, SourceComponents, Structure, SubObjects, SyntaxConfiguration, SyntaxLanguage, ToXml,
-    WorkbenchVersion, XmlConversion,
+    Source, SourceComponents, Structure, SubObject, SubObjectDescriptor, SyntaxConfiguration,
+    SyntaxLanguage, ToXml, WorkbenchVersion, XmlConversion,
 };
 pub use operation::{
     Advertised, AdvertisedCollection, AdvertisedTarget, AdvertisedTemplate, BatchError, BatchKey,
