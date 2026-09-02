@@ -1,24 +1,54 @@
 //! Optimistic and pessimistic concurrency-control decorators.
-
-use http::{StatusCode, header};
-
 use super::{Operation, OperationResponse};
 use crate::{
     EncodeError, EncodedOperation, EntityTag, ObjectError, ObjectLock, ObjectRef, ResponseError,
     Stateful, Stateless, api::locking,
 };
+use http::{StatusCode, header};
 
 /// The outcome of a request using a cache validator such as `If-None-Match`.
+///
+/// If the E-Tag we sent along it not the current version of the resource on
+/// the server, the new version is contained in [`Self::Modified`]. Otherwise,
+/// the version we have it still up-to-date and an optional server E-Tag is
+/// returned for validation in [`Self::NotModified`].
+///
+/// See the [MDN documentation for `If-None-Match`][mdn-if-none-match].
+///
+/// [mdn-if-none-match]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/If-None-Match
 #[derive(Clone, Debug)]
 pub enum ConditionalResult<T> {
     /// The resource changed and a new representation was returned.
     Modified(T),
-
     /// The supplied validator still identifies the current representation.
     NotModified { etag: Option<EntityTag> },
 }
 
+impl<T> ConditionalResult<T> {
+    /// Borrows the returned representation when the resource was modified.
+    pub fn as_modified(&self) -> Option<&T> {
+        match self {
+            Self::Modified(value) => Some(value),
+            Self::NotModified { .. } => None,
+        }
+    }
+
+    /// Returns the ETag supplied with a not-modified response.
+    pub fn not_modified_etag(&self) -> Option<&str> {
+        match self {
+            Self::Modified(_) => None,
+            Self::NotModified { etag } => etag.as_deref(),
+        }
+    }
+}
+
 /// An operation carrying an `If-None-Match` cache validator.
+///
+/// The operation response is wrapped in a [`ConditionalResult`] and
+/// decoded locally. The decorator is lightweight and only adds the
+/// E-Tag header and response status code inspection.
+///
+/// See the result documentation for more detail.
 #[derive(Debug)]
 pub struct IfNoneMatch<O> {
     inner: O,
@@ -26,6 +56,8 @@ pub struct IfNoneMatch<O> {
 }
 
 impl<O> IfNoneMatch<O> {
+    /// Internal constructor to construct a conditional query.
+    /// Crate users currently should not interface with this method.
     pub(crate) fn new(inner: O, etag: EntityTag) -> Self {
         Self { inner, etag }
     }
@@ -51,38 +83,24 @@ where
                 etag: response.entity_tag(),
             });
         }
-
         self.inner.decode(response).map(ConditionalResult::Modified)
     }
 }
 
-impl<T> ConditionalResult<T> {
-    /// Borrows the returned representation when the resource was modified.
-    pub fn as_modified(&self) -> Option<&T> {
-        match self {
-            Self::Modified(value) => Some(value),
-            Self::NotModified { .. } => None,
-        }
-    }
-
-    /// Consumes the outcome and returns the representation when modified.
-    pub fn into_modified(self) -> Option<T> {
-        match self {
-            Self::Modified(value) => Some(value),
-            Self::NotModified { .. } => None,
-        }
-    }
-
-    /// Returns the ETag supplied with a not-modified response.
-    pub fn not_modified_etag(&self) -> Option<&str> {
-        match self {
-            Self::Modified(_) => None,
-            Self::NotModified { etag } => etag.as_deref(),
-        }
-    }
-}
-
-/// Outcome of a request using optimistic concurrency control with `If-Match`.
+/// The outcome of a request using optimistic concurrency control with `If-Match`.
+///
+/// If the E-Tag we sent along it not the current version of the resource on
+/// the server, the operation is rejected by the server, typically because it
+/// attempts to mutate a resource that has since been mutated by another client.
+///
+/// In that case, the servers current version is returned in [`Self::Failed`] for
+/// validation and error detail, this E-Tag should not be used to bypass the
+/// cache-control! If the E-Tag is still up-to-date, the response passes through
+/// the [`Self::Success`] variant.
+///
+/// See the [MDN documentation for `If-Match`][mdn-if-match].
+///
+/// [mdn-if-match]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/If-Match
 #[derive(Clone, Debug)]
 pub enum PreconditionResult<T> {
     /// The precondition succeeded and the operation response was returned.
@@ -93,6 +111,12 @@ pub enum PreconditionResult<T> {
 }
 
 /// An operation carrying an `If-Match` precondition.
+///
+/// The operation response is wrapped in a [`PreconditionResult`] and
+/// decoded locally. The decorator is lightweight and only adds the
+/// E-Tag header and response status code inspection.
+///
+/// See the result documentation for more detail.
 #[derive(Debug)]
 pub struct IfMatch<O> {
     inner: O,
@@ -136,7 +160,7 @@ where
     }
 }
 
-/// Pessimistic concurrency control decorator via object locks.
+/// Pessimistic concurrency control decorator via an object lock.
 ///
 /// This turns the operation into a [`Stateful`] operation unconditionally,
 /// because object locks are only valid in the [`crate::UserSession`] they were
