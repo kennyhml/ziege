@@ -1,25 +1,21 @@
 use std::future::Future;
 
-use http::{HeaderMap, HeaderValue, StatusCode, header};
+use http::{HeaderMap, StatusCode, header};
 
 use crate::{
-    AdtRequest, AdtResponse, AdtUri, Client, ClientState, EncodeError, EntityTag, OperationError,
-    Ready, ResolveError, ResponseError,
-    compatibility::media_types_match,
+    AdtResponse, AdtUri, Client, ClientState, Discovery, EncodeError, EntityTag, OperationError,
+    ResponseError,
+    compatibility::{MediaTypes, media_types_match},
     user_session::{UserSession, UserSessionId},
 };
 
 mod batch;
 mod concurrency;
 mod encoded;
-mod target;
 
 pub use batch::{BatchError, BatchKey, BatchOperation, BatchResponses, Batched};
 pub use concurrency::{ConditionalResult, IfMatch, IfNoneMatch, Locked, PreconditionResult};
-use encoded::EncodedTarget;
-pub use encoded::{Advertised, EncodedOperation, OperationTarget, Owned};
-pub use target::{AdvertisedCollection, AdvertisedTarget, AdvertisedTemplate, DiscoveryDocument};
-pub(crate) use target::{CollectionLocator, TemplateLocator};
+pub use encoded::EncodedOperation;
 
 mod private {
     pub trait Sealed {}
@@ -48,16 +44,38 @@ impl private::Sealed for Stateful {}
 impl OperationKind for Stateless {}
 impl OperationKind for Stateful {}
 
+/// Identifies the context required while encoding an operation.
+pub trait ResolutionRequirement: private::Sealed + Send + Sync + 'static {
+    type Resolver: ?Sized;
+}
+
+/// Encoding does not require an ADT discovery document.
+#[derive(Clone, Copy, Debug)]
+pub struct Independent;
+
+/// Encoding requires capabilities loaded from ADT discovery.
+#[derive(Clone, Copy, Debug)]
+pub struct RequiresDiscovery;
+
+impl private::Sealed for Independent {}
+impl private::Sealed for RequiresDiscovery {}
+
+impl ResolutionRequirement for Independent {
+    type Resolver = ();
+}
+
+impl ResolutionRequirement for RequiresDiscovery {
+    type Resolver = Discovery;
+}
+
 /// A typed ADT operation.
 ///
 /// ADT uses HTTP resource semantics, including methods such as `GET`, `POST`,
 /// and `PUT`, resource URIs, headers, and representation bodies.
 ///
-/// [`EncodedOperation`] represents those semantics before an owned or advertised
-/// target is resolved into an [`AdtRequest`].
-///
-/// The operation's [`OperationKind`] and [`Operation::Target`] determine which
-/// [`Execute`] can run it.
+/// [`EncodedOperation`] contains the transport-ready request after target
+/// resolution. The operation's [`OperationKind`] and resolution requirement
+/// determine which [`Execute`] can run it.
 ///
 /// Consumers of the API should construct operations manually only in exceptional
 /// cases. In most scenarios, a callable operation can be constructed - or at least
@@ -65,10 +83,13 @@ impl OperationKind for Stateful {}
 pub trait Operation: Send + Sync {
     type Response: Send;
     type Kind: OperationKind;
-    type Target: OperationTarget;
+    type ResolutionRequirement: ResolutionRequirement;
 
-    /// Encodes the operation without consulting client or transport state.
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError>;
+    /// Resolves and encodes the operation without consulting transport state.
+    fn encode(
+        &self,
+        resolver: &<Self::ResolutionRequirement as ResolutionRequirement>::Resolver,
+    ) -> Result<EncodedOperation, EncodeError>;
 
     /// Converts the raw transport response into this operations response type.
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError>;
@@ -86,23 +107,24 @@ pub trait Operation: Send + Sync {
     }
 }
 
-/// Resolves an [`EncodedOperation`] into a [`ResolvedOperation`].
-///
-/// This keeps target resolution context (largely HATEOAS based) out of the
-/// operation encoding. The operation simply defines an [`OperationTarget`],
-/// e.g. a collection or a template, which the resolver can resolve due to
-/// knowledge of the discovery documents.
-///
-/// The [`OperationTarget`] is purely a marker to add compile time guarantees
-/// that an [`Operation`] with a target that must be resolved through the
-/// discovery, i.e. that is not [`Owned`], can only be executed by objects
-/// that implement [`Resolve<Advertised>`], which only [`Client<Ready>`] does.
-pub trait Resolve<T: OperationTarget> {
-    /// Resolves the encoded operation. While the request body is already
-    /// ready for dispatch, the operation target may be a set of template
-    /// arguments to be resolved against an advertised template or the target
-    /// is simply an uri of an advertised object collection.
-    fn resolve(&self, operation: EncodedOperation<T>) -> Result<ResolvedOperation, ResolveError>;
+/// Supplies the resolver required to encode an operation.
+pub trait Resolves<R: ResolutionRequirement> {
+    fn resolver(&self) -> &R::Resolver;
+}
+
+/// Initial client can only resolve an independent operation, such as the
+/// initial discovery query itself or system logon (not advertised)
+impl<S: ClientState> Resolves<Independent> for Client<S> {
+    fn resolver(&self) -> &() {
+        &()
+    }
+}
+
+/// Discovery client can resolve operation encodings that rely on discovery
+impl Resolves<RequiresDiscovery> for Client<Discovery> {
+    fn resolver(&self) -> &Discovery {
+        self.discovery()
+    }
 }
 
 /// An execution context capable of executing operation `O`.
@@ -131,9 +153,8 @@ where
 
 /// Local request metadata retained until an operation decodes its response.
 ///
-/// The operation resolvers attach this to the [`ResolvedOperation`] and
-/// the executors reattach it to [`OperationResponse`] - both of which
-/// wrap the raw [`AdtRequest`] and [`AdtResponse`] respectively.
+/// Executors derive this from the final request and attach it to
+/// [`OperationResponse`], which wraps the raw [`AdtResponse`].
 ///
 /// This way, the operation decoders gain access to additional execution
 /// context which is needed, for example, for the resolved target URI to
@@ -153,61 +174,6 @@ impl OperationContext {
     /// Returns the target of the originating request.
     pub fn request_target(&self) -> &AdtUri {
         &self.target
-    }
-}
-
-/// An operation that has been encoded and resolved against a target.
-///
-/// This means the [`AdtRequest`] it wraps is ready for transport. The
-/// produced [`OperationResponse`] is enriched with the same context
-/// that the resolved operation carries.
-///
-/// The bound user session is used to verify that the operation cannot
-/// be executed by an executor bound to a different user session.
-pub struct ResolvedOperation {
-    request: AdtRequest,
-    context: OperationContext,
-    bound_user_session: Option<UserSessionId>,
-}
-
-impl ResolvedOperation {
-    /// Returns the transport-ready ADT request.
-    pub fn request(&self) -> &AdtRequest {
-        &self.request
-    }
-
-    /// Separates the transport request, response context, and session binding.
-    pub fn into_parts(self) -> (AdtRequest, OperationContext, Option<UserSessionId>) {
-        (self.request, self.context, self.bound_user_session)
-    }
-}
-
-impl EncodedOperation<Owned> {
-    /// Because the operation target is owned (we directly supplied a URI,
-    /// the resolution is infallible.
-    ///
-    /// Having this helper method allows us to fully bypass any client
-    /// involvement in executing owned, stateless requests which makes
-    /// them usable at the transport level without entering a recursive
-    /// chain of calls into that same layer.
-    pub(crate) fn resolve(self) -> ResolvedOperation {
-        let (operation, bound_user_session) = self.into_parts();
-        let EncodedTarget::Owned(target) = operation.target else {
-            unreachable!("an owned encoded operation must contain an owned target");
-        };
-        let context = OperationContext::new(target.clone());
-        let request = AdtRequest::from_parts(
-            operation.method,
-            target,
-            operation.query,
-            operation.headers,
-            operation.body,
-        );
-        ResolvedOperation {
-            request,
-            context,
-            bound_user_session,
-        }
     }
 }
 
@@ -314,9 +280,32 @@ impl OperationResponse {
         }
     }
 
+    pub(crate) fn require_supported_media_type(
+        &self,
+        supported: MediaTypes,
+    ) -> Result<&'static str, ResponseError> {
+        let content_type =
+            self.content_type()
+                .ok_or_else(|| ResponseError::MissingContentType {
+                    target: self.request_target().clone(),
+                })?;
+
+        supported
+            .matching(content_type)
+            .ok_or_else(|| ResponseError::UnsupportedContentType {
+                target: self.request_target().clone(),
+                content_type: content_type.to_owned(),
+                supported: supported
+                    .as_slice()
+                    .iter()
+                    .map(|value| (*value).to_owned())
+                    .collect(),
+            })
+    }
+
     /// Returns the response entity tag when its header value is valid text.
-    pub fn entity_tag(&self) -> Option<EntityTag> {
-        self.response.entity_tag()
+    pub fn etag(&self) -> Option<EntityTag> {
+        self.response.etag()
     }
 
     /// Consumes the response context and returns its body.
@@ -330,57 +319,16 @@ impl OperationResponse {
     }
 }
 
-impl<S: ClientState> Resolve<Owned> for Client<S> {
-    fn resolve(
-        &self,
-        operation: EncodedOperation<Owned>,
-    ) -> Result<ResolvedOperation, ResolveError> {
-        Ok(operation.resolve())
-    }
-}
-
-impl Resolve<Advertised> for Client<Ready> {
-    fn resolve(
-        &self,
-        operation: EncodedOperation<Advertised>,
-    ) -> Result<ResolvedOperation, ResolveError> {
-        let (operation, bound_user_session) = operation.into_parts();
-        let EncodedTarget::Advertised(target) = operation.target else {
-            unreachable!("an advertised encoded operation must contain an advertised target");
-        };
-        let resolved = target.resolve(self)?;
-        let mut query = resolved.query;
-        query.extend(operation.query);
-        let mut headers = operation.headers;
-        if let Some(content_type) = resolved.content_type {
-            headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
-        }
-        let context = OperationContext::new(resolved.target.clone());
-        let request = AdtRequest::from_parts(
-            operation.method,
-            resolved.target,
-            query,
-            headers,
-            operation.body,
-        );
-        Ok(ResolvedOperation {
-            request,
-            context,
-            bound_user_session,
-        })
-    }
-}
-
 // Execution of a stateless request
 impl<S, O> Execute<O> for Client<S>
 where
     S: ClientState,
     O: Operation<Kind = Stateless>,
-    Client<S>: Resolve<O::Target>,
+    Client<S>: Resolves<O::ResolutionRequirement>,
 {
     async fn execute(&self, operation: &O) -> Result<O::Response, OperationError> {
-        let resolved = self.resolve(operation.encode()?)?;
-        let response = self.execute_resolved(resolved).await?;
+        let encoded = operation.encode(self.resolver())?;
+        let response = self.execute_encoded(encoded).await?;
         Ok(operation.decode(response)?)
     }
 }
@@ -390,11 +338,11 @@ impl<S, O> Execute<O> for UserSession<S>
 where
     S: ClientState,
     O: Operation,
-    Client<S>: Resolve<O::Target>,
+    Client<S>: Resolves<O::ResolutionRequirement>,
 {
     async fn execute(&self, operation: &O) -> Result<O::Response, OperationError> {
-        let resolved = self.client().resolve(operation.encode()?)?;
-        let response = self.execute_resolved(resolved).await?;
+        let encoded = operation.encode(self.client().resolver())?;
+        let response = self.execute_encoded(encoded).await?;
         Ok(operation.decode(response)?)
     }
 }
@@ -407,16 +355,17 @@ where
     ///
     /// Because this only handles stateless requests, the presence of a user session
     /// is considered an error as it can cause unexpected behavior on the backend.
-    pub(crate) async fn execute_resolved(
+    pub(crate) async fn execute_encoded(
         &self,
-        resolved: ResolvedOperation,
+        encoded: EncodedOperation,
     ) -> Result<OperationResponse, OperationError> {
-        if resolved.bound_user_session.is_some() {
-            return Err(ResolveError::UserSessionMismatch.into());
+        let (request, context, bound_user_session) = encoded.into_parts();
+        if bound_user_session.is_some() {
+            return Err(OperationError::UserSessionMismatch);
         }
 
-        let response = self.transport().send(resolved.request).await?;
-        Ok(OperationResponse::with_context(response, resolved.context))
+        let response = self.transport().send(request).await?;
+        Ok(OperationResponse::with_context(response, context))
     }
 }
 
@@ -429,15 +378,16 @@ where
     /// Because this handles stateful requests, additonal precautions surrounding
     /// the related user sessions must be taken, such as checking for session
     /// expiry, mismatched session ids and expiration responses.
-    pub(crate) async fn execute_resolved(
+    pub(crate) async fn execute_encoded(
         &self,
-        mut resolved: ResolvedOperation,
+        encoded: EncodedOperation,
     ) -> Result<OperationResponse, OperationError> {
-        if resolved.bound_user_session.is_some_and(|s| s != self.id()) {
-            return Err(ResolveError::UserSessionMismatch.into());
+        let (mut request, context, bound_user_session) = encoded.into_parts();
+        if bound_user_session.is_some_and(|s| s != self.id()) {
+            return Err(OperationError::UserSessionMismatch);
         }
 
-        let target = resolved.context.request_target().clone();
+        let target = context.request_target().clone();
         let mut session = self.state().lock().await;
 
         // We might be able to infer expiration based on what the server told us
@@ -449,14 +399,14 @@ where
 
         // Mount the user session context on the request and update it based
         // on the response. This may expire the user session after the call.
-        session.decorate(&mut resolved.request)?;
-        let response = self.client().transport().send(resolved.request).await?;
+        session.decorate(&mut request)?;
+        let response = self.client().transport().send(request).await?;
         session.update(&response);
 
         if session.is_expired() {
             return Err(ResponseError::UserSessionExpired { target }.into());
         }
-        Ok(OperationResponse::with_context(response, resolved.context).in_user_session(self.id()))
+        Ok(OperationResponse::with_context(response, context).in_user_session(self.id()))
     }
 }
 
@@ -472,7 +422,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        AdtUri, Transport, TransportError,
+        AdtRequest, AdtUri, Transport, TransportError,
         protocol::{ADT_SESSION_TYPE_HEADER, AdtSessionType},
     };
 
@@ -483,10 +433,10 @@ mod tests {
     impl Operation for StatefulProbe {
         type Response = AdtUri;
         type Kind = Stateful;
-        type Target = Owned;
+        type ResolutionRequirement = Independent;
 
-        fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-            Ok(EncodedOperation::owned(
+        fn encode(&self, _resolver: &()) -> Result<EncodedOperation, EncodeError> {
+            Ok(EncodedOperation::new(
                 Method::GET,
                 AdtUri::parse("/sap/bc/adt/stateful-probe").unwrap(),
             ))
@@ -501,10 +451,10 @@ mod tests {
     impl Operation for StatelessProbe {
         type Response = AdtUri;
         type Kind = Stateless;
-        type Target = Owned;
+        type ResolutionRequirement = Independent;
 
-        fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-            Ok(EncodedOperation::owned(
+        fn encode(&self, _resolver: &()) -> Result<EncodedOperation, EncodeError> {
+            Ok(EncodedOperation::new(
                 Method::GET,
                 AdtUri::parse("/sap/bc/adt/stateless-probe").unwrap(),
             ))
@@ -549,7 +499,7 @@ mod tests {
         assert_eq!(response.request_target(), &target);
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.body(), b"response");
-        assert_eq!(response.entity_tag().as_deref(), Some("response-etag"));
+        assert_eq!(response.etag().as_deref(), Some("response-etag"));
 
         let (raw, request_target) = response.into_parts();
         assert_eq!(request_target, target);

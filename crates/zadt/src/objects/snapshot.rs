@@ -1,16 +1,17 @@
 use std::{any::Any, fmt, sync::Arc};
 
 use super::{ObjectIdentity, ObjectRef, ObjectType, SnapshotKind, WorkbenchVersion};
-use crate::{EntityTag, ObjectError};
+use crate::{AdtUri, EntityTag, ObjectError};
 
 pub(crate) type ErasedProperties = Arc<dyn Any + Send + Sync>;
 
 /// An immutable snapshot of a loaded ADT object representation.
 ///
-/// Unlike [`ObjectRef<T>`], this value includes the Workbench version and object
-/// properties returned by ADT. The type parameter `T` selects the property type
-/// and the operations available for that object family. [`ObjectSnapshot<()>`]
-/// stores the object family and its concrete properties at runtime.
+/// Unlike [`ObjectRef<T>`], this value includes the concrete resource URI,
+/// Workbench version, and object properties returned by ADT. The type parameter
+/// `T` selects the property type and the operations available for that object
+/// family. [`ObjectSnapshot<()>`] stores the object family and its concrete
+/// properties at runtime.
 ///
 /// The runtime form is the loaded counterpart to [`ObjectRef<()>`]. It is useful
 /// when the object family comes from user input or a repository response.
@@ -24,8 +25,9 @@ pub(crate) type ErasedProperties = Arc<dyn Any + Send + Sync>;
 /// that only need the object identity can use [`ObjectSnapshot::reference`].
 pub struct ObjectSnapshot<T: SnapshotKind = ()> {
     reference: ObjectRef<T>,
+    uri: AdtUri,
     workbench_version: WorkbenchVersion,
-    media_type: String,
+    media_type: &'static str,
     etag: Option<EntityTag>,
     properties: T::StoredProperties,
 }
@@ -36,14 +38,19 @@ impl<T: SnapshotKind> ObjectSnapshot<T> {
         &self.reference
     }
 
+    /// Returns the concrete URI from which this snapshot was loaded.
+    pub fn uri(&self) -> &AdtUri {
+        &self.uri
+    }
+
     /// Returns the Workbench version represented by this snapshot.
     pub fn workbench_version(&self) -> WorkbenchVersion {
         self.workbench_version
     }
 
     /// Returns the media type of this snapshot.
-    pub fn media_type(&self) -> &str {
-        &self.media_type
+    pub fn media_type(&self) -> &'static str {
+        self.media_type
     }
 
     /// Returns the entity tag associated with this snapshot.
@@ -56,15 +63,17 @@ impl<T: ObjectType> ObjectSnapshot<T> {
     /// Creates a new snapshot for an internally parsed query result.
     pub(crate) fn new(
         reference: ObjectRef<T>,
+        uri: AdtUri,
         workbench_version: WorkbenchVersion,
-        media_type: impl Into<String>,
+        media_type: &'static str,
         etag: Option<EntityTag>,
         properties: T::Properties,
     ) -> Self {
         Self {
             reference,
+            uri,
             workbench_version,
-            media_type: media_type.into(),
+            media_type,
             etag,
             properties,
         }
@@ -81,6 +90,7 @@ impl<T: ObjectType> ObjectSnapshot<T> {
     pub fn into_erased(self) -> ObjectSnapshot<()> {
         ObjectSnapshot::<()>::new_erased(
             self.reference.erase(),
+            self.uri,
             self.workbench_version,
             self.media_type,
             self.etag,
@@ -96,8 +106,9 @@ where
     fn clone(&self) -> Self {
         Self {
             reference: self.reference.clone(),
+            uri: self.uri.clone(),
             workbench_version: self.workbench_version,
-            media_type: self.media_type.clone(),
+            media_type: self.media_type,
             etag: self.etag.clone(),
             properties: self.properties.clone(),
         }
@@ -118,15 +129,17 @@ impl ObjectSnapshot<()> {
     /// Constructs a snapshot with properties retained behind its runtime descriptor.
     pub(crate) fn new_erased(
         reference: ObjectRef<()>,
+        uri: AdtUri,
         workbench_version: WorkbenchVersion,
-        media_type: impl Into<String>,
+        media_type: &'static str,
         etag: Option<EntityTag>,
         properties: ErasedProperties,
     ) -> Self {
         Self {
             reference,
+            uri,
             workbench_version,
-            media_type: media_type.into(),
+            media_type,
             etag,
             properties,
         }
@@ -163,6 +176,7 @@ impl ObjectSnapshot<()> {
 
         Ok(ObjectSnapshot::new(
             reference,
+            self.uri,
             self.workbench_version,
             self.media_type,
             self.etag,
@@ -196,6 +210,7 @@ impl fmt::Debug for ObjectSnapshot<()> {
         formatter
             .debug_struct("ObjectSnapshot")
             .field("reference", &self.reference)
+            .field("uri", &self.uri)
             .field("workbench_version", &self.workbench_version)
             .field("media_type", &self.media_type)
             .field("etag", &self.etag)
@@ -214,6 +229,7 @@ where
         formatter
             .debug_struct("ObjectSnapshot")
             .field("reference", &self.reference)
+            .field("uri", &self.uri)
             .field("workbench_version", &self.workbench_version)
             .field("media_type", &self.media_type)
             .field("etag", &self.etag)

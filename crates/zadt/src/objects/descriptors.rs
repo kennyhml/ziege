@@ -2,10 +2,12 @@ use super::{
     AccessControl, AnnotationDefinition, AssignObjectIdentity, Class, Create, DataDefinition,
     DataElement, Domain, ErasedProperties, FunctionGroup, FunctionGroupInclude, FunctionModule,
     GlobalWorkbenchType, Include, Interface, MediaTyped, MetadataExtension, ObjectIdentity,
-    ObjectRef, ObjectSnapshot, ObjectType, Package, Program, RunCapability, ServiceDefinition,
-    Source, SourceComponents, Structure, ToXml, XmlConversion,
+    ObjectRef, ObjectSnapshot, ObjectType, Package, Program, ResolvedObjectRef, RunCapability,
+    ServiceDefinition, Source, SourceComponents, Structure, ToXml, XmlConversion,
 };
-use crate::{CategoryId, ObjectStructureQuery, SourceRef, error::ObjectError};
+use crate::{
+    CategoryId, ObjectStructureQuery, SourceRef, compatibility::MediaTypes, error::ObjectError,
+};
 
 /// Runtime descriptor for one modeled object type.
 ///
@@ -78,19 +80,20 @@ impl ObjectTypeDescriptor {
         }
     }
 
-    pub(crate) fn creation_media_types(&self) -> Option<&'static [&'static str]> {
+    pub(crate) fn creation_media_types(&self) -> Option<MediaTypes> {
         self.capabilities.create.map(|create| create.media_types)
     }
 
     pub(crate) fn creation_payload_to_xml(
         &self,
-        reference: &ObjectRef<()>,
+        reference: &ResolvedObjectRef<()>,
         payload: serde_json::Value,
     ) -> Result<Vec<u8>, ObjectError> {
-        let create = self
-            .capabilities
-            .create
-            .ok_or_else(|| reference.unsupported_capability("object creation"))?;
+        let create = self.capabilities.create.ok_or_else(|| {
+            reference
+                .reference()
+                .unsupported_capability("object creation")
+        })?;
         (create.encode)(reference, payload)
     }
 
@@ -163,7 +166,7 @@ impl ObjectTypeDescriptor {
         (self.properties.encode_json)(object, properties)
     }
 
-    pub(crate) const fn properties_media_types(&self) -> &'static [&'static str] {
+    pub(crate) const fn properties_media_types(&self) -> MediaTypes {
         self.properties.media_types
     }
 }
@@ -172,7 +175,7 @@ type DecodeXmlFn = fn(&ObjectRef, &[u8]) -> Result<ErasedProperties, ObjectError
 type DecodeJsonFn = fn(&ObjectRef, serde_json::Value) -> Result<ErasedProperties, ObjectError>;
 type EncodeXmlFn = fn(&ObjectRef, &ErasedProperties) -> Result<Vec<u8>, ObjectError>;
 type EncodeJsonFn = fn(&ObjectRef, &ErasedProperties) -> Result<serde_json::Value, ObjectError>;
-type EncodeCreationFn = fn(&ObjectRef, serde_json::Value) -> Result<Vec<u8>, ObjectError>;
+type EncodeCreationFn = fn(&ResolvedObjectRef, serde_json::Value) -> Result<Vec<u8>, ObjectError>;
 type SourceFn = fn(&ObjectSnapshot<()>) -> Result<SourceRef, ObjectError>;
 type SourceComponentFn = fn(&ObjectSnapshot<()>, &str) -> Result<Option<SourceRef>, ObjectError>;
 type ObjectStructureFn = fn(&ObjectSnapshot<()>) -> Result<ObjectStructureQuery, ObjectError>;
@@ -180,7 +183,7 @@ type ObjectStructureFn = fn(&ObjectSnapshot<()>) -> Result<ObjectStructureQuery,
 /// Type-erased codecs for one complete properties representation.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PropertiesCodec {
-    media_types: &'static [&'static str],
+    media_types: MediaTypes,
     decode_xml: DecodeXmlFn,
     decode_json: DecodeJsonFn,
     encode_xml: EncodeXmlFn,
@@ -248,7 +251,7 @@ impl PropertiesCodec {
 /// Type-erased codec and media types for an object-creation payload.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CreateCodec {
-    media_types: &'static [&'static str],
+    media_types: MediaTypes,
     encode: EncodeCreationFn,
 }
 
@@ -264,12 +267,15 @@ impl CreateCodec {
         }
     }
 
-    fn encode<T>(reference: &ObjectRef, payload: serde_json::Value) -> Result<Vec<u8>, ObjectError>
+    fn encode<T>(
+        reference: &ResolvedObjectRef,
+        payload: serde_json::Value,
+    ) -> Result<Vec<u8>, ObjectError>
     where
         T: Create,
         T::Payload: serde::de::DeserializeOwned,
     {
-        validate_object_type::<T>(reference)?;
+        validate_object_type::<T>(reference.reference())?;
         let mut payload: T::Payload =
             serde_json::from_value(payload).map_err(ObjectError::InvalidPropertiesJson)?;
         payload.assign_reference(reference);
@@ -319,6 +325,7 @@ impl RuntimeCapabilities {
     ) -> Result<SourceRef, ObjectError> {
         ObjectSnapshot::<T>::source_from_parts(
             &object.typed_reference::<T>()?,
+            object.uri(),
             object.typed_properties::<T>(),
         )
     }
@@ -329,6 +336,7 @@ impl RuntimeCapabilities {
     ) -> Result<Option<SourceRef>, ObjectError> {
         ObjectSnapshot::<T>::source_component_from_parts(
             &object.typed_reference::<T>()?,
+            object.uri(),
             object.typed_properties::<T>(),
             name,
         )
@@ -339,6 +347,7 @@ impl RuntimeCapabilities {
     ) -> Result<ObjectStructureQuery, ObjectError> {
         ObjectSnapshot::<T>::object_structure_from_parts(
             &object.typed_reference::<T>()?,
+            object.uri(),
             object.typed_properties::<T>(),
         )
     }
@@ -489,10 +498,8 @@ mod tests {
         ))
         .unwrap();
         let object = crate::ObjectSnapshot::new(
-            ObjectRef::<Class>::new(
-                "CL_ADT_URI_MAPPER".to_owned(),
-                AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
-            ),
+            ObjectRef::<Class>::new("CL_ADT_URI_MAPPER"),
+            AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
             crate::WorkbenchVersion::Active,
             "application/vnd.sap.adt.oo.classes.v4+xml",
             None,

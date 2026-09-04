@@ -5,14 +5,15 @@
 //! decoding because each representation produces an object snapshot.
 use super::transports::TRANSPORT_REQUEST_QUERY;
 use crate::{
-    CompatibilityError, IfMatch, Locked, ObjectError, ObjectLock, ObjectSnapshot, SnapshotKind,
-    TransportNumber, compatibility,
+    Discovery, IfMatch, Locked, ObjectError, ObjectLock, ObjectSnapshot, RequiresDiscovery,
+    SnapshotKind, TransportNumber,
+    compatibility::MediaTypes,
     error::{EncodeError, ResponseError},
     objects::{
         AssignObjectIdentity, Create, MediaTyped, ObjectIdentity, ObjectRef, ObjectType, ToXml,
         WorkbenchVersion, XmlConversion,
     },
-    operation::{EncodedOperation, IfNoneMatch, Operation, OperationResponse, Owned, Stateless},
+    operation::{EncodedOperation, IfNoneMatch, Operation, OperationResponse, Stateless},
     protocol::EntityTag,
 };
 use http::Method;
@@ -28,18 +29,16 @@ use http::Method;
 /// creation, the API mirrors the properties into a separate struct instead
 /// of marking all other fields as optional.
 ///
-/// Successful responses without a representation decode to `None`. Object
-/// families that return their properties decode to a loaded object.
+/// Successful responses do not contain a representation. Query the object
+/// reference after creation to load its properties.
 #[derive(Debug)]
 pub struct ObjectCreation<T, P> {
-    /// A reference to the object to create, needed to decode the response.
+    /// A reference to the object to create.
     reference: ObjectRef<T>,
     /// The request payload, either typed or JSON.
     payload: P,
     /// Media types supported for creation.
-    create_media_types: &'static [&'static str],
-    /// Media types accepted for the response.
-    response_media_types: &'static [&'static str],
+    media_types: MediaTypes,
     /// A transport request to assign the new object to.
     transport_request: Option<TransportNumber>,
 }
@@ -53,30 +52,19 @@ impl<T, P> ObjectCreation<T, P> {
     }
 
     /// Shared internal helper for both typed and erased paths.
-    fn build_request(&self, body: Vec<u8>) -> Result<EncodedOperation<Owned>, EncodeError> {
-        // We retain the resolved object collection for this purpose: during creation,
-        // we must use the base object path to POST to. We also need to know what
-        // media types that collection even accepts to ensure one of ours matches.
-        // The operation target can stay owned because all context is resolved.
-        let (target, accepted_media_types) = self.reference.collection()?;
-        let content_type = compatibility::select_accepted_media_type(
-            self.create_media_types,
-            accepted_media_types,
-        )
-        .ok_or_else(|| {
-            ObjectError::from(CompatibilityError::NoCompatibleMediaType {
-                supported: self
-                    .create_media_types
-                    .iter()
-                    .map(|media_type| (*media_type).to_owned())
-                    .collect(),
-                accepted: accepted_media_types.to_vec(),
-            })
-        })?;
+    fn build_request(
+        &self,
+        body: Vec<u8>,
+        resolver: &Discovery,
+    ) -> Result<EncodedOperation, EncodeError> {
+        let collection = resolver.resolve_object_collection(&self.reference)?;
+        let content_type = self
+            .media_types
+            .select_compatible(&collection.accepted_media_types)
+            .map_err(ObjectError::from)?;
 
-        let mut request = EncodedOperation::owned(Method::POST, target.clone());
+        let mut request = EncodedOperation::new(Method::POST, collection.target);
         request.set_content_type(content_type);
-        request.set_accepts(self.response_media_types);
         request.set_body(body);
 
         // Transport handling, no lock here that may carry one.
@@ -91,43 +79,46 @@ impl<T, P> ObjectCreation<T, P> {
 impl<T, P> Operation for ObjectCreation<T, P>
 where
     T: Create<Payload = P>,
-    P: ToXml + Send + Sync,
+    P: AssignObjectIdentity + Clone + ToXml + Send + Sync,
 {
     type Kind = Stateless;
-    type Response = Option<ObjectSnapshot<T>>;
-    type Target = Owned;
+    type Response = ();
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        self.build_request(self.payload.to_xml()?)
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        let reference = resolver.resolve_object(&self.reference)?;
+
+        // PERF: No choice but to clone the payload because we need the resolver.
+        // Not a big issue as its rather small and creation is rare.
+        let mut payload = self.payload.clone();
+        payload.assign_reference(&reference);
+
+        let body = payload.to_xml()?;
+        self.build_request(body, resolver)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        response.require_success()?;
-        if response.body().is_empty() {
-            return Ok(None);
-        }
-        ObjectSnapshot::<T>::decode(&self.reference, response).map(Some)
+        response.require_success()
     }
 }
 
 // Untyped creation implementation
 impl Operation for ObjectCreation<(), serde_json::Value> {
     type Kind = Stateless;
-    type Response = Option<ObjectSnapshot<()>>;
-    type Target = Owned;
+    type Response = ();
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
         let descriptor = self.reference.require_descriptor()?;
-        let payload = descriptor.creation_payload_to_xml(&self.reference, self.payload.clone())?;
-        self.build_request(payload)
+        let reference = resolver.resolve_object(&self.reference)?;
+
+        // PERF: Same payload cloning is needed - identity set in the descriptor.
+        let payload = descriptor.creation_payload_to_xml(&reference, self.payload.clone())?;
+        self.build_request(payload, resolver)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        response.require_success()?;
-        if response.body().is_empty() {
-            return Ok(None);
-        }
-        ObjectSnapshot::<()>::decode(&self.reference, response).map(Some)
+        response.require_success()
     }
 }
 
@@ -143,19 +134,13 @@ where
     /// Other properties, such as description, ABAP language version, and
     /// object specific properties can be supplied in the payload.
     ///
-    /// A response representation produces `Some` snapshot. An empty successful
-    /// response produces `None`.
-    pub fn create(&self, mut payload: T::Payload) -> ObjectCreation<T, T::Payload> {
-        // Make sure identify matches the reference. In the erased path,
-        // the same thing happens during the descriptor xml serialization.
-        payload.assign_reference(self);
-
+    /// A successful response confirms creation without returning properties.
+    pub fn create(&self, payload: T::Payload) -> ObjectCreation<T, T::Payload> {
         ObjectCreation {
             reference: self.clone(),
             payload,
             transport_request: None,
-            create_media_types: T::CREATE_MEDIA_TYPES,
-            response_media_types: T::Properties::MEDIA_TYPES,
+            media_types: T::CREATE_MEDIA_TYPES,
         }
     }
 }
@@ -170,8 +155,8 @@ impl ObjectRef<()> {
     /// object specific properties can be supplied in the payload.
     ///
     /// JSON conversion and XML encoding occur when the operation is encoded and
-    /// can fail at that stage. A response representation produces `Some`
-    /// snapshot, while an empty successful response produces `None`.
+    /// can fail at that stage. A successful response confirms creation without
+    /// returning properties.
     pub fn create(
         &self,
         payload: serde_json::Value,
@@ -190,8 +175,7 @@ impl ObjectRef<()> {
             reference: self.clone(),
             payload,
             transport_request: None,
-            create_media_types,
-            response_media_types: descriptor.properties_media_types(),
+            media_types: create_media_types,
         })
     }
 }
@@ -216,19 +200,20 @@ pub struct ObjectQuery<T> {
 
 impl<T> ObjectQuery<T> {
     /// Internal helper to build the request for both typed and erased paths.
-    fn build_request(&self, media_types: &'static [&'static str]) -> EncodedOperation<Owned> {
-        // Because the object uri is resolved at object construction through
-        // the client, the request target is already owned. This kinda blurs
-        // the lines between the responsibilities but its worthwhile being
-        // able to use ObjectRef for both internal and advertised objects.
-        let mut request = EncodedOperation::owned(Method::GET, self.resource.uri().clone());
+    fn build_request(
+        &self,
+        media_types: MediaTypes,
+        resolver: &Discovery,
+    ) -> Result<EncodedOperation, EncodeError> {
+        let target = resolver.resolve_object_uri(&self.resource)?;
+        let mut request = EncodedOperation::new(Method::GET, target);
         if let Some(version) = self.workbench_version {
             request.push_query(WorkbenchVersion::QUERY_PARAMETER, version.as_str());
         }
 
-        request.set_accepts(media_types);
+        request.set_accepts(media_types.as_slice());
         request.set_cache_revalidation(None);
-        request
+        Ok(request)
     }
 
     /// Sets the workbench version of the object to be queried.
@@ -250,10 +235,10 @@ where
 {
     type Response = ObjectSnapshot<T>;
     type Kind = Stateless;
-    type Target = Owned;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        Ok(self.build_request(T::Properties::MEDIA_TYPES))
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        self.build_request(T::Properties::MEDIA_TYPES, resolver)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
@@ -265,11 +250,11 @@ where
 impl Operation for ObjectQuery<()> {
     type Response = ObjectSnapshot<()>;
     type Kind = Stateless;
-    type Target = Owned;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
         let descriptor = self.resource.require_descriptor()?;
-        Ok(self.build_request(descriptor.properties_media_types()))
+        self.build_request(descriptor.properties_media_types(), resolver)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
@@ -344,15 +329,18 @@ impl<T> ObjectUpdate<T> {
     }
 
     // Shared request encoding for typed, erased, stateless, and stateful updates.
-    fn build_request(&self) -> EncodedOperation<Owned> {
-        let mut request = EncodedOperation::owned(Method::PUT, self.resource.uri().clone());
-        if let Some(transport_request) = &self.transport_request {
-            request.push_query(TRANSPORT_REQUEST_QUERY, transport_request.as_str());
-        }
+    fn build_request(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        let target = resolver.resolve_object_uri(&self.resource)?;
+
+        let mut request = EncodedOperation::new(Method::PUT, target);
         request.set_accept(self.media_type);
         request.set_content_type(self.media_type);
         request.set_body(self.body.clone());
-        request
+
+        if let Some(transport_request) = &self.transport_request {
+            request.push_query(TRANSPORT_REQUEST_QUERY, transport_request.as_str());
+        }
+        Ok(request)
     }
 }
 
@@ -363,10 +351,10 @@ where
 {
     type Response = Option<ObjectSnapshot<T>>;
     type Kind = Stateless;
-    type Target = Owned;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        Ok(self.build_request())
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        self.build_request(resolver)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
@@ -383,18 +371,18 @@ where
 impl Operation for ObjectUpdate<()> {
     type Response = Option<ObjectSnapshot<()>>;
     type Kind = Stateless;
-    type Target = Owned;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        Ok(self.build_request())
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        self.build_request(resolver)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         response.require_success()?;
-
         if response.body().is_empty() {
             return Ok(None);
         }
+
         ObjectSnapshot::<()>::decode(&self.resource, response).map(Some)
     }
 }
@@ -446,13 +434,9 @@ impl<T: ObjectType> ObjectSnapshot<T> {
     fn update(&self, mut properties: T::Properties) -> Result<ObjectUpdate<T>, ObjectError> {
         properties.assign_identity(self.reference());
 
-        let media_type =
-            compatibility::matching_media_type(T::Properties::MEDIA_TYPES, self.media_type())
-                .expect("typed ADT objects carry a supported media type");
-
         Ok(ObjectUpdate {
             resource: self.reference().clone(),
-            media_type,
+            media_type: self.media_type(),
             body: properties.to_xml()?,
             transport_request: None,
         })
@@ -493,16 +477,6 @@ impl ObjectSnapshot<()> {
     fn update(&self, properties: serde_json::Value) -> Result<ObjectUpdate<()>, ObjectError> {
         let descriptor = self.reference().require_descriptor()?;
 
-        // Select media type through the descriptor
-        let media_type = compatibility::matching_media_type(
-            descriptor.properties_media_types(),
-            self.media_type(),
-        )
-        .ok_or_else(|| ObjectError::UnsupportedPropertiesMediaType {
-            object_type: self.reference().object_type().clone(),
-            media_type: self.media_type().to_owned(),
-        })?;
-
         // Descriptor does the heavy lifting here, recover the typed properties
         // from JSON and then serialize them to xml. This all uses the same
         // implementations as the static path does under the hood.
@@ -511,7 +485,7 @@ impl ObjectSnapshot<()> {
 
         Ok(ObjectUpdate {
             resource: self.reference().clone(),
-            media_type,
+            media_type: self.media_type(),
             body,
             transport_request: None,
         })
@@ -524,22 +498,21 @@ impl<T: ObjectType> ObjectSnapshot<T> {
     /// object snapshot response with an identical content type.
     fn decode(resource: &ObjectRef<T>, response: OperationResponse) -> Result<Self, ResponseError> {
         response.require_success()?;
+        let uri = response.request_target().clone();
 
         let supported = T::Properties::MEDIA_TYPES;
-        let content_type = response.require_content_type(supported)?;
-        let media_type = compatibility::matching_media_type(supported, content_type)
-            .expect("validated properties Content-Type must match a supported media type");
+        let media_type = response.require_supported_media_type(supported)?;
 
-        let etag = response.entity_tag();
         let extract = WorkbenchVersionExtractor::from_xml(response.body())?;
         let properties = T::Properties::from_xml(response.body())?;
         properties.validate_for(resource)?;
 
         Ok(Self::new(
             resource.clone(),
+            uri,
             extract.workbench_version,
             media_type,
-            etag,
+            response.etag(),
             properties,
         ))
     }
@@ -549,27 +522,23 @@ impl ObjectSnapshot<()> {
     /// Internal, module-private helper to construct the snapshot from a
     /// response since creation, updating and query all may return an
     /// object snapshot response with an identical content type.
-    fn decode(
-        resource: &ObjectRef<()>,
-        response: OperationResponse,
-    ) -> Result<Self, ResponseError> {
+    fn decode(resource: &ObjectRef, response: OperationResponse) -> Result<Self, ResponseError> {
         response.require_success()?;
+        let uri = response.request_target().clone();
         let descriptor = resource.require_descriptor()?;
 
         let supported = descriptor.properties_media_types();
-        let content_type = response.require_content_type(supported)?;
-        let media_type = compatibility::matching_media_type(supported, content_type)
-            .expect("validated properties Content-Type must match a supported media type");
+        let media_type = response.require_supported_media_type(supported)?;
 
-        let etag = response.entity_tag();
         let extract = WorkbenchVersionExtractor::from_xml(response.body())?;
         let properties = descriptor.properties_from_xml(resource, response.body())?;
 
         Ok(Self::new_erased(
             resource.clone(),
+            uri,
             extract.workbench_version,
             media_type,
-            etag,
+            response.etag(),
             properties,
         ))
     }
@@ -599,9 +568,9 @@ mod tests {
     use crate::{
         AbapLanguageVersion, AccessMode, AdtRequest, AdtResponse, AdtUri,
         AdvertisedObjectReference, Class, ClassCategory, ClassCreateProperties, ClassProperties,
-        ClassTemplate, Client, CompatibilityError, FunctionGroup, FunctionGroupInclude,
+        ClassTemplate, Client, CompatibilityError, Discovery, FunctionGroup, FunctionGroupInclude,
         FunctionGroupIncludeCreateProperties, FunctionModule, FunctionModuleCreateProperties,
-        ObjectType, Package, Ready, Resolve, Stateful, Transport,
+        ObjectType, Package, Stateful, Transport,
     };
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
@@ -616,7 +585,7 @@ mod tests {
         }
     }
 
-    fn ready_client(xml: &[u8]) -> Client<Ready> {
+    fn discovered_client(xml: &[u8]) -> Client<Discovery> {
         Client::new(UnusedTransport).with_capabilities(
             crate::api::discovery::parse_capabilities(xml).unwrap(),
             crate::api::discovery::parse_capabilities(xml).unwrap(),
@@ -624,7 +593,7 @@ mod tests {
     }
 
     fn reference(name: &str) -> ObjectRef<Class> {
-        ready_client(DISCOVERY_XML).object(name).unwrap()
+        ObjectRef::new(name)
     }
 
     fn create_properties() -> ClassCreateProperties {
@@ -640,6 +609,7 @@ mod tests {
 
     #[test]
     fn typed_and_runtime_creation_build_the_same_class_request() {
+        let client = discovered_client(DISCOVERY_XML);
         let reference = reference("ZZZTEST");
         let properties = create_properties();
         let typed = reference.create(properties.clone());
@@ -649,14 +619,11 @@ mod tests {
         runtime_values.remove("@adtcore:type");
         let runtime = reference.erase().create(runtime_payload).unwrap();
 
-        let typed_request = typed.encode().unwrap();
-        let runtime_request = runtime.encode().unwrap();
+        let typed_request = typed.encode(client.discovery()).unwrap();
+        let runtime_request = runtime.encode(client.discovery()).unwrap();
 
         assert_eq!(typed_request.method(), Method::POST);
-        assert_eq!(
-            typed_request.headers()[header::ACCEPT],
-            ClassProperties::MEDIA_TYPES.join(", ")
-        );
+        assert!(!typed_request.headers().contains_key(header::ACCEPT));
         assert_eq!(
             typed_request.headers()[header::CONTENT_TYPE],
             ClassProperties::MEDIA_TYPES[0]
@@ -684,26 +651,26 @@ mod tests {
 
     #[test]
     fn creation_negotiates_the_preferred_advertised_media_type() {
-        let client = ready_client(DISCOVERY_XML);
-        let reference = client.object::<Class>("ZZZTEST").unwrap();
+        let client = discovered_client(DISCOVERY_XML);
+        let reference = ObjectRef::<Class>::new("ZZZTEST");
         let typed = reference.create(create_properties());
         let runtime = reference
             .erase()
             .create(serde_json::to_value(create_properties()).unwrap())
             .unwrap();
 
-        let typed = client.resolve(typed.encode().unwrap()).unwrap();
-        let runtime = client.resolve(runtime.encode().unwrap()).unwrap();
+        let typed = typed.encode(client.discovery()).unwrap();
+        let runtime = runtime.encode(client.discovery()).unwrap();
 
         assert_eq!(
-            typed.request().headers()[header::CONTENT_TYPE],
+            typed.headers()[header::CONTENT_TYPE],
             ClassProperties::MEDIA_TYPES[0]
         );
         assert_eq!(
-            runtime.request().headers()[header::CONTENT_TYPE],
+            runtime.headers()[header::CONTENT_TYPE],
             ClassProperties::MEDIA_TYPES[0]
         );
-        assert_eq!(typed.request().target().as_str(), "/sap/bc/adt/oo/classes");
+        assert_eq!(typed.target().as_str(), "/sap/bc/adt/oo/classes");
     }
 
     #[test]
@@ -712,13 +679,12 @@ mod tests {
         for media_type in ClassProperties::MEDIA_TYPES {
             discovery = discovery.replace(&format!("<app:accept>{media_type}</app:accept>"), "");
         }
-        let client = ready_client(discovery.as_bytes());
-        let operation = client
-            .object::<Class>("ZZZTEST")
-            .unwrap()
-            .create(create_properties());
+        let client = discovered_client(discovery.as_bytes());
+        let operation = ObjectRef::<Class>::new("ZZZTEST").create(create_properties());
 
-        let Err(EncodeError::Object(ObjectError::Compatibility(error))) = operation.encode() else {
+        let Err(EncodeError::Object(ObjectError::Compatibility(error))) =
+            operation.encode(client.discovery())
+        else {
             panic!("creation encoding should reject a collection without app:accept")
         };
 
@@ -741,7 +707,7 @@ mod tests {
     }
 
     #[test]
-    fn creation_does_not_relabel_a_newer_payload_as_an_older_media_type() {
+    fn creation_uses_an_older_advertised_property_media_type() {
         let discovery = String::from_utf8(DISCOVERY_XML.to_vec())
             .unwrap()
             .replace(
@@ -752,51 +718,42 @@ mod tests {
                 "<app:accept>application/vnd.sap.adt.oo.classes.v3+xml</app:accept>",
                 "",
             );
-        let client = ready_client(discovery.as_bytes());
-        let operation = client
-            .object::<Class>("ZZZTEST")
-            .unwrap()
-            .create(create_properties());
+        let client = discovered_client(discovery.as_bytes());
+        let operation = ObjectRef::<Class>::new("ZZZTEST").create(create_properties());
 
-        let Err(error) = operation.encode() else {
-            panic!("a V4 creation payload must not be advertised as V2")
-        };
+        let request = operation.encode(client.discovery()).unwrap();
 
-        assert!(matches!(
-            error,
-            EncodeError::Object(ObjectError::Compatibility(
-                CompatibilityError::NoCompatibleMediaType {
-                ref supported,
-                ref accepted,
-            })) if supported == Class::CREATE_MEDIA_TYPES
-                && accepted == &[ClassProperties::MEDIA_TYPES[2].to_owned()]
-        ));
+        assert_eq!(
+            request.headers()[header::CONTENT_TYPE],
+            ClassProperties::MEDIA_TYPES[2]
+        );
     }
 
     #[test]
-    fn child_reference_retains_its_resolved_collection() {
-        let client = ready_client(DISCOVERY_XML);
-        let group = client.object::<FunctionGroup>("Z_TEST_GROUP").unwrap();
-        let module = group.subobject::<FunctionModule>("ZZZZFUNC").unwrap();
+    fn child_reference_resolves_its_collection() {
+        let client = discovered_client(DISCOVERY_XML);
+        let group = ObjectRef::<FunctionGroup>::new("Z_TEST_GROUP");
+        let module = group.subobject::<FunctionModule>("ZZZZFUNC");
 
-        let (target, accepted_media_types) = module.collection().unwrap();
+        let collection = client
+            .discovery()
+            .resolve_object_collection(&module)
+            .unwrap();
         assert_eq!(
-            target.as_str(),
+            collection.target.as_str(),
             "/sap/bc/adt/functions/groups/z_test_group/fmodules"
         );
         assert_eq!(
-            accepted_media_types,
+            collection.accepted_media_types,
             ["application/vnd.sap.adt.functions.fmodules.v3+xml"]
         );
     }
 
     #[test]
     fn typed_and_runtime_include_creation_use_the_parent_collection() {
-        let client = ready_client(DISCOVERY_XML);
-        let group = client.object::<FunctionGroup>("ZGROUP123").unwrap();
-        let include = group
-            .subobject::<FunctionGroupInclude>("LZGROUP123RRR")
-            .unwrap();
+        let client = discovered_client(DISCOVERY_XML);
+        let group = ObjectRef::<FunctionGroup>::new("ZGROUP123");
+        let include = group.subobject::<FunctionGroupInclude>("LZGROUP123RRR");
         let typed = include.create(
             FunctionGroupIncludeCreateProperties::builder()
                 .description("zttfart")
@@ -808,8 +765,8 @@ mod tests {
             .create(serde_json::json!({ "@adtcore:description": "zttfart" }))
             .unwrap();
 
-        let typed = typed.encode().unwrap();
-        let runtime = runtime.encode().unwrap();
+        let typed = typed.encode(client.discovery()).unwrap();
+        let runtime = runtime.encode(client.discovery()).unwrap();
         assert_eq!(
             typed.target().as_str(),
             "/sap/bc/adt/functions/groups/zgroup123/includes"
@@ -828,9 +785,9 @@ mod tests {
 
     #[test]
     fn typed_and_runtime_function_module_creation_use_the_parent_collection() {
-        let client = ready_client(DISCOVERY_XML);
-        let group = client.object::<FunctionGroup>("ZGROUP123").unwrap();
-        let module = group.subobject::<FunctionModule>("ZFTFART").unwrap();
+        let client = discovered_client(DISCOVERY_XML);
+        let group = ObjectRef::<FunctionGroup>::new("ZGROUP123");
+        let module = group.subobject::<FunctionModule>("ZFTFART");
         let typed = module.create(
             FunctionModuleCreateProperties::builder()
                 .description("tfatart")
@@ -842,8 +799,8 @@ mod tests {
             .create(serde_json::json!({ "@adtcore:description": "tfatart" }))
             .unwrap();
 
-        let typed = typed.encode().unwrap();
-        let runtime = runtime.encode().unwrap();
+        let typed = typed.encode(client.discovery()).unwrap();
+        let runtime = runtime.encode(client.discovery()).unwrap();
         assert_eq!(
             typed.target().as_str(),
             "/sap/bc/adt/functions/groups/zgroup123/fmodules"
@@ -868,6 +825,7 @@ mod tests {
 
     #[test]
     fn runtime_creation_applies_the_typed_builder_defaults() {
+        let client = discovered_client(DISCOVERY_XML);
         let reference = reference("ZZZTEST");
         let typed = reference.create(create_properties());
         let runtime = reference
@@ -880,19 +838,20 @@ mod tests {
             }))
             .unwrap();
 
-        let typed_request = typed.encode().unwrap();
-        let runtime_request = runtime.encode().unwrap();
+        let typed_request = typed.encode(client.discovery()).unwrap();
+        let runtime_request = runtime.encode(client.discovery()).unwrap();
 
         assert_eq!(runtime_request.body(), typed_request.body());
     }
 
     #[test]
     fn creation_uses_the_reference_identity() {
+        let client = discovered_client(DISCOVERY_XML);
         let mut properties = create_properties();
         properties.name = "ZOTHER".to_owned();
         properties.object_type = Package::WORKBENCH_TYPE;
         let operation = reference("ZZZTEST").create(properties);
-        let request = operation.encode().unwrap();
+        let request = operation.encode(client.discovery()).unwrap();
         let body = std::str::from_utf8(request.body()).unwrap();
 
         assert!(body.contains("adtcore:name=\"ZZZTEST\""));
@@ -902,6 +861,7 @@ mod tests {
 
     #[test]
     fn creation_serializes_optional_class_settings() {
+        let client = discovered_client(DISCOVERY_XML);
         let properties = ClassCreateProperties::builder()
             .description("Created class")
             .abap_language_version(AbapLanguageVersion::CloudDevelopment)
@@ -911,7 +871,7 @@ mod tests {
             .build()
             .unwrap();
         let operation = reference("ZZZTEST").create(properties);
-        let request = operation.encode().unwrap();
+        let request = operation.encode(client.discovery()).unwrap();
         let body = std::str::from_utf8(request.body()).unwrap();
 
         assert!(body.contains("adtcore:abapLanguageVersion=\"5\""));
@@ -927,6 +887,7 @@ mod tests {
 
     #[test]
     fn creation_serializes_template_properties_as_nested_elements() {
+        let client = discovered_client(DISCOVERY_XML);
         let properties = ClassCreateProperties::builder()
             .description("Generated class")
             .template(
@@ -941,7 +902,7 @@ mod tests {
             .build()
             .unwrap();
         let operation = reference("ZZZTEST").create(properties);
-        let request = operation.encode().unwrap();
+        let request = operation.encode(client.discovery()).unwrap();
         let body = std::str::from_utf8(request.body()).unwrap();
 
         assert!(
@@ -958,11 +919,7 @@ mod tests {
 
     #[test]
     fn runtime_creation_rejects_non_creatable_object_types() {
-        let reference = ObjectRef::<Package>::new(
-            "$TMP".to_owned(),
-            AdtUri::parse("/sap/bc/adt/packages/$tmp").unwrap(),
-        )
-        .erase();
+        let reference = ObjectRef::<Package>::new("$TMP").erase();
 
         let error = reference.create(serde_json::json!({})).unwrap_err();
 
@@ -976,55 +933,24 @@ mod tests {
     }
 
     #[test]
-    fn creation_accepts_an_empty_success_response() {
+    fn creation_accepts_a_success_response() {
         let operation = reference("ZZZTEST").create(create_properties());
         let response = OperationResponse::new(
             AdtResponse::new(StatusCode::CREATED, HeaderMap::new(), Vec::new()),
             AdtUri::parse("/sap/bc/adt/oo/classes").unwrap(),
         );
 
-        assert!(operation.decode(response).unwrap().is_none());
-    }
-
-    #[test]
-    fn creation_decodes_returned_properties() {
-        let reference = reference("CL_ADT_URI_MAPPER");
-        let operation = reference.create(create_properties());
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/vnd.sap.adt.oo.classes.v4+xml"),
-        );
-        let response = OperationResponse::new(
-            AdtResponse::new(StatusCode::CREATED, headers.clone(), CLASS_XML.to_vec()),
-            reference.uri().clone(),
-        );
-        let runtime_response = OperationResponse::new(
-            AdtResponse::new(StatusCode::CREATED, headers, CLASS_XML.to_vec()),
-            reference.uri().clone(),
-        );
-        let runtime = reference
-            .erase()
-            .create(serde_json::to_value(create_properties()).unwrap())
-            .unwrap();
-
-        let created = operation.decode(response).unwrap().unwrap();
-        let runtime_created = runtime.decode(runtime_response).unwrap().unwrap();
-
-        assert_eq!(created.reference().name(), "CL_ADT_URI_MAPPER");
-        assert_eq!(created.workbench_version(), WorkbenchVersion::Active);
-        assert_eq!(
-            runtime_created.properties().unwrap()["@adtcore:name"],
-            "CL_ADT_URI_MAPPER"
-        );
+        assert_eq!(operation.decode(response).unwrap(), ());
     }
 
     #[test]
     fn updates_canonicalize_identity_and_use_the_property_version() {
+        let client = discovered_client(DISCOVERY_XML);
         let reference = reference("CL_ADT_URI_MAPPER");
         let properties: ClassProperties = serde_xml_rs::from_reader(CLASS_XML).unwrap();
         let snapshot = ObjectSnapshot::new(
             reference.clone(),
+            AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
             WorkbenchVersion::Active,
             ClassProperties::MEDIA_TYPES[0],
             Some(EntityTag::from_static("class-etag")),
@@ -1039,7 +965,7 @@ mod tests {
         let typed_update = snapshot.update_if_match(typed_properties).unwrap();
         fn assert_stateless<O: Operation<Kind = Stateless>>(_: &O) {}
         assert_stateless(&typed_update);
-        let typed = typed_update.encode().unwrap();
+        let typed = typed_update.encode(client.discovery()).unwrap();
 
         let runtime_snapshot = snapshot.into_erased();
         let mut runtime_properties = runtime_snapshot.properties().unwrap();
@@ -1051,7 +977,7 @@ mod tests {
             .unwrap();
         fn assert_stateful<O: Operation<Kind = Stateful>>(_: &O) {}
         assert_stateful(&runtime_update);
-        let runtime = runtime_update.encode().unwrap();
+        let runtime = runtime_update.encode(client.discovery()).unwrap();
 
         assert_eq!(typed.headers().get(header::IF_MATCH).unwrap(), "class-etag");
         assert!(
@@ -1085,10 +1011,12 @@ mod tests {
 
     #[test]
     fn optimistic_update_reports_a_failed_precondition() {
+        let client = discovered_client(DISCOVERY_XML);
         let reference = reference("CL_ADT_URI_MAPPER");
         let properties: ClassProperties = serde_xml_rs::from_reader(CLASS_XML).unwrap();
         let snapshot = ObjectSnapshot::new(
             reference.clone(),
+            AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
             WorkbenchVersion::Active,
             ClassProperties::MEDIA_TYPES[0],
             Some(EntityTag::from_static("stale-etag")),
@@ -1099,7 +1027,7 @@ mod tests {
         headers.insert(header::ETAG, HeaderValue::from_static("current-etag"));
         let response = OperationResponse::new(
             AdtResponse::new(StatusCode::PRECONDITION_FAILED, headers, Vec::new()),
-            reference.uri().clone(),
+            client.discovery().resolve_object_uri(&reference).unwrap(),
         );
 
         let result = update.decode(response).unwrap();
@@ -1113,10 +1041,12 @@ mod tests {
 
     #[test]
     fn locked_update_does_not_require_an_entity_tag() {
+        let client = discovered_client(DISCOVERY_XML);
         let reference = reference("CL_ADT_URI_MAPPER");
         let properties: ClassProperties = serde_xml_rs::from_reader(CLASS_XML).unwrap();
         let snapshot = ObjectSnapshot::new(
             reference.clone(),
+            AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
             WorkbenchVersion::Active,
             ClassProperties::MEDIA_TYPES[0],
             None,
@@ -1134,7 +1064,7 @@ mod tests {
         let request = snapshot
             .update_with_lock(lock.clone(), properties)
             .unwrap()
-            .encode()
+            .encode(client.discovery())
             .unwrap();
 
         assert!(!request.headers().contains_key(header::IF_MATCH));
@@ -1148,14 +1078,14 @@ mod tests {
                 .query()
                 .contains(&(TRANSPORT_REQUEST_QUERY.to_owned(), "A4HK900001".to_owned()))
         );
-        let (_, bound_session) = request.into_parts();
+        let (_, _, bound_session) = request.into_parts();
         assert_eq!(bound_session, lock_session);
 
         let request = snapshot
             .update_with_lock(lock, snapshot.properties().clone())
             .unwrap()
             .transport("A4HK900002")
-            .encode()
+            .encode(client.discovery())
             .unwrap();
         assert!(
             request

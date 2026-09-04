@@ -8,21 +8,14 @@ use serde::Deserialize;
 use url::Url;
 
 use crate::{
-    AdtUri, Client, ClientState, EncodeError, EncodedOperation, LogonError, Operation,
-    OperationResponse, Owned, ResponseError, Stateless, compatibility::media_types_match,
+    AdtRequest, AdtUri, Client, ClientState, EncodeError, EncodedOperation, Independent,
+    LogonError, Operation, OperationResponse, ResponseError, Stateless,
+    compatibility::media_types_match,
 };
 
-pub(crate) const SESSION_MEDIA_TYPE: &str = "application/vnd.sap.adt.core.http.session.v3+xml";
 pub(crate) const HTTP_SESSIONS_PATH: &str = "/sap/bc/adt/core/http/sessions";
 pub(crate) const SECURITY_SESSION_HEADER: HeaderName =
     HeaderName::from_static("x-sap-security-session");
-pub(crate) const PURPOSE_HEADER: HeaderName = HeaderName::from_static("sap-adt-purpose");
-pub(crate) const LOAD_BALANCER_HEADER: HeaderName = HeaderName::from_static("sap-adt-saplb");
-pub(crate) const CANCEL_ON_CLOSE_HEADER: HeaderName =
-    HeaderName::from_static("sap-cancel-on-close");
-#[cfg(feature = "reqwest")]
-pub(crate) const PREFLIGHT_LOGON_PURPOSE: &str = "preflight_logon";
-const LOGON_PURPOSE: &str = "logon";
 
 /// Information advertised for an authenticated ADT HTTP security session.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -41,6 +34,7 @@ pub struct SessionInformation {
 }
 
 impl SessionInformation {
+    pub(crate) const MEDIA_TYPE: &str = "application/vnd.sap.adt.core.http.session.v3+xml";
     const LOGOFF_RELATION: &str = "http://www.sap.com/adt/categories/core/http/sessions/logoff";
     const CLEANUP_RELATION: &str =
         "http://www.sap.com/adt/categories/core/http/sessions/securitysession";
@@ -214,15 +208,22 @@ pub struct Logon {
 impl Default for Logon {
     fn default() -> Self {
         Self {
-            purpose: LOGON_PURPOSE,
+            purpose: Self::LOGON_PURPOSE,
         }
     }
 }
 
 impl Logon {
+    const PURPOSE_HEADER: HeaderName = HeaderName::from_static("sap-adt-purpose");
+    const LOAD_BALANCER_HEADER: HeaderName = HeaderName::from_static("sap-adt-saplb");
+    const CANCEL_ON_CLOSE_HEADER: HeaderName = HeaderName::from_static("sap-cancel-on-close");
+    const LOGON_PURPOSE: &str = "logon";
+    #[cfg(feature = "reqwest")]
+    pub(crate) const PREFLIGHT_LOGON_PURPOSE: &str = "preflight_logon";
+
     #[cfg(feature = "reqwest")]
     pub(crate) fn as_preflight(mut self) -> Self {
-        self.purpose = PREFLIGHT_LOGON_PURPOSE;
+        self.purpose = Self::PREFLIGHT_LOGON_PURPOSE;
         self
     }
 }
@@ -237,14 +238,14 @@ impl<S: ClientState> Client<S> {
 impl Operation for Logon {
     type Response = SessionInformation;
     type Kind = Stateless;
-    type Target = Owned;
+    type ResolutionRequirement = Independent;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+    fn encode(&self, _: &()) -> Result<EncodedOperation, EncodeError> {
         let target = AdtUri::parse(HTTP_SESSIONS_PATH)
             .expect("the HTTP sessions path must be a valid ADT URI");
-        let mut request = EncodedOperation::owned(Method::GET, target);
+        let mut request = AdtRequest::new(Method::GET, target);
         request.push_query("_", cache_buster());
-        request.set_accept(SESSION_MEDIA_TYPE);
+        request.set_accept(SessionInformation::MEDIA_TYPE);
 
         // TODO: These should probably be statically typed enums
         request
@@ -252,14 +253,16 @@ impl Operation for Logon {
             .insert(SECURITY_SESSION_HEADER, HeaderValue::from_static("create"));
         request
             .headers_mut()
-            .insert(PURPOSE_HEADER, HeaderValue::from_static(self.purpose));
-        request
-            .headers_mut()
-            .insert(LOAD_BALANCER_HEADER, HeaderValue::from_static("fetch"));
-        request
-            .headers_mut()
-            .insert(CANCEL_ON_CLOSE_HEADER, HeaderValue::from_static("true"));
-        Ok(request)
+            .insert(Self::PURPOSE_HEADER, HeaderValue::from_static(self.purpose));
+        request.headers_mut().insert(
+            Self::LOAD_BALANCER_HEADER,
+            HeaderValue::from_static("fetch"),
+        );
+        request.headers_mut().insert(
+            Self::CANCEL_ON_CLOSE_HEADER,
+            HeaderValue::from_static("true"),
+        );
+        Ok(EncodedOperation::from(request))
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
@@ -272,7 +275,7 @@ impl Operation for Logon {
             .get(header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .ok_or(LogonError::MissingContentType)?;
-        if !media_types_match(SESSION_MEDIA_TYPE, content_type) {
+        if !media_types_match(SessionInformation::MEDIA_TYPE, content_type) {
             return Err(LogonError::UnsupportedContentType {
                 content_type: content_type.to_owned(),
             }

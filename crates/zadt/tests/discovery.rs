@@ -88,7 +88,7 @@ async fn client_discovery_transitions_and_retains_capabilities() {
     let client = client.discover().await.unwrap();
     let cloned_client = client.clone();
 
-    let collection = client.collection(PROGRAMS_CATEGORY).unwrap();
+    let collection = client.discovery().collection(PROGRAMS_CATEGORY).unwrap();
 
     assert_eq!(collection.title(), Some("Programs"));
     assert_eq!(
@@ -100,15 +100,16 @@ async fn client_discovery_transitions_and_retains_capabilities() {
     );
     assert_eq!(collection.template_links().len(), 1);
     assert!(std::ptr::eq(
-        client.capabilities(),
-        cloned_client.capabilities()
+        client.discovery().capabilities(),
+        cloned_client.discovery().capabilities()
     ));
     assert!(std::ptr::eq(
-        client.core_capabilities(),
-        cloned_client.core_capabilities()
+        client.discovery().core_capabilities(),
+        cloned_client.discovery().core_capabilities()
     ));
     assert!(
         client
+            .discovery()
             .core_capabilities()
             .collection(
                 "http://www.sap.com/adt/categories/system/communication/services",
@@ -132,10 +133,17 @@ async fn class_references_use_the_discovered_oo_collection() {
     Logon::default().execute(&client).await.unwrap();
     let client = client.discover().await.unwrap();
 
-    let class = client.object::<Class>("ZCL_EXAMPLE").unwrap();
+    let class = ObjectRef::<Class>::new("ZCL_EXAMPLE");
 
     assert_eq!(class.name(), "ZCL_EXAMPLE");
-    assert_eq!(class.uri().as_str(), "/sap/bc/adt/oo/classes/zcl_example");
+    assert_eq!(
+        client
+            .discovery()
+            .resolve_object_uri(&class)
+            .unwrap()
+            .as_str(),
+        "/sap/bc/adt/oo/classes/zcl_example"
+    );
 }
 
 #[tokio::test]
@@ -196,10 +204,17 @@ async fn runtime_object_types_use_the_registered_descriptor() {
         ),
     ] {
         let parsed_type: GlobalWorkbenchType = object_type.parse().unwrap();
-        let object = client.object_from_wb_type(&parsed_type, name).unwrap();
+        let object = ObjectRef::from_workbench_type(&parsed_type, name).unwrap();
 
         assert_eq!(object.object_type().as_str(), object_type);
-        assert_eq!(object.uri().as_str(), expected_uri);
+        assert_eq!(
+            client
+                .discovery()
+                .resolve_object_uri(&object)
+                .unwrap()
+                .as_str(),
+            expected_uri
+        );
         assert!(match object_type {
             "PROG/P" => object.typed::<zadt::Program>().is_some(),
             "PROG/I" => object.typed::<zadt::Include>().is_some(),
@@ -220,14 +235,14 @@ async fn runtime_object_types_use_the_registered_descriptor() {
 
     let child_type: GlobalWorkbenchType = "FUGR/FF".parse().unwrap();
     assert!(matches!(
-        client.object_from_wb_type(&child_type, "ZZZZFUNC"),
+        ObjectRef::from_workbench_type(&child_type, "ZZZZFUNC"),
         Err(ObjectError::ParentObjectRequired { object_type })
             if object_type.as_str() == "FUGR/FF"
     ));
 
     let unsupported_type: GlobalWorkbenchType = "ENQU/DL".parse().unwrap();
     assert!(matches!(
-        client.object_from_wb_type(&unsupported_type, "EZABAPGIT"),
+        ObjectRef::from_workbench_type(&unsupported_type, "EZABAPGIT"),
         Err(ObjectError::UnsupportedObjectType { object_type })
             if object_type.as_str() == "ENQU/DL"
     ));
@@ -239,12 +254,10 @@ async fn function_groups_resolve_typed_and_runtime_subobjects() {
     Logon::default().execute(&client).await.unwrap();
     let client = client.discover().await.unwrap();
 
-    let group = client.object::<FunctionGroup>("Z_TEST_GROUP").unwrap();
-    let module = group.subobject::<FunctionModule>("ZZZZFUNC").unwrap();
-    let include = group
-        .subobject::<FunctionGroupInclude>("LZ_TEST_GROUPTOP")
-        .unwrap();
-    let namespaced = group.subobject::<FunctionModule>("/DMO/FUNCTION").unwrap();
+    let group = ObjectRef::<FunctionGroup>::new("Z_TEST_GROUP");
+    let module = group.subobject::<FunctionModule>("ZZZZFUNC");
+    let include = group.subobject::<FunctionGroupInclude>("LZ_TEST_GROUPTOP");
+    let namespaced = group.subobject::<FunctionModule>("/DMO/FUNCTION");
     let runtime = group.erase();
     let runtime_module = runtime
         .subobject(&FunctionModule::WORKBENCH_TYPE, "ZZZZFUNC")
@@ -253,30 +266,46 @@ async fn function_groups_resolve_typed_and_runtime_subobjects() {
         serde_json::from_value(serde_json::to_value(&module).unwrap()).unwrap();
     let detached: ObjectRef<FunctionGroup> =
         serde_json::from_value(serde_json::to_value(&group).unwrap()).unwrap();
+    let resolved_module = client.discovery().resolve_object(&module).unwrap();
 
     assert_eq!(
-        module.uri().as_str(),
+        resolved_module.uri().as_str(),
         "/sap/bc/adt/functions/groups/z_test_group/fmodules/zzzzfunc"
     );
+    assert_eq!(resolved_module.reference(), &module);
+    let resolved_group = resolved_module.parent().unwrap();
+    assert_eq!(resolved_group.reference(), &group.erase());
     assert_eq!(
-        include.uri().as_str(),
+        resolved_group.uri().as_str(),
+        "/sap/bc/adt/functions/groups/z_test_group"
+    );
+    assert_eq!(
+        client
+            .discovery()
+            .resolve_object_uri(&include)
+            .unwrap()
+            .as_str(),
         "/sap/bc/adt/functions/groups/z_test_group/includes/lz_test_grouptop"
     );
     assert_eq!(
-        namespaced.uri().as_str(),
+        client
+            .discovery()
+            .resolve_object_uri(&namespaced)
+            .unwrap()
+            .as_str(),
         "/sap/bc/adt/functions/groups/z_test_group/fmodules/%2Fdmo%2Ffunction"
     );
     assert_eq!(runtime_module, module.erase());
     assert!(runtime_module.typed::<FunctionModule>().is_some());
-    let advertised: zadt::AdvertisedObjectReference = (&restored_module).into();
+    assert_eq!(restored_module.parent().unwrap(), &group.erase());
+    let detached_module = detached.subobject::<FunctionModule>("ZZZZFUNC");
     assert_eq!(
-        advertised.parent_uri.as_deref(),
-        Some("/sap/bc/adt/functions/groups/z_test_group")
+        client
+            .discovery()
+            .resolve_object_uri(&detached_module)
+            .unwrap(),
+        client.discovery().resolve_object_uri(&module).unwrap()
     );
-    assert!(matches!(
-        detached.subobject::<FunctionModule>("ZZZZFUNC"),
-        Err(ObjectError::MissingTemplate { .. })
-    ));
 }
 
 #[tokio::test]
@@ -284,13 +313,14 @@ async fn function_group_subobjects_require_the_advertised_template() {
     let client = Client::new(FixtureTransport::new(FUNCTIONS_WITHOUT_SUBOBJECT_TEMPLATES));
     Logon::default().execute(&client).await.unwrap();
     let client = client.discover().await.unwrap();
-    let group = client.object::<FunctionGroup>("Z_TEST_GROUP").unwrap();
+    let group = ObjectRef::<FunctionGroup>::new("Z_TEST_GROUP");
 
-    let error = group.subobject::<FunctionModule>("ZZZZFUNC").unwrap_err();
+    let module = group.subobject::<FunctionModule>("ZZZZFUNC");
+    let error = client.discovery().resolve_object_uri(&module).unwrap_err();
 
     assert!(matches!(
         error,
-        ObjectError::MissingTemplate { relation }
+        zadt::ResolveError::Object(ObjectError::MissingTemplate { relation })
             if relation
                 == "http://www.sap.com/adt/categories/functiongroups/functionmodules"
     ));
@@ -317,11 +347,14 @@ async fn function_group_subobjects_require_the_supported_template_shape() {
     let client = Client::new(FixtureTransport::new(unsupported));
     Logon::default().execute(&client).await.unwrap();
     let client = client.discover().await.unwrap();
-    let group = client.object::<FunctionGroup>("Z_TEST_GROUP").unwrap();
+    let group = ObjectRef::<FunctionGroup>::new("Z_TEST_GROUP");
 
+    let module = group.subobject::<FunctionModule>("ZZZZFUNC");
     assert!(matches!(
-        group.subobject::<FunctionModule>("ZZZZFUNC"),
-        Err(ObjectError::MissingTemplate { .. })
+        client.discovery().resolve_object_uri(&module),
+        Err(zadt::ResolveError::Object(
+            ObjectError::MissingTemplate { .. }
+        ))
     ));
 
     let malformed = unsupported.replacen(
@@ -333,9 +366,13 @@ async fn function_group_subobjects_require_the_supported_template_shape() {
     Logon::default().execute(&client).await.unwrap();
     let client = client.discover().await.unwrap();
 
+    let group = ObjectRef::<FunctionGroup>::new("Z_TEST_GROUP");
+    let module = group.subobject::<FunctionModule>("ZZZZFUNC");
     assert!(matches!(
-        client.object::<FunctionGroup>("Z_TEST_GROUP"),
-        Err(ObjectError::InvalidExpandedTarget { .. })
+        client.discovery().resolve_object_uri(&module),
+        Err(zadt::ResolveError::Object(
+            ObjectError::InvalidExpandedTarget { .. }
+        ))
     ));
 }
 
@@ -385,6 +422,7 @@ async fn reqwest_transport_sends_the_discovery_contract() {
     core_discovery.assert_async().await;
     assert!(
         client
+            .discovery()
             .capabilities()
             .collection(PROGRAMS_SCHEME, "programs")
             .is_some()

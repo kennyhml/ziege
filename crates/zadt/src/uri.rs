@@ -78,14 +78,6 @@ impl AdtUri {
         &self.0
     }
 
-    pub(crate) fn is_descendant_of(&self, parent: &Self) -> bool {
-        let child = self.as_str().as_bytes();
-        let parent = parent.as_str().as_bytes();
-        child.len() > parent.len()
-            && child.get(parent.len()) == Some(&b'/')
-            && percent_encoding_eq(&child[..parent.len()], parent)
-    }
-
     pub(crate) fn append_segments<I, S>(&self, segments: I) -> Result<Self, AdtUriError>
     where
         I: IntoIterator<Item = S>,
@@ -102,36 +94,6 @@ impl AdtUri {
             );
         Self::parse(url.path())
     }
-}
-
-fn percent_encoding_eq(left: &[u8], right: &[u8]) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-    let mut index = 0;
-    while index < left.len() {
-        if left[index] == b'%'
-            && right[index] == b'%'
-            && index + 2 < left.len()
-            && left[index + 1].is_ascii_hexdigit()
-            && left[index + 2].is_ascii_hexdigit()
-            && right[index + 1].is_ascii_hexdigit()
-            && right[index + 2].is_ascii_hexdigit()
-        {
-            if !left[index + 1].eq_ignore_ascii_case(&right[index + 1])
-                || !left[index + 2].eq_ignore_ascii_case(&right[index + 2])
-            {
-                return false;
-            }
-            index += 3;
-        } else {
-            if left[index] != right[index] {
-                return false;
-            }
-            index += 1;
-        }
-    }
-    true
 }
 
 #[derive(Debug, Error)]
@@ -217,17 +179,6 @@ mod tests {
                 .unwrap()
                 .as_str(),
             "/sap/bc/adt/programs/programs/%2FDMO%2FPROGRAM"
-        );
-    }
-
-    #[test]
-    fn descendant_comparison_ignores_percent_encoding_hex_case() {
-        let lower = AdtUri::parse("/sap/bc/adt/oo/classes/%2fdemo%2fclass").unwrap();
-
-        assert!(
-            AdtUri::parse("/sap/bc/adt/oo/classes/%2Fdemo%2Fclass/includes/test")
-                .unwrap()
-                .is_descendant_of(&lower)
         );
     }
 }

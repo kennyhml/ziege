@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Class, ClassProperties, Client, ConditionalResult, EntityTag, Logon, MediaTyped,
-    ObjectSnapshot, Operation, Ready, ReqwestTransport, WorkbenchVersion,
+    Class, ClassProperties, Client, ConditionalResult, Discovery, EntityTag, Logon, MediaTyped,
+    ObjectRef, ObjectSnapshot, Operation, ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -56,8 +56,8 @@ async fn class_run_uses_the_advertised_plain_text_contract() {
         })
         .await;
 
-    let client = ready_client(transport(&server)).await;
-    let class = client.object::<Class>("CL_ADT_URI_MAPPER").unwrap();
+    let client = discovered_client(transport(&server)).await;
+    let class = ObjectRef::<Class>::new("CL_ADT_URI_MAPPER");
     let output = class
         .run()
         .profiler_id("TRACE ID")
@@ -96,8 +96,8 @@ async fn repository_object_properties_forward_through_the_typed_query() {
         })
         .await;
 
-    let client = ready_client(transport(&server)).await;
-    let object = client.object::<Class>("CL_ADT_URI_MAPPER").unwrap().erase();
+    let client = discovered_client(transport(&server)).await;
+    let object = ObjectRef::<Class>::new("CL_ADT_URI_MAPPER").erase();
     let properties: ObjectSnapshot<()> = object
         .query()
         .workbench_version(WorkbenchVersion::Active)
@@ -109,18 +109,27 @@ async fn repository_object_properties_forward_through_the_typed_query() {
         properties.media_type(),
         "application/vnd.sap.adt.oo.classes.v4+xml"
     );
+    assert_eq!(
+        properties.uri().as_str(),
+        "/sap/bc/adt/oo/classes/cl_adt_uri_mapper"
+    );
     let properties_json = properties.properties().unwrap();
     assert_eq!(properties_json["@adtcore:name"], "CL_ADT_URI_MAPPER");
     assert_eq!(properties.etag().map(EntityTag::as_str), Some("class-etag"));
-    let revalidation = properties.revalidation().unwrap().encode().unwrap();
+    let revalidation = properties
+        .revalidation()
+        .unwrap()
+        .encode(<Client<_> as zadt::Resolves<zadt::RequiresDiscovery>>::resolver(&client))
+        .unwrap();
     assert_eq!(
         revalidation.headers()[http::header::IF_NONE_MATCH],
         "class-etag"
     );
     let class: ObjectSnapshot<Class> = properties.clone().try_into_typed::<Class>().unwrap();
     assert_eq!(class.reference().name(), "CL_ADT_URI_MAPPER");
+    assert_eq!(class.uri(), properties.uri());
     assert_eq!(class.workbench_version(), WorkbenchVersion::Active);
-    assert_eq!(class.reference().uri(), object.uri());
+    assert_eq!(class.reference().erase(), object);
     logon.assert_async().await;
     discovery.assert_async().await;
     metadata.assert_async().await;
@@ -146,7 +155,7 @@ async fn mock_discovery(server: &MockServer) -> Mock<'_> {
         .await
 }
 
-async fn ready_client(transport: ReqwestTransport) -> Client<Ready> {
+async fn discovered_client(transport: ReqwestTransport) -> Client<Discovery> {
     let client = Client::new(transport);
     Logon::default().execute(&client).await.unwrap();
     client.discover().await.unwrap()
@@ -195,8 +204,8 @@ async fn class_properties_query_converts_the_live_v4_manifest() {
         })
         .await;
 
-    let client = ready_client(transport(&server)).await;
-    let reference = client.object::<Class>("CL_ADT_URI_MAPPER").unwrap();
+    let client = discovered_client(transport(&server)).await;
+    let reference = ObjectRef::<Class>::new("CL_ADT_URI_MAPPER");
     let response = reference
         .query()
         .workbench_version(WorkbenchVersion::Active)
@@ -259,8 +268,8 @@ async fn class_properties_query_accepts_server_selected_v2_and_v3() {
         })
         .await;
 
-    let client = ready_client(transport(&server)).await;
-    let reference = client.object::<Class>("CL_ADT_URI_MAPPER").unwrap();
+    let client = discovered_client(transport(&server)).await;
+    let reference = ObjectRef::<Class>::new("CL_ADT_URI_MAPPER");
     let response = reference
         .query()
         .workbench_version(WorkbenchVersion::Active)
@@ -299,8 +308,8 @@ async fn class_properties_query_returns_not_modified_for_a_current_etag() {
         })
         .await;
 
-    let client = ready_client(transport(&server)).await;
-    let reference = client.object::<Class>("CX_ROOT").unwrap();
+    let client = discovered_client(transport(&server)).await;
+    let reference = ObjectRef::<Class>::new("CX_ROOT");
     let response = reference
         .query()
         .workbench_version(WorkbenchVersion::Active)

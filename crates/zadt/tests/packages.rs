@@ -3,7 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    AccessMode, Client, MediaTyped, Operation, Package, PackageProperties, Ready, ReqwestTransport,
+    AccessMode, Client, Discovery, MediaTyped, ObjectRef, Operation, Package, PackageProperties,
+    ReqwestTransport,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -50,7 +51,7 @@ async fn mock_core_discovery(server: &MockServer) -> Mock<'_> {
         .await
 }
 
-async fn ready_client(server: &MockServer) -> Client<Ready> {
+async fn discovered_client(server: &MockServer) -> Client<Discovery> {
     let transport = ReqwestTransport::builder()
         .destination(server.base_url())
         .sap_client("001")
@@ -85,8 +86,8 @@ async fn package_properties_advertise_all_supported_contracts() {
         })
         .await;
 
-    let client = ready_client(&server).await;
-    let reference = client.object::<Package>("sadt_tools_core").unwrap();
+    let client = discovered_client(&server).await;
+    let reference = ObjectRef::<Package>::new("sadt_tools_core");
     let response = reference.query().execute(&client).await.unwrap();
     assert_eq!(response.media_type(), PackageProperties::MEDIA_TYPES[0]);
     let package = response.properties();
@@ -194,8 +195,8 @@ async fn package_properties_update_returns_none_for_an_empty_response() {
         })
         .await;
 
-    let client = ready_client(&server).await;
-    let reference = client.object::<Package>("SADT_TOOLS_CORE").unwrap();
+    let client = discovered_client(&server).await;
+    let reference = ObjectRef::<Package>::new("SADT_TOOLS_CORE");
     let package = reference.query().execute(&client).await.unwrap();
     let original_description = package.properties().description.clone();
     let mut updated_properties = package.properties().clone();
@@ -269,8 +270,8 @@ async fn package_tree_queries_expand_the_discovered_template() {
         })
         .await;
 
-    let client = ready_client(&server).await;
-    let package = client.object::<Package>("SADT_TOOLS_CORE").unwrap();
+    let client = discovered_client(&server).await;
+    let package = ObjectRef::<Package>::new("SADT_TOOLS_CORE");
     let ancestors = package.super_tree().execute(&client).await.unwrap();
     let children = package.sub_tree().execute(&client).await.unwrap();
 
@@ -305,8 +306,8 @@ async fn package_settings_use_the_discovered_collection() {
         })
         .await;
 
-    let client = ready_client(&server).await;
-    let response = client.package_settings().execute(&client).await.unwrap();
+    let client = discovered_client(&server).await;
+    let response = zadt::PackageSettingsQuery.execute(&client).await.unwrap();
 
     assert!(!response.show_package_check_errors);
     logon.assert_async().await;

@@ -153,10 +153,10 @@ impl HttpSecuritySession {
         connection.reset_cookies();
         state.reset();
 
-        // Reuse a resolved logon operation with private dispatch
+        // Reuse an encoded logon operation with private dispatch.
         let operation = Logon::default().as_preflight();
-        let resolved = operation.encode().map_err(TransportError::new)?.resolve();
-        let (request, context, _) = resolved.into_parts();
+        let encoded = operation.encode(&()).map_err(TransportError::new)?;
+        let (request, context, _) = encoded.into_parts();
 
         let response = connection.send(&request, &HeaderMap::new()).await?;
         let information = operation

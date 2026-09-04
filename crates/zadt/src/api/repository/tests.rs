@@ -1,24 +1,14 @@
 use async_trait::async_trait;
 use http::{HeaderMap, Method, StatusCode, header};
 
-use super::{
-    content::{
-        REPOSITORY_CONTENT_REQUEST_MEDIA_TYPE, REPOSITORY_CONTENT_RESULT_MEDIA_TYPE,
-        RepositoryContentRequest,
-    },
-    favorites::{FAVORITES_MEDIA_TYPE, FAVORITES_UPDATE_MEDIA_TYPE},
-    object_properties::{
-        OBJECT_PROPERTIES_MEDIA_TYPE, PACKAGE_RELATION, TRANSPORT_PROPERTIES_MEDIA_TYPE,
-    },
-    *,
-};
+use super::{content::RepositoryContentRequest, *};
 use crate::{
-    AccessMode, AdtRequest, AdtResponse, AdtUri, Advertised, Class, Client, CompatibilityError,
-    DataElement, EncodedOperation, Include, ObjectError, ObjectRef, ObjectType, Operation,
-    OperationError, OperationResponse, Package, Program, Ready, RepositoryError, ResolveError,
-    Transport, TransportError,
+    AccessMode, AdtRequest, AdtResponse, AdtUri, Class, Client, CompatibilityError, DataElement,
+    Discovery, EncodeError, Include, ObjectError, ObjectRef, ObjectType, Operation, OperationError,
+    OperationResponse, Package, Program, RepositoryError, ResolveError, Transport, TransportError,
 };
 
+const DISCOVERY_XML: &[u8] = include_bytes!("../../../tests/fixtures/discovery.xml");
 const CONTENT_XML: &[u8] = include_bytes!("../../../tests/fixtures/repository-content.xml");
 const FACETS_XML: &[u8] = include_bytes!("../../../tests/fixtures/repository-facets.xml");
 const OBJECT_PROPERTIES_XML: &[u8] =
@@ -35,15 +25,38 @@ impl Transport for UnusedTransport {
     }
 }
 
-fn ready_client(xml: &[u8]) -> Client<Ready> {
+fn discovered_client(xml: &[u8]) -> Client<Discovery> {
     Client::new(UnusedTransport).with_capabilities(
         crate::api::discovery::parse_capabilities(xml).unwrap(),
         crate::api::discovery::parse_capabilities(xml).unwrap(),
     )
 }
 
+fn repository_client() -> Client<Discovery> {
+    let discovery = String::from_utf8(DISCOVERY_XML.to_vec()).unwrap().replace(
+        "</app:service>",
+        r#"
+    <app:workspace>
+        <atom:title>Additional Repository Information</atom:title>
+        <app:collection href="/sap/bc/adt/repository/favorites/lists">
+            <atom:title>Favorite Objects</atom:title>
+            <atom:category term="objectFavorites"
+                scheme="http://www.sap.com/adt/categories/repository/virtualfolders" />
+        </app:collection>
+        <app:collection href="/sap/bc/adt/repository/informationsystem/transportproperties/values">
+            <atom:title>Transport Properties</atom:title>
+            <atom:category term="transportProperties"
+                scheme="http://www.sap.com/adt/categories/repository" />
+        </app:collection>
+    </app:workspace>
+</app:service>"#,
+    );
+    discovered_client(discovery.as_bytes())
+}
+
 #[test]
 fn repository_content_request_matches_the_ris_contract() {
+    let client = repository_client();
     let query = RepositoryContentQuery::builder()
         .search_pattern("Z*")
         .preselection(
@@ -56,7 +69,7 @@ fn repository_content_request_matches_the_ris_contract() {
         .build()
         .unwrap();
 
-    let request = query.encode().unwrap();
+    let request = query.encode(client.discovery()).unwrap();
     let body = std::str::from_utf8(request.body()).unwrap();
 
     assert_eq!(request.method(), Method::POST);
@@ -70,11 +83,11 @@ fn repository_content_request_matches_the_ris_contract() {
     );
     assert_eq!(
         request.headers().get(header::CONTENT_TYPE).unwrap(),
-        REPOSITORY_CONTENT_REQUEST_MEDIA_TYPE
+        RepositoryContentRequest::MEDIA_TYPE
     );
     assert_eq!(
         request.headers().get(header::ACCEPT).unwrap(),
-        REPOSITORY_CONTENT_RESULT_MEDIA_TYPE
+        RepositoryContent::MEDIA_TYPE
     );
     assert!(body.contains("xmlns:vfs=\"http://www.sap.com/adt/ris/virtualFolders\""));
     assert!(body.contains("objectSearchPattern=\"Z*\""));
@@ -107,16 +120,20 @@ fn repository_content_response_decodes_one_layer() {
 
 #[test]
 fn favorite_objects_response_decodes_objects() {
+    let client = repository_client();
     let user = crate::User::new("DEVELOPER");
     let query = user.favorites();
-    let request = query.encode().unwrap();
+    let request = query.encode(client.discovery()).unwrap();
     assert_eq!(
         request.headers().get(header::ACCEPT).unwrap(),
-        FAVORITES_MEDIA_TYPE
+        FavoriteObjectList::MEDIA_TYPE
     );
 
     let mut headers = HeaderMap::new();
-    headers.insert(header::CONTENT_TYPE, FAVORITES_MEDIA_TYPE.parse().unwrap());
+    headers.insert(
+        header::CONTENT_TYPE,
+        FavoriteObjectList::MEDIA_TYPE.parse().unwrap(),
+    );
     let response = AdtResponse::new(
         StatusCode::OK,
         headers,
@@ -152,25 +169,22 @@ fn favorite_objects_response_decodes_objects() {
 
 #[test]
 fn favorite_objects_update_serializes_transactions() {
-    let object = ObjectRef::<Program>::for_test(
-        "Z_TEST",
-        AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
-    )
-    .erase();
+    let client = repository_client();
+    let object = ObjectRef::<Program>::new("Z_TEST").erase();
     let mut update = FavoriteObjectsUpdate::new("TEAM");
     update.add(&object).remove(&object);
 
-    let request = update.encode().unwrap();
+    let request = update.encode(client.discovery()).unwrap();
     let body = std::str::from_utf8(request.body()).unwrap();
 
     assert_eq!(request.method(), Method::POST);
     assert_eq!(
         request.headers().get(header::ACCEPT).unwrap(),
-        FAVORITES_MEDIA_TYPE
+        FavoriteObjectList::MEDIA_TYPE
     );
     assert_eq!(
         request.headers().get(header::CONTENT_TYPE).unwrap(),
-        FAVORITES_UPDATE_MEDIA_TYPE
+        FavoriteObjectList::UPDATE_MEDIA_TYPE
     );
     assert!(body.contains("xmlns:vf=\"http://www.sap.com/adt/ris/vf/favorites\""));
     assert!(body.contains("xmlns:adtcore=\"http://www.sap.com/adt/core\""));
@@ -184,15 +198,21 @@ fn favorite_objects_update_serializes_transactions() {
 
 #[test]
 fn object_properties_request_repeats_included_facets() {
-    let object = ObjectRef::<Program>::for_test(
-        "Z_TEST",
-        AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
+    let client = repository_client();
+    let object = ObjectRef::<Program>::new("Z_TEST");
+    assert_eq!(
+        client
+            .discovery()
+            .resolve_object_uri(&object)
+            .unwrap()
+            .as_str(),
+        "/sap/bc/adt/programs/programs/z_test"
     );
     let query = RepositoryObjectPropertiesQuery::new(&object)
         .include_facet(RepositoryFacet::PACKAGE)
         .include_facet(RepositoryFacet::GROUP);
 
-    let request = query.encode().unwrap();
+    let request = query.encode(client.discovery()).unwrap();
 
     assert_eq!(request.method(), Method::GET);
     assert_eq!(
@@ -208,7 +228,7 @@ fn object_properties_request_repeats_included_facets() {
     );
     assert_eq!(
         request.headers().get(header::ACCEPT).unwrap(),
-        OBJECT_PROPERTIES_MEDIA_TYPE
+        RepositoryObjectProperties::MEDIA_TYPE
     );
 
     let response = AdtResponse::new(
@@ -224,18 +244,48 @@ fn object_properties_request_repeats_included_facets() {
         ),
     )
     .unwrap();
-    assert_eq!(properties.object.reference.uri(), object.uri());
+    assert_eq!(properties.object.reference.name(), "CL_ADT_URI_MAPPER");
     assert_eq!(properties.properties.len(), 3);
 }
 
 #[test]
-fn assigned_transports_request_and_response_match_the_ris_contract() {
-    let object = ObjectRef::<Program>::for_test(
-        "Z_TEST",
-        AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
+fn object_properties_use_the_native_adt_identity_relation() {
+    let query = RepositoryObjectPropertiesQuery::for_uri(
+        AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
     );
+    let response = AdtResponse::new(
+        StatusCode::OK,
+        HeaderMap::new(),
+        br#"<opr:objectProperties xmlns:opr="http://www.sap.com/adt/ris/objectProperties">
+            <opr:object name="CL_ADT_URI_MAPPER" text="URI Mapper" package="SADT_TOOLS_CORE"
+                    type="CLAS/OC" expandable="true">
+                <atom:link href="/sap/bc/adt/vit/wb/object_type/clasoc/object_name/CL_ADT_URI_MAPPER"
+                    rel="http://www.sap.com/adt/relations/objects"
+                    type="application/vnd.sap.sapgui" xmlns:atom="http://www.w3.org/2005/Atom" />
+                <atom:link href="/sap/bc/adt/oo/classes/cl_adt_uri_mapper"
+                    rel="http://www.sap.com/adt/relations/objects"
+                    xmlns:atom="http://www.w3.org/2005/Atom" />
+            </opr:object>
+        </opr:objectProperties>"#
+            .to_vec(),
+    );
+
+    let properties = query
+        .decode(OperationResponse::new(
+            response,
+            AdtUri::parse("/sap/bc/adt/repository/objectproperties").unwrap(),
+        ))
+        .unwrap();
+
+    assert_eq!(properties.object.reference.name(), "CL_ADT_URI_MAPPER");
+}
+
+#[test]
+fn assigned_transports_request_and_response_match_the_ris_contract() {
+    let client = repository_client();
+    let object = ObjectRef::<Program>::new("Z_TEST");
     let query = object.transport_requests();
-    let request = query.encode().unwrap();
+    let request = query.encode(client.discovery()).unwrap();
 
     assert_eq!(request.method(), Method::GET);
     assert_eq!(
@@ -247,13 +297,13 @@ fn assigned_transports_request_and_response_match_the_ris_contract() {
     );
     assert_eq!(
         request.headers().get(header::ACCEPT).unwrap(),
-        TRANSPORT_PROPERTIES_MEDIA_TYPE
+        AssignedTransportRequests::MEDIA_TYPE
     );
 
     let mut headers = HeaderMap::new();
     headers.insert(
         header::CONTENT_TYPE,
-        TRANSPORT_PROPERTIES_MEDIA_TYPE.parse().unwrap(),
+        AssignedTransportRequests::MEDIA_TYPE.parse().unwrap(),
     );
     let response = AdtResponse::new(
         StatusCode::OK,
@@ -284,31 +334,35 @@ fn assigned_transports_request_and_response_match_the_ris_contract() {
 
 #[test]
 fn facets_request_uses_the_advertised_collection_target() {
-    let request: EncodedOperation<Advertised> = RepositoryFacetsQuery.encode().unwrap();
+    let client = repository_client();
+    let request = RepositoryFacetsQuery.encode(client.discovery()).unwrap();
 
     assert_eq!(request.method(), Method::GET);
+    assert_eq!(
+        request.target().as_str(),
+        "/sap/bc/adt/repository/informationsystem/virtualfolders/facets"
+    );
 }
 
 #[tokio::test]
 async fn repository_request_requires_its_discovery_collection() {
-    let client = ready_client(
+    let client = discovered_client(
         br#"<app:service xmlns:app="http://www.w3.org/2007/app"
                     xmlns:atom="http://www.w3.org/2005/Atom">
                     <app:workspace><atom:title>Repository</atom:title></app:workspace>
                 </app:service>"#,
     );
 
-    let error = client
-        .repository_content()
+    let error = RepositoryContentQuery::new()
         .execute(&client)
         .await
         .unwrap_err();
 
     assert!(matches!(
         error,
-        OperationError::Resolve(ResolveError::Compatibility(
+        OperationError::Encode(EncodeError::Resolve(ResolveError::Compatibility(
             CompatibilityError::MissingCollection(category)
-        ))
+        )))
             if category.scheme
                 == "http://www.sap.com/adt/categories/repository/virtualfolders"
                 && category.term == "contents"
@@ -373,7 +427,7 @@ fn parses_virtual_folders_and_repository_objects() {
         "CLAS/OC"
     );
     assert_eq!(
-        content.objects[0].reference.uri().as_str(),
+        content.objects[0].uri().as_str(),
         "/sap/bc/adt/oo/classes/zcl_demo"
     );
     assert_eq!(
@@ -384,12 +438,12 @@ fn parses_virtual_folders_and_repository_objects() {
             .unwrap()
             .unwrap()
             .target,
-        *content.objects[0].reference.uri()
+        content.objects[0].uri().clone()
     );
 }
 
 #[test]
-fn converts_ris_entries_to_checked_typed_references_without_changing_the_uri() {
+fn converts_ris_entries_to_checked_typed_references() {
     let base =
         AdtUri::parse("/sap/bc/adt/repository/informationsystem/virtualfolders/contents").unwrap();
     let content = RepositoryContent::parse(CONTENT_XML, &base).unwrap();
@@ -397,7 +451,7 @@ fn converts_ris_entries_to_checked_typed_references_without_changing_the_uri() {
 
     let class = entry.typed_reference::<Class>().unwrap();
     assert_eq!(class.name(), "ZCL_DEMO");
-    assert_eq!(class.uri(), entry.reference.uri());
+    assert_eq!(class.object_type(), entry.reference.object_type());
 
     let error = ObjectRef::<Program>::try_from(entry).unwrap_err();
     assert!(matches!(
@@ -597,16 +651,11 @@ fn parses_uniform_object_properties() {
 
     assert_eq!(properties.object.name, "CL_ADT_URI_MAPPER");
     assert_eq!(properties.object.object_type.to_string(), "CLAS/OC");
-    assert_eq!(properties.object.reference.uri(), &object_uri);
     assert_eq!(properties.object.relations().len(), 1);
     assert_eq!(properties.properties[0].facet, RepositoryFacet::PACKAGE);
-    let package_hierarchy = properties.package_hierarchy().unwrap();
+    let package_hierarchy = properties.package_hierarchy();
     let package = &package_hierarchy[0];
     assert_eq!(package.name(), "SADT_TOOLS_CORE");
-    assert_eq!(
-        package.uri().as_str(),
-        "/sap/bc/adt/packages/sadt_tools_core"
-    );
     assert_eq!(properties.properties[0].value, "SADT_TOOLS_CORE");
     assert_eq!(properties.properties[0].relations().len(), 1);
     assert_eq!(properties.properties[2].facet.as_str(), "FUTURE");
@@ -618,16 +667,11 @@ fn returns_the_complete_package_hierarchy_in_response_order() {
     let properties =
         RepositoryObjectProperties::parse(OBJECT_PROPERTIES_HIERARCHY_XML, &object_uri).unwrap();
 
-    let hierarchy = properties.package_hierarchy().unwrap();
+    let hierarchy = properties.package_hierarchy();
 
     assert_eq!(
         hierarchy.iter().map(ObjectRef::name).collect::<Vec<_>>(),
         ["BASIS", "SRIS", "SRIS_ADT"]
-    );
-    assert_eq!(hierarchy[0].uri().as_str(), "/sap/bc/adt/packages/basis");
-    assert_eq!(
-        hierarchy.last().unwrap().uri().as_str(),
-        "/sap/bc/adt/packages/sris_adt"
     );
     assert_eq!(
         properties
@@ -638,22 +682,4 @@ fn returns_the_complete_package_hierarchy_in_response_order() {
             .collect::<Vec<_>>(),
         ["BC", "BC-DWB", "BC-DWB-AIE"]
     );
-}
-
-#[test]
-fn package_hierarchy_requires_a_relation_for_every_level() {
-    let xml = String::from_utf8(OBJECT_PROPERTIES_HIERARCHY_XML.to_vec())
-        .unwrap()
-        .replacen(PACKAGE_RELATION, "urn:unexpected", 1);
-    let object_uri = AdtUri::parse("/sap/bc/adt/oo/classes/cl_ris_adt_res_obj_properties").unwrap();
-    let properties = RepositoryObjectProperties::parse(xml.as_bytes(), &object_uri).unwrap();
-
-    let error = properties.package_hierarchy().unwrap_err();
-
-    assert!(matches!(
-        error,
-        ObjectError::MissingRelation {
-            relation: PACKAGE_RELATION
-        }
-    ));
 }

@@ -3,7 +3,7 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTyped, ToXml, WorkbenchVersion,
+    MediaTyped, MediaTypes, ToXml, WorkbenchVersion,
 };
 
 #[object_type(
@@ -135,7 +135,7 @@ pub struct ServiceDefinitionProperties {
 }
 
 impl MediaTyped for ServiceDefinitionProperties {
-    const MEDIA_TYPES: &'static [&'static str] = &["application/vnd.sap.adt.ddic.srvd.v1+xml"];
+    const MEDIA_TYPES: MediaTypes = MediaTypes::new(&["application/vnd.sap.adt.ddic.srvd.v1+xml"]);
 }
 
 impl ToXml for ServiceDefinitionProperties {
@@ -175,10 +175,7 @@ mod tests {
         assert_eq!(properties.source_type, "S");
         assert!(properties.abap_language_version.is_none());
 
-        let reference = ObjectRef::<ServiceDefinition>::new(
-            "Z_SERVICE_DEFINITION".to_owned(),
-            AdtUri::parse("/sap/bc/adt/ddic/srvd/sources/z_service_definition").unwrap(),
-        );
+        let reference = ObjectRef::<ServiceDefinition>::new("Z_SERVICE_DEFINITION");
         properties.assign_identity(&reference);
         let body = properties.to_xml().unwrap();
         let body = std::str::from_utf8(&body).unwrap();
@@ -215,10 +212,8 @@ mod tests {
     fn relative_source_uri_resolves_against_the_object() {
         let properties = properties();
         let object = crate::ObjectSnapshot::new(
-            ObjectRef::<ServiceDefinition>::new(
-                properties.name.clone(),
-                AdtUri::parse("/sap/bc/adt/ddic/srvd/sources/managedistributions").unwrap(),
-            ),
+            ObjectRef::<ServiceDefinition>::new(properties.name.clone()),
+            AdtUri::parse("/sap/bc/adt/ddic/srvd/sources/managedistributions").unwrap(),
             crate::WorkbenchVersion::Active,
             ServiceDefinitionProperties::MEDIA_TYPES[0],
             None,

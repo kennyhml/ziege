@@ -11,13 +11,16 @@ use async_trait::async_trait;
 use http::{HeaderMap, HeaderValue, StatusCode, header};
 use tokio::sync::Notify;
 use zadt::{
-    AdtRequest, AdtResponse, Client, Package, RepositoryFacet, RepositoryPreselection, Transport,
-    TransportError,
+    AdtRequest, AdtResponse, Client, ObjectRef, Package, RepositoryFacet, RepositoryPreselection,
+    Transport, TransportError,
 };
 use zvfs::{FacetLevel, FacetPolicy, Mount, NodeId, NodeKind, VfsError, VirtualRepositoryTree};
 
 const DISCOVERY_XML: &str = include_str!("../../zadt/tests/fixtures/discovery.xml");
 const CORE_DISCOVERY_XML: &str = include_str!("../../zadt/tests/fixtures/core-discovery.xml");
+const CORE_DISCOVERY_WITHOUT_BATCH_XML: &str = r#"
+    <app:service xmlns:app="http://www.w3.org/2007/app" />
+"#;
 
 const FACETS_XML: &str = r#"
     <vf:facets xmlns:vf="http://www.sap.com/adt/ris/facets">
@@ -107,6 +110,7 @@ const OBJECT_XML: &str = r#"
 #[derive(Clone, Copy)]
 enum Behavior {
     Tree,
+    TreeWithoutBatch,
     MissingPackageUri,
     Adaptive(u32),
     AdaptiveRefresh,
@@ -163,7 +167,7 @@ impl TestTransport {
 
     fn repository_response(&self, body: &str, request_number: usize) -> Result<String, io::Error> {
         match self.behavior {
-            Behavior::Tree => {
+            Behavior::Tree | Behavior::TreeWithoutBatch => {
                 if body.contains("<vfs:value>/ROOT</vfs:value>")
                     && body.contains("<vfs:facet>PACKAGE</vfs:facet>")
                 {
@@ -464,7 +468,12 @@ impl Transport for TestTransport {
             return Ok(Self::response(DISCOVERY_XML.as_bytes().to_vec()));
         }
         if request.target().as_str() == "/sap/bc/adt/core/discovery" {
-            return Ok(Self::response(CORE_DISCOVERY_XML.as_bytes().to_vec()));
+            let body = if matches!(self.behavior, Behavior::TreeWithoutBatch) {
+                CORE_DISCOVERY_WITHOUT_BATCH_XML
+            } else {
+                CORE_DISCOVERY_XML
+            };
+            return Ok(Self::response(body.as_bytes().to_vec()));
         }
         if request.target().as_str()
             == "/sap/bc/adt/repository/informationsystem/virtualfolders/facets"
@@ -508,7 +517,7 @@ impl Transport for TestTransport {
     }
 }
 
-async fn client(behavior: Behavior) -> (zadt::Client<zadt::Ready>, Arc<TransportState>) {
+async fn client(behavior: Behavior) -> (zadt::Client<zadt::Discovery>, Arc<TransportState>) {
     let (transport, state) = TestTransport::new(behavior);
     let client = Client::new(transport).discover().await.unwrap();
     (client, state)
@@ -619,7 +628,8 @@ async fn validates_facet_policies_while_building() {
 #[tokio::test]
 async fn traverses_packages_groups_types_and_objects() {
     let (client, state) = client(Behavior::Tree).await;
-    let expected_mount_uri = client.object::<Package>("/ROOT").unwrap().uri().clone();
+    let package = ObjectRef::<Package>::new("/ROOT");
+    let expected_mount_uri = client.discovery().resolve_object_uri(&package).unwrap();
     let vfs = VirtualRepositoryTree::builder(client)
         .mount(Mount::package("/ROOT"))
         .build()
@@ -669,11 +679,7 @@ async fn traverses_packages_groups_types_and_objects() {
     assert!(!objects[0].is_directory());
     let object = objects[0].clone();
     assert_eq!(
-        vfs.object_entry(objects[0].id)
-            .unwrap()
-            .reference
-            .uri()
-            .as_str(),
+        vfs.object_entry(objects[0].id).unwrap().uri().as_str(),
         "/sap/bc/adt/oo/classes/zcl_demo"
     );
 
@@ -728,6 +734,29 @@ async fn traverses_packages_groups_types_and_objects() {
         requests
             .iter()
             .any(|request| request.contains("<vfs:value>../ROOT</vfs:value>"))
+    );
+}
+
+#[tokio::test]
+async fn falls_back_to_sequential_requests_without_batch_discovery() {
+    let (client, state) = client(Behavior::TreeWithoutBatch).await;
+    let vfs = VirtualRepositoryTree::builder(client)
+        .mount(Mount::package("/ROOT"))
+        .build()
+        .await
+        .unwrap();
+    let mount = vfs.children(vfs.root()).await.unwrap().remove(0);
+
+    let children = vfs.children(mount.id).await.unwrap();
+
+    assert_eq!(state.batch_count.load(Ordering::SeqCst), 0);
+    assert_eq!(state.post_count.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        children
+            .iter()
+            .map(|node| node.label.as_str())
+            .collect::<Vec<_>>(),
+        ["/ROOT/CHILD", "Source Code Library"]
     );
 }
 

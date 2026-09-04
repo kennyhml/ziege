@@ -4,7 +4,7 @@ use zadt_macros::object_type;
 use super::super::{
     AbapLanguageVersion, GlobalWorkbenchType, MediaTyped, ObjectRef, ToXml, WorkbenchVersion,
 };
-use crate::{AdvertisedLink, AdvertisedObjectReference};
+use crate::{AdvertisedLink, AdvertisedObjectReference, MediaTypes};
 
 #[object_type(
     properties = ProgramProperties,
@@ -32,15 +32,15 @@ pub struct Include;
 
 impl ObjectRef<Program> {
     #[cfg(test)]
-    pub(crate) fn for_test(name: &str, uri: crate::AdtUri) -> Self {
-        Self::new(name.to_ascii_uppercase(), uri)
+    pub(crate) fn for_test(name: &str) -> Self {
+        Self::new(name)
     }
 }
 
 impl ObjectRef<Include> {
     #[cfg(test)]
-    pub(crate) fn for_test(name: &str, uri: crate::AdtUri) -> Self {
-        Self::new(name.to_ascii_uppercase(), uri)
+    pub(crate) fn for_test(name: &str) -> Self {
+        Self::new(name)
     }
 }
 
@@ -160,10 +160,10 @@ pub struct ProgramProperties {
 }
 
 impl MediaTyped for ProgramProperties {
-    const MEDIA_TYPES: &'static [&'static str] = &[
+    const MEDIA_TYPES: MediaTypes = MediaTypes::new(&[
         "application/vnd.sap.adt.programs.programs.v3+xml",
         "application/vnd.sap.adt.programs.programs.v2+xml",
-    ];
+    ]);
 }
 
 impl ToXml for ProgramProperties {
@@ -257,8 +257,8 @@ pub struct IncludeProperties {
 }
 
 impl MediaTyped for IncludeProperties {
-    const MEDIA_TYPES: &'static [&'static str] =
-        &["application/vnd.sap.adt.programs.includes.v2+xml"];
+    const MEDIA_TYPES: MediaTypes =
+        MediaTypes::new(&["application/vnd.sap.adt.programs.includes.v2+xml"]);
 }
 
 impl ToXml for IncludeProperties {
@@ -272,6 +272,7 @@ impl ToXml for IncludeProperties {
 
 #[cfg(test)]
 mod tests {
+    use super::ObjectRef;
     use super::*;
     use crate::ObjectType;
 
@@ -344,11 +345,7 @@ mod tests {
     #[test]
     fn serializes_program_properties_as_a_complete_update_payload() {
         let program = parse_program(PROGRAM_XML).unwrap();
-        let reference = ObjectRef::<Program>::new(
-            program.name.clone(),
-            crate::AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
-        )
-        .erase();
+        let reference = ObjectRef::<Program>::for_test(&program.name).erase();
         let properties = Program::DESCRIPTOR
             .properties_from_json(&reference, serde_json::to_value(&program).unwrap())
             .unwrap();
@@ -373,11 +370,7 @@ mod tests {
     #[test]
     fn serializes_include_properties_as_a_complete_update_payload() {
         let include = parse_include(INCLUDE_XML).unwrap();
-        let reference = ObjectRef::<Include>::new(
-            include.name.clone(),
-            crate::AdtUri::parse("/sap/bc/adt/programs/includes/ztest").unwrap(),
-        )
-        .erase();
+        let reference = ObjectRef::<Include>::for_test(&include.name).erase();
         let properties = Include::DESCRIPTOR
             .properties_from_json(&reference, serde_json::to_value(&include).unwrap())
             .unwrap();

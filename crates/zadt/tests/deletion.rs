@@ -1,7 +1,7 @@
 #![cfg(feature = "reqwest")]
 
 use httpmock::{Mock, prelude::*};
-use zadt::{Class, Client, Operation, Ready, ReqwestTransport};
+use zadt::{Class, Client, Discovery, ObjectRef, Operation, ReqwestTransport};
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
 const CORE_DISCOVERY_XML: &str = include_str!("fixtures/core-discovery.xml");
@@ -43,7 +43,7 @@ async fn mock_csrf(server: &MockServer) -> Mock<'_> {
         .await
 }
 
-async fn ready_client(server: &MockServer) -> Client<Ready> {
+async fn discovered_client(server: &MockServer) -> Client<Discovery> {
     let transport = ReqwestTransport::builder()
         .destination(server.base_url())
         .sap_client("001")
@@ -75,8 +75,8 @@ async fn deletion_check_uses_the_discovered_contract() {
         })
         .await;
 
-    let client = ready_client(&server).await;
-    let reference = client.object::<Class>("ZMYCLASS").unwrap();
+    let client = discovered_client(&server).await;
+    let reference = ObjectRef::<Class>::new("ZMYCLASS");
     let result = reference.deletion_check().execute(&client).await.unwrap();
 
     assert_eq!(result.objects.len(), 1);
@@ -108,8 +108,8 @@ async fn deletion_records_each_object_in_its_transport() {
         })
         .await;
 
-    let client = ready_client(&server).await;
-    let reference = client.object::<Class>("ZMYCLASS").unwrap();
+    let client = discovered_client(&server).await;
+    let reference = ObjectRef::<Class>::new("ZMYCLASS");
     let result = reference
         .deletion_with_transport("A4HK900148")
         .execute(&client)

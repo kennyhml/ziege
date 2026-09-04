@@ -3,29 +3,18 @@ use serde::Deserialize;
 
 use super::{common::RepositoryFacet, content::RepositoryObjectEntry};
 use crate::{
-    AdtUri, Advertised, CategoryId, EncodeError, EncodedOperation, GlobalWorkbenchType,
-    ObjectError, ObjectRef, ObjectSnapshot, ObjectType, Operation, OperationResponse, Package,
-    RepositoryError, ResponseError, Stateless, TransportNumber, TransportStatus, User,
-    operation::CollectionLocator,
-    resource::{AdvertisedLink, Relations},
-};
-
-pub(super) const PACKAGE_RELATION: &str = "http://www.sap.com/adt/relations/packages";
-const URI_QUERY: &str = "uri";
-pub(super) const OBJECT_PROPERTIES_MEDIA_TYPE: &str =
-    "application/vnd.sap.adt.repository.objproperties.result.v1+xml";
-pub(super) const TRANSPORT_PROPERTIES_MEDIA_TYPE: &str =
-    "application/vnd.sap.adt.repository.trproperties.result.v1+xml";
-const ASSIGNED_TRANSPORTS_CATEGORY: CategoryId = CategoryId {
-    scheme: "http://www.sap.com/adt/categories/repository",
-    term: "transportProperties",
+    AdtUri, CategoryId, Discovery, EncodeError, EncodedOperation, GlobalWorkbenchType, ObjectError,
+    ObjectRef, ObjectSnapshot, ObjectType, Operation, OperationResponse, Package, RepositoryError,
+    RequiresDiscovery, ResponseError, Stateless, TransportNumber, TransportStatus, User,
+    resource::{AdvertisedLink, Relations, resolve_href},
 };
 
 /// Fetches uniform RIS properties for an arbitrary repository object.
 ///
-/// The repository object to fetch is represented by its [`AdtUri`]. For example,
-/// `?uri=/sap/bc/adt/programs/programs/ZPROG` returns the properties of the
-/// program `ZPROG`.
+/// The repository object can be supplied as an [`ObjectRef`] or directly as an
+/// [`AdtUri`]. Logical object references are resolved through discovery when the
+/// query is encoded. For example, `?uri=/sap/bc/adt/programs/programs/ZPROG`
+/// returns the properties of the program `ZPROG`.
 ///
 /// These properties are RIS centric and thus only provide generic repository information,
 /// such as facet properties and packages. Notably, the entire package chain is returned,
@@ -36,25 +25,52 @@ const ASSIGNED_TRANSPORTS_CATEGORY: CategoryId = CategoryId {
 /// Handler: `CL_RIS_ADT_RES_OBJ_PROPERTIES`
 #[derive(Clone, Debug)]
 pub struct RepositoryObjectPropertiesQuery {
-    object_uri: AdtUri,
+    target: RepositoryObjectTarget,
     facets: Vec<RepositoryFacet>,
 }
 
+#[derive(Clone, Debug)]
+enum RepositoryObjectTarget {
+    Object(ObjectRef),
+    Uri(AdtUri),
+}
+
+impl RepositoryObjectTarget {
+    fn for_object<T>(object: &ObjectRef<T>) -> Self {
+        Self::Object(object.erase())
+    }
+
+    fn for_uri(uri: AdtUri) -> Self {
+        Self::Uri(uri)
+    }
+
+    fn resolve(&self, resolver: &Discovery) -> Result<AdtUri, EncodeError> {
+        match self {
+            Self::Object(object) => Ok(resolver.resolve_object_uri(object)?),
+            Self::Uri(uri) => Ok(uri.clone()),
+        }
+    }
+}
+
 impl RepositoryObjectPropertiesQuery {
-    const TARGET: CollectionLocator = CollectionLocator::new(CategoryId {
+    const CATEGORY: CategoryId = CategoryId {
         scheme: "http://www.sap.com/adt/categories/repository",
         term: "objectProperties",
-    });
+    };
+    const URI_QUERY: &str = "uri";
 
     /// Creates a property query for a validated object reference.
     pub fn new<T>(object: &ObjectRef<T>) -> Self {
-        Self::for_uri(object.uri().clone())
+        Self {
+            target: RepositoryObjectTarget::for_object(object),
+            facets: Vec::new(),
+        }
     }
 
     /// Creates a property query from a validated ADT object URI.
     pub fn for_uri(object_uri: AdtUri) -> Self {
         Self {
-            object_uri,
+            target: RepositoryObjectTarget::for_uri(object_uri),
             facets: Vec::new(),
         }
     }
@@ -70,28 +86,30 @@ impl RepositoryObjectPropertiesQuery {
 impl Operation for RepositoryObjectPropertiesQuery {
     type Response = RepositoryObjectProperties;
     type Kind = Stateless;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut request = Self::TARGET.operation(Method::GET);
-        request.push_query(URI_QUERY, self.object_uri.as_str());
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        let object_uri = self.target.resolve(resolver)?;
+        let target = resolver.require_collection_target(Self::CATEGORY)?;
+        let mut request = EncodedOperation::new(Method::GET, target);
+        request.push_query(Self::URI_QUERY, object_uri.as_str());
         for facet in &self.facets {
             request.push_query("facet", facet.as_str());
         }
-        request.set_accept(OBJECT_PROPERTIES_MEDIA_TYPE);
+        request.set_accept(RepositoryObjectProperties::MEDIA_TYPE);
         Ok(request)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         response.require_status(StatusCode::OK)?;
-        RepositoryObjectProperties::parse(response.body(), &self.object_uri).map_err(Into::into)
+        RepositoryObjectProperties::parse_query(response.body(), response.request_target())
     }
 }
 
 impl RepositoryObjectEntry {
     /// Creates a uniform RIS property query for this listed object.
     pub fn properties(&self) -> RepositoryObjectPropertiesQuery {
-        RepositoryObjectPropertiesQuery::new(&self.reference)
+        RepositoryObjectPropertiesQuery::for_uri(self.uri().clone())
     }
 }
 
@@ -104,38 +122,48 @@ impl RepositoryObjectEntry {
 /// Backend handler: `CL_RIS_ADT_RES_TR_PROPERTIES`
 #[derive(Debug, Clone)]
 pub struct AssignedTransportsQuery {
-    object_uri: AdtUri,
+    target: RepositoryObjectTarget,
 }
 
 impl AssignedTransportsQuery {
-    const TARGET: CollectionLocator = CollectionLocator::new(ASSIGNED_TRANSPORTS_CATEGORY);
+    const CATEGORY: CategoryId = CategoryId {
+        scheme: "http://www.sap.com/adt/categories/repository",
+        term: "transportProperties",
+    };
+    const URI_QUERY: &str = "uri";
 
     /// Creates a query for the transport requests assigned to an object.
     pub fn new<T>(object: &ObjectRef<T>) -> Self {
-        Self::for_uri(object.uri().clone())
+        Self {
+            target: RepositoryObjectTarget::for_object(object),
+        }
     }
 
     /// Creates a query for the repository objects resolved from an ADT URI.
     pub fn for_uri(object_uri: AdtUri) -> Self {
-        Self { object_uri }
+        Self {
+            target: RepositoryObjectTarget::for_uri(object_uri),
+        }
     }
 }
 
 impl Operation for AssignedTransportsQuery {
     type Kind = Stateless;
     type Response = AssignedTransportRequests;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut request = Self::TARGET.operation(Method::GET);
-        request.push_query(URI_QUERY, self.object_uri.as_str());
-        request.set_accept(TRANSPORT_PROPERTIES_MEDIA_TYPE);
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        let object_uri = self.target.resolve(resolver)?;
+        let target = resolver.require_collection_target(Self::CATEGORY)?;
+        let mut request = EncodedOperation::new(Method::GET, target);
+        request.push_query(Self::URI_QUERY, object_uri.as_str());
+        request.set_accept(AssignedTransportRequests::MEDIA_TYPE);
         Ok(request)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         response.require_status(StatusCode::OK)?;
-        response.require_content_type(&[TRANSPORT_PROPERTIES_MEDIA_TYPE])?;
+        response.require_content_type(&[AssignedTransportRequests::MEDIA_TYPE])?;
         serde_xml_rs::from_reader(response.body())
             .map_err(RepositoryError::InvalidResponse)
             .map_err(Into::into)
@@ -150,13 +178,13 @@ impl<T> ObjectRef<T> {
 
 impl<T: ObjectType> ObjectSnapshot<T> {
     pub fn transport_requests(&self) -> AssignedTransportsQuery {
-        AssignedTransportsQuery::new(self.reference())
+        AssignedTransportsQuery::for_uri(self.uri().clone())
     }
 }
 
 impl ObjectSnapshot<()> {
     pub fn transport_requests(&self) -> AssignedTransportsQuery {
-        AssignedTransportsQuery::new(self.reference())
+        AssignedTransportsQuery::for_uri(self.uri().clone())
     }
 }
 
@@ -205,35 +233,66 @@ pub struct RepositoryObjectProperties {
 }
 
 impl RepositoryObjectProperties {
+    pub(super) const MEDIA_TYPE: &str =
+        "application/vnd.sap.adt.repository.objproperties.result.v1+xml";
+    const OBJECT_RELATION: &str = "http://www.sap.com/adt/relations/objects";
+    const SAP_GUI_MEDIA_TYPE: &str = "application/vnd.sap.sapgui";
+
     /// Returns the package hierarchy in the top-down order emitted by RIS.
     ///
     /// The first entry is the root package and the final entry is the package
     /// directly containing the object. An empty hierarchy means package
     /// properties were not requested or the object has no package assignment.
-    pub fn package_hierarchy(&self) -> Result<Vec<ObjectRef<Package>>, ObjectError> {
+    pub fn package_hierarchy(&self) -> Vec<ObjectRef<Package>> {
         self.properties
             .iter()
             .filter(|property| property.facet == RepositoryFacet::PACKAGE)
-            .map(|property| {
-                let link = property.relations.find(PACKAGE_RELATION)?.ok_or(
-                    ObjectError::MissingRelation {
-                        relation: PACKAGE_RELATION,
-                    },
-                )?;
-                Ok(ObjectRef::new(property.value.clone(), link.target.clone()))
-            })
+            .map(|property| ObjectRef::new(property.value.clone()))
             .collect()
     }
 }
 
 impl RepositoryObjectProperties {
-    pub(super) fn parse(body: &[u8], object_uri: &AdtUri) -> Result<Self, RepositoryError> {
-        let raw: RawRepositoryObjectProperties =
-            serde_xml_rs::from_reader(body).map_err(RepositoryError::InvalidResponse)?;
-        let reference = ObjectRef::erased(
-            raw.object.name.clone(),
-            object_uri.clone(),
+    #[cfg(test)]
+    pub(super) fn parse(body: &[u8], request_uri: &AdtUri) -> Result<Self, ResponseError> {
+        Self::parse_query(body, request_uri)
+    }
+
+    fn parse_query(body: &[u8], request_uri: &AdtUri) -> Result<Self, ResponseError> {
+        let raw = Self::parse_raw(body)?;
+        let link = raw
+            .object
+            .links
+            .iter()
+            .find(|link| {
+                link.relation.as_deref() == Some(Self::OBJECT_RELATION)
+                    && link.media_type.as_deref().is_none_or(|media_type| {
+                        !media_type.eq_ignore_ascii_case(Self::SAP_GUI_MEDIA_TYPE)
+                    })
+            })
+            .ok_or(ObjectError::MissingRelation {
+                relation: Self::OBJECT_RELATION,
+            })?;
+        let object_uri = resolve_href(request_uri, &link.href)
+            .map(|resolved| resolved.target)
+            .map_err(|source| RepositoryError::InvalidObjectUri {
+                name: raw.object.name.clone(),
+                uri: link.href.clone(),
+                source,
+            })?;
+
+        Ok(Self::from_raw(raw, &object_uri))
+    }
+
+    fn parse_raw(body: &[u8]) -> Result<RawRepositoryObjectProperties, RepositoryError> {
+        serde_xml_rs::from_reader(body).map_err(RepositoryError::InvalidResponse)
+    }
+
+    fn from_raw(raw: RawRepositoryObjectProperties, object_uri: &AdtUri) -> Self {
+        let reference = ObjectRef::from_parts(
+            raw.object.name.to_ascii_uppercase(),
             raw.object.object_type.clone(),
+            None,
         );
         let properties = raw
             .properties
@@ -244,7 +303,7 @@ impl RepositoryObjectProperties {
                 display_name: property.display_name,
                 description: property.description,
                 has_children_of_same_facet: property.has_children_of_same_facet,
-                relations: Relations::new(reference.clone(), property.links),
+                relations: Relations::for_base(object_uri.clone(), property.links),
             })
             .collect();
         let object = RepositoryObjectSummary {
@@ -253,11 +312,11 @@ impl RepositoryObjectProperties {
             package: raw.object.package,
             object_type: raw.object.object_type,
             expandable: raw.object.expandable,
-            relations: Relations::new(reference.clone(), raw.object.links),
+            relations: Relations::for_base(object_uri.clone(), raw.object.links),
             reference,
         };
 
-        Ok(Self { object, properties })
+        Self { object, properties }
     }
 }
 
@@ -269,6 +328,9 @@ pub struct AssignedTransportRequests {
 }
 
 impl AssignedTransportRequests {
+    pub(super) const MEDIA_TYPE: &str =
+        "application/vnd.sap.adt.repository.trproperties.result.v1+xml";
+
     pub fn len(&self) -> usize {
         self.requests.len()
     }

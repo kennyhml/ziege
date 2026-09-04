@@ -3,7 +3,7 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTyped, ToXml, WorkbenchVersion,
+    MediaTyped, MediaTypes, ToXml, WorkbenchVersion,
 };
 
 #[object_type(
@@ -115,7 +115,7 @@ pub struct AccessControlProperties {
 }
 
 impl MediaTyped for AccessControlProperties {
-    const MEDIA_TYPES: &'static [&'static str] = &["application/vnd.sap.adt.dclSource+xml"];
+    const MEDIA_TYPES: MediaTypes = MediaTypes::new(&["application/vnd.sap.adt.dclSource+xml"]);
 }
 
 impl ToXml for AccessControlProperties {
@@ -130,7 +130,7 @@ impl ToXml for AccessControlProperties {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, AssignObjectIdentity, ObjectRef, ObjectType};
+    use crate::{AssignObjectIdentity, ObjectRef, ObjectType};
 
     const ACCESS_CONTROL_XML: &str =
         include_str!("../../../tests/fixtures/access-control-sdsh-cds-domain-val-dcl.xml");
@@ -154,10 +154,7 @@ mod tests {
         assert_eq!(properties.object_type, AccessControl::WORKBENCH_TYPE);
         assert!(properties.abap_language_version.is_none());
 
-        let reference = ObjectRef::<AccessControl>::new(
-            "Z_ACCESS_CONTROL".to_owned(),
-            AdtUri::parse("/sap/bc/adt/acm/dcl/sources/z_access_control").unwrap(),
-        );
+        let reference = ObjectRef::<AccessControl>::new("Z_ACCESS_CONTROL");
         properties.assign_identity(&reference);
         let body = properties.to_xml().unwrap();
         let body = std::str::from_utf8(&body).unwrap();

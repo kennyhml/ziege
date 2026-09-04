@@ -1,30 +1,14 @@
-use std::{collections::HashMap, fmt, hash::Hash, marker::PhantomData, sync::Arc};
+use std::{collections::HashMap, fmt, hash::Hash, marker::PhantomData};
 
 use serde::{Deserialize, Deserializer, Serialize};
 use stduritemplate::Value;
 
 use super::{
-    GlobalWorkbenchType, ObjectIdentity, ObjectType, PrimaryObjectType, SubObject,
-    SubObjectDescriptor, descriptors,
+    GlobalWorkbenchType, ObjectIdentity, ObjectType, PrimaryObjectType, SubObject, descriptors,
 };
-use crate::{
-    CategoryId,
-    client::{Client, Ready},
-    error::ObjectError,
-    resource::AdtUriTemplate,
-    uri::AdtUri,
-};
+use crate::{Discovery, ResolveError, error::ObjectError, resource::AdtUriTemplate, uri::AdtUri};
 
-/// A mapping of subobject workbench types to their resolved locators
-///
-/// For instance, function groups `FUGR/F` has a mapping of
-/// `FUGR/FF` -> `/sap/bc/adt/functions/groups/zgroup/fmodules` (+media type)
-/// `FUGR/I` -> `/sap/bc/adt/functions/groups/zgroup/includes` (+media type)
-///
-/// That way, child objects can be resolved from the parent object.
-type SubObjectMapping = HashMap<GlobalWorkbenchType, ResolvedCollection>;
-
-/// A reference to an ADT object with its name, URI, and Workbench type.
+/// A logical reference to an ADT object.
 ///
 /// Unlike [`crate::ObjectSnapshot<T>`], this value does not include loaded properties.
 /// The type parameter `T` selects the operations available for that object
@@ -33,56 +17,93 @@ type SubObjectMapping = HashMap<GlobalWorkbenchType, ResolvedCollection>;
 /// [`ObjectRef<()>`] stores the object family at runtime. It is useful when the
 /// family comes from user input or a repository response.
 ///
-/// References created by [`Client::object`] retain their containing collection
-/// and any subobject collections resolved from discovery. Those targets are
-/// transient and are not serialized. Child references retain and serialize
-/// their parent identity so response validation and operations such as
-/// activation remain stable.
+/// A [`Discovery`] resolves the object when an operation is encoded. Child
+/// references retain their parent so the relationship template can be selected
+/// without caching discovery state on the reference.
 #[derive(Debug, Serialize)]
-#[serde(bound = "")]
 pub struct ObjectRef<T = ()> {
+    /// The full name of the object
     name: String,
-    uri: AdtUri,
+
+    /// The workbench type of the object
     object_type: GlobalWorkbenchType,
-
-    #[serde(skip)]
-    collection: Option<ResolvedCollection>,
-
-    /// Describes which sub-objects this object type may carry
-    #[serde(skip)]
-    subobjects: Option<Arc<HashMap<GlobalWorkbenchType, ResolvedCollection>>>,
 
     /// An optional parent of this object, if it has one
     #[serde(skip_serializing_if = "Option::is_none")]
-    parent: Option<ParentObjectIdentity>,
+    parent: Option<Box<ObjectRef<()>>>,
 
     #[serde(skip)]
     marker: PhantomData<fn() -> T>,
 }
 
-/// A resource collection that has been resolved from the discovery.
+/// An object reference whose URI and any parent URI have been resolved.
 ///
-/// This is the same target uri the object reference has been created from.
-/// Its saved as context needed for creation requests to the object reference
-/// as the reference stores only the future location, not its base or the
-/// media types accepted for creation requests.
-#[derive(Clone, Debug)]
-struct ResolvedCollection {
-    target: AdtUri,
-    accepted_media_types: Vec<String>,
+/// This type is primarily used internally while encoding operations that must
+/// embed a complete object identity in their payload.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct ResolvedObjectRef<T = ()> {
+    reference: ObjectRef<T>,
+    uri: AdtUri,
+    parent: Option<Box<ResolvedObjectRef<()>>>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct ParentObjectIdentity {
-    name: String,
-    uri: AdtUri,
-    object_type: GlobalWorkbenchType,
+impl<T> ResolvedObjectRef<T> {
+    /// Returns the logical object reference.
+    pub fn reference(&self) -> &ObjectRef<T> {
+        &self.reference
+    }
+
+    /// Returns the resolved object URI.
+    pub fn uri(&self) -> &AdtUri {
+        &self.uri
+    }
+
+    /// Returns the fully resolved parent reference, when this is a subobject.
+    pub fn parent(&self) -> Option<&ResolvedObjectRef<()>> {
+        self.parent.as_deref()
+    }
+
+    pub(crate) fn parent_reference(&self) -> Option<AdvertisedObjectReference> {
+        self.parent().map(AdvertisedObjectReference::from)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        reference: ObjectRef<T>,
+        uri: AdtUri,
+        parent: Option<ResolvedObjectRef<()>>,
+    ) -> Self {
+        Self {
+            reference,
+            uri,
+            parent: parent.map(Box::new),
+        }
+    }
+}
+
+impl<T> Clone for ResolvedObjectRef<T> {
+    fn clone(&self) -> Self {
+        Self {
+            reference: self.reference.clone(),
+            uri: self.uri.clone(),
+            parent: self.parent.clone(),
+        }
+    }
 }
 
 impl<T> ObjectRef<T> {
-    /// Returns the object's resource URI.
-    pub fn uri(&self) -> &AdtUri {
-        &self.uri
+    pub(crate) fn from_parts(
+        name: String,
+        object_type: GlobalWorkbenchType,
+        parent: Option<Box<ObjectRef<()>>>,
+    ) -> Self {
+        Self {
+            name,
+            object_type,
+            parent,
+            marker: PhantomData,
+        }
     }
 
     /// Returns the object name.
@@ -103,10 +124,7 @@ impl<T> ObjectRef<T> {
     pub(crate) fn retag<U>(&self) -> ObjectRef<U> {
         ObjectRef {
             name: self.name.clone(),
-            uri: self.uri.clone(),
             object_type: self.object_type.clone(),
-            collection: self.collection.clone(),
-            subobjects: self.subobjects.clone(),
             parent: self.parent.clone(),
             marker: PhantomData,
         }
@@ -126,7 +144,9 @@ impl<T> ObjectRef<T> {
     }
 
     pub(crate) fn same_identity<U>(&self, other: &ObjectRef<U>) -> bool {
-        self.uri == other.uri && self.name == other.name && self.object_type == other.object_type
+        self.name == other.name
+            && self.object_type == other.object_type
+            && self.parent == other.parent
     }
 
     pub(crate) fn unsupported_capability(&self, capability: &'static str) -> ObjectError {
@@ -136,85 +156,45 @@ impl<T> ObjectRef<T> {
         }
     }
 
-    pub(crate) fn collection(&self) -> Result<(&AdtUri, &[String]), ObjectError> {
-        self.collection
-            .as_ref()
-            .map(|collection| {
-                (
-                    &collection.target,
-                    collection.accepted_media_types.as_slice(),
-                )
-            })
-            .ok_or_else(|| ObjectError::MissingCollectionContext {
-                object_type: self.object_type.clone(),
-            })
-    }
-
-    fn with_collection(mut self, collection: ResolvedCollection) -> Self {
-        self.collection = Some(collection);
-        self
-    }
-
-    fn with_subobjects(
-        mut self,
-        subobjects: HashMap<GlobalWorkbenchType, ResolvedCollection>,
-    ) -> Self {
-        self.subobjects = Some(Arc::new(subobjects));
-        self
-    }
-
-    pub(crate) fn with_parent<U>(mut self, parent: &ObjectRef<U>) -> Self {
-        self.parent = Some(ParentObjectIdentity {
-            name: parent.name.clone(),
-            uri: parent.uri.clone(),
-            object_type: parent.object_type.clone(),
-        });
-        self
-    }
-
-    pub(crate) fn parent_identity(&self) -> Option<(&str, &AdtUri, &GlobalWorkbenchType)> {
-        self.parent
-            .as_ref()
-            .map(|parent| (parent.name.as_str(), &parent.uri, &parent.object_type))
-    }
-
-    pub(crate) fn parent_reference(&self) -> Option<AdvertisedObjectReference> {
-        self.parent
-            .as_ref()
-            .map(|parent| AdvertisedObjectReference {
-                name: Some(parent.name.clone()),
-                uri: Some(parent.uri.as_str().to_owned()),
-                object_type: Some(parent.object_type.clone()),
-                ..Default::default()
-            })
+    /// Returns the logical parent identity for a subobject.
+    pub fn parent(&self) -> Option<&ObjectRef<()>> {
+        self.parent.as_deref()
     }
 }
 
-impl<T: ObjectType> ObjectRef<T> {
-    pub(crate) fn new(name: String, uri: AdtUri) -> Self {
-        Self {
-            name,
-            uri,
-            object_type: T::WORKBENCH_TYPE,
-            collection: None,
-            subobjects: None,
-            parent: None,
-            marker: PhantomData,
-        }
+impl<T: PrimaryObjectType> ObjectRef<T> {
+    /// Creates a logical primary-object reference.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self::from_parts(name.into().to_ascii_uppercase(), T::WORKBENCH_TYPE, None)
     }
 }
 
 impl ObjectRef<()> {
-    pub(crate) fn erased(name: String, uri: AdtUri, object_type: GlobalWorkbenchType) -> Self {
-        Self {
-            name,
-            uri,
-            object_type,
-            collection: None,
-            subobjects: None,
-            parent: None,
-            marker: PhantomData,
-        }
+    /// Creates a logical primary-object reference from a Workbench type.
+    ///
+    /// Subobjects require a parent and must instead be created through
+    /// [`ObjectRef::subobject`].
+    pub fn from_workbench_type(
+        object_type: &GlobalWorkbenchType,
+        name: impl Into<String>,
+    ) -> Result<Self, ObjectError> {
+        let descriptor = descriptors::object_type_descriptor(object_type).ok_or_else(|| {
+            ObjectError::UnsupportedObjectType {
+                object_type: object_type.clone(),
+            }
+        })?;
+
+        descriptor
+            .category()
+            .ok_or_else(|| ObjectError::ParentObjectRequired {
+                object_type: object_type.clone(),
+            })?;
+
+        Ok(Self::from_parts(
+            name.into().to_ascii_uppercase(),
+            object_type.clone(),
+            None,
+        ))
     }
 
     /// Recovers a typed reference when this object has the requested type.
@@ -230,10 +210,7 @@ impl<T> Clone for ObjectRef<T> {
     fn clone(&self) -> Self {
         Self {
             name: self.name.clone(),
-            uri: self.uri.clone(),
             object_type: self.object_type.clone(),
-            collection: self.collection.clone(),
-            subobjects: self.subobjects.clone(),
             parent: self.parent.clone(),
             marker: PhantomData,
         }
@@ -250,9 +227,19 @@ impl<T> ObjectIdentity for ObjectRef<T> {
     }
 }
 
+impl<T> ObjectIdentity for ResolvedObjectRef<T> {
+    fn object_name(&self) -> &str {
+        self.reference.name()
+    }
+
+    fn object_type(&self) -> &GlobalWorkbenchType {
+        self.reference.object_type()
+    }
+}
+
 impl<T> PartialEq for ObjectRef<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.uri == other.uri
+        self.same_identity(other)
     }
 }
 
@@ -260,13 +247,15 @@ impl<T> Eq for ObjectRef<T> {}
 
 impl<T> Hash for ObjectRef<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.uri.hash(state);
+        self.name.hash(state);
+        self.object_type.hash(state);
+        self.parent.hash(state);
     }
 }
 
 impl<T> fmt::Display for ObjectRef<T> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.uri.fmt(formatter)
+        write!(formatter, "{} ({})", self.name, self.object_type)
     }
 }
 
@@ -277,10 +266,9 @@ impl<T> fmt::Display for ObjectRef<T> {
 #[derive(Deserialize)]
 struct RawObjectRef {
     name: String,
-    uri: AdtUri,
     object_type: GlobalWorkbenchType,
     #[serde(default)]
-    parent: Option<ParentObjectIdentity>,
+    parent: Option<Box<ObjectRef<()>>>,
 }
 
 impl<'de> Deserialize<'de> for ObjectRef<()> {
@@ -290,9 +278,11 @@ impl<'de> Deserialize<'de> for ObjectRef<()> {
     {
         let reference = RawObjectRef::deserialize(deserializer)?;
         validate_parent_identity(&reference).map_err(serde::de::Error::custom)?;
-        let mut object = Self::erased(reference.name, reference.uri, reference.object_type);
-        object.parent = reference.parent;
-        Ok(object)
+        Ok(Self::from_parts(
+            reference.name,
+            reference.object_type,
+            reference.parent,
+        ))
     }
 }
 
@@ -311,9 +301,11 @@ impl<'de, T: ObjectType> Deserialize<'de> for ObjectRef<T> {
             ));
         }
         validate_parent_identity(&reference).map_err(serde::de::Error::custom)?;
-        let mut object = Self::new(reference.name, reference.uri);
-        object.parent = reference.parent;
-        Ok(object)
+        Ok(Self::from_parts(
+            reference.name,
+            T::WORKBENCH_TYPE,
+            reference.parent,
+        ))
     }
 }
 
@@ -333,21 +325,6 @@ fn validate_parent_identity(reference: &RawObjectRef) -> Result<(), ObjectError>
             reason: format!(
                 "type `{}` does not declare this subobject relationship",
                 parent.object_type
-            ),
-        });
-    }
-    if !reference.uri.is_descendant_of(&parent.uri)
-        || reference.uri.as_str()[parent.uri.as_str().len()..]
-            .split('/')
-            .filter(|segment| !segment.is_empty())
-            .count()
-            != 2
-    {
-        return Err(ObjectError::InvalidParentObject {
-            object_type: reference.object_type.clone(),
-            reason: format!(
-                "URI `{}` is not a direct subobject of `{}`",
-                reference.uri, parent.uri
             ),
         });
     }
@@ -391,12 +368,20 @@ pub struct AdvertisedObjectReference {
 impl<T> From<&ObjectRef<T>> for AdvertisedObjectReference {
     fn from(value: &ObjectRef<T>) -> Self {
         Self {
-            uri: Some(value.uri().as_str().to_owned()),
             object_type: Some(value.object_type.clone()),
             name: Some(value.name.clone()),
-            parent_uri: value
-                .parent_identity()
-                .map(|(_, uri, _)| uri.as_str().to_owned()),
+            ..Default::default()
+        }
+    }
+}
+
+impl<T> From<&ResolvedObjectRef<T>> for AdvertisedObjectReference {
+    fn from(value: &ResolvedObjectRef<T>) -> Self {
+        Self {
+            uri: Some(value.uri().to_string()),
+            object_type: Some(value.reference.object_type.clone()),
+            name: Some(value.reference.name.clone()),
+            parent_uri: value.parent().map(|parent| parent.uri().to_string()),
             ..Default::default()
         }
     }
@@ -426,174 +411,138 @@ pub struct ObjectReferences {
     pub objects: Vec<AdvertisedObjectReference>,
 }
 
-impl Client<Ready> {
-    /// Loads all parts of an object identity by its category in the discovery.
-    ///
-    /// This includes checking all associated sub-object relationships and finding
-    /// the advertised template for each of them, substituting the primary object
-    /// in the template and then storing those uris in the returned reference.
-    ///
-    /// Both typed and erased objects can use this path, they only differ in where
-    /// the sub object descriptors come from (static vs descriptor).
-    fn resolve_object_identity(
+pub(crate) struct ResolvedObjectCollection {
+    pub(crate) target: AdtUri,
+    pub(crate) accepted_media_types: Vec<String>,
+}
+
+impl Discovery {
+    /// Resolves an object and its parent to references with concrete URIs.
+    pub fn resolve_object<T>(
         &self,
-        category: CategoryId,
-        name: &str,
-        subobjects: &[SubObjectDescriptor],
-    ) -> Result<(String, AdtUri, ResolvedCollection, SubObjectMapping), ObjectError> {
-        let name = name.to_ascii_uppercase();
-        let uri_name = name.to_ascii_lowercase();
-        let collection = self.require_collection(category)?;
+        object: &ObjectRef<T>,
+    ) -> Result<ResolvedObjectRef<T>, ResolveError> {
+        let uri = self.resolve_object_uri(object)?;
+        let parent = object
+            .parent()
+            .map(|parent| self.resolve_object(parent))
+            .transpose()?
+            .map(Box::new);
+        Ok(ResolvedObjectRef {
+            reference: object.clone(),
+            uri,
+            parent,
+        })
+    }
 
-        // Base URI of the primary object
-        let collection_target = collection.target()?;
-        let uri = collection_target.append_segments([&uri_name])?;
-        let resolved_collection = ResolvedCollection {
-            target: collection_target,
-            accepted_media_types: collection.accepted_media_types().to_vec(),
-        };
-        let templates = collection.template_links();
+    /// Resolves an object's concrete URI through discovery.
+    pub fn resolve_object_uri<T>(&self, object: &ObjectRef<T>) -> Result<AdtUri, ResolveError> {
+        let collection = self.resolve_object_collection(object)?;
+        collection
+            .target
+            .append_segments([object.name().to_ascii_lowercase()])
+            .map_err(ObjectError::InvalidTarget)
+            .map_err(Into::into)
+    }
 
-        let mut resolved_subobjects = HashMap::new();
-        for subobject in subobjects {
-            let Some(link) = templates
+    pub(crate) fn resolve_object_collection<T>(
+        &self,
+        object: &ObjectRef<T>,
+    ) -> Result<ResolvedObjectCollection, ResolveError> {
+        if let Some(parent) = object.parent() {
+            let parent_descriptor = parent.require_descriptor()?;
+            let category =
+                parent_descriptor
+                    .category()
+                    .ok_or_else(|| ObjectError::InvalidParentObject {
+                        object_type: object.object_type().clone(),
+                        reason: format!(
+                            "parent type `{}` is not directly addressable",
+                            parent.object_type()
+                        ),
+                    })?;
+            let relationship = parent_descriptor
+                .subobjects()
                 .iter()
-                .find(|link| link.relation() == subobject.relation())
-            else {
-                // no template found for this sub-object, which is weird
-                // and hints towards an incompatible API, but dont consider
-                // this an error yet until its actually used
-                continue;
-            };
-
-            // We expect the template to have exactly one variable name for the
-            // parent object, e.g. `/sap/bc/adt/functions/groups/{fgroup}/fmodules`
+                .find(|candidate| candidate.object_type() == object.object_type())
+                .ok_or_else(|| ObjectError::UnsupportedSubObjectType {
+                    parent_type: parent.object_type().clone(),
+                    child_type: object.object_type().clone(),
+                })?;
+            let link = self.require_template(category, relationship.relation())?;
             let template = AdtUriTemplate::new(link.template());
-            if template.variable_names() != [subobject.parent_variable()] {
-                continue;
+            if template.variable_names() != [relationship.parent_variable()] {
+                return Err(ObjectError::MissingTemplate {
+                    relation: relationship.relation(),
+                }
+                .into());
             }
-
-            // Substitute the variable to create a concrete adt uri, such
-            // as `/sap/bc/adt/functions/groups/zgroup/fmodules` for FUGR.
             let variables = HashMap::from([(
-                subobject.parent_variable().to_owned(),
-                Value::String(uri_name.clone()),
+                relationship.parent_variable().to_owned(),
+                Value::String(parent.name().to_ascii_lowercase()),
             )]);
             let (target, query) = template.expand(&variables)?;
-
-            // query parameters are not expected / supported
-            if query.is_empty() {
-                resolved_subobjects.insert(
-                    subobject.object_type().clone(),
-                    ResolvedCollection {
-                        target,
-                        accepted_media_types: link
-                            .media_type()
-                            .map(str::to_owned)
-                            .into_iter()
-                            .collect(),
-                    },
-                );
+            if !query.is_empty() {
+                return Err(ObjectError::MissingTemplate {
+                    relation: relationship.relation(),
+                }
+                .into());
             }
+            return Ok(ResolvedObjectCollection {
+                target,
+                accepted_media_types: link.media_type().map(str::to_owned).into_iter().collect(),
+            });
         }
-        Ok((name, uri, resolved_collection, resolved_subobjects))
-    }
 
-    /// Resolves a primary object reference from its statically known collection.
-    ///
-    /// This resolves from the client because some system discovery knowledge is
-    /// required in order to resolve the base [`AdtUri`] of the object collection
-    /// as well as locating and resolving any subobject relationship templates.
-    pub fn object<T: PrimaryObjectType>(&self, name: &str) -> Result<ObjectRef<T>, ObjectError> {
-        let (name, uri, collection, subobjects) = self.resolve_object_identity(
-            T::CATEGORY,
-            name,
-            <T as super::private::PrimaryMetadata>::SUBOBJECTS,
-        )?;
-
-        Ok(ObjectRef::new(name, uri)
-            .with_collection(collection)
-            .with_subobjects(subobjects))
-    }
-
-    /// Resolves an object reference from a dynamically specified workbench type
-    /// and name. This method can make no static guarantees that the object is
-    /// a primary object and can actually be resolved through this method.
-    ///
-    /// If the object is actually a subobject, such as `FUGR/FF`, it must be
-    /// resolved from its parent object `FUGR/F` instead.
-    ///
-    /// The result is the same as when calling [`Self::object<T>`] except
-    /// that the type tag is erased.
-    pub fn object_from_wb_type(
-        &self,
-        object_type: &GlobalWorkbenchType,
-        name: &str,
-    ) -> Result<ObjectRef<()>, ObjectError> {
-        let descriptor = descriptors::object_type_descriptor(object_type).ok_or_else(|| {
-            ObjectError::UnsupportedObjectType {
-                object_type: object_type.clone(),
-            }
-        })?;
-
+        let descriptor = object.require_descriptor()?;
         let category = descriptor
             .category()
             .ok_or_else(|| ObjectError::ParentObjectRequired {
-                object_type: object_type.clone(),
+                object_type: object.object_type().clone(),
             })?;
-
-        let (name, uri, collection, subobjects) =
-            self.resolve_object_identity(category, name, descriptor.subobjects())?;
-        Ok(ObjectRef::erased(name, uri, object_type.clone())
-            .with_collection(collection)
-            .with_subobjects(subobjects))
+        let collection = self.require_collection(category)?;
+        Ok(ResolvedObjectCollection {
+            target: collection.target().map_err(ObjectError::InvalidTarget)?,
+            accepted_media_types: collection.accepted_media_types().to_vec(),
+        })
     }
 }
 
 impl<P: PrimaryObjectType> ObjectRef<P> {
-    /// Resolves the location of a subobject belonging to this primary object.
+    /// Creates a logical subobject reference belonging to this primary object.
     ///
     /// [`SubObject<C>`] guarantees that the returned object reference has a sub-
     /// object relationship with `T` and the relationship lookup is infallible.
     ///
-    /// Constructing the subobject may still fail when the server does not
-    /// advertise the template needed to resolve the relationship.
-    ///
-    /// The parent reference is implicitly added to the returnd child.
-    pub fn subobject<C>(&self, name: &str) -> Result<ObjectRef<C>, ObjectError>
+    /// The parent reference is retained for later discovery-based resolution.
+    pub fn subobject<C>(&self, name: impl Into<String>) -> ObjectRef<C>
     where
         C: ObjectType,
         P: SubObject<C>,
     {
-        let descriptor = <P as SubObject<C>>::DESCRIPTOR;
-        let collection = self.subobject_collection(&descriptor)?;
-        let uri = collection
-            .target
-            .append_segments([name.to_ascii_lowercase()])?;
-        Ok(ObjectRef::new(name.to_ascii_uppercase(), uri)
-            .with_collection(collection.clone())
-            .with_parent(self))
+        ObjectRef::from_parts(
+            name.into().to_ascii_uppercase(),
+            C::WORKBENCH_TYPE,
+            Some(Box::new(self.erase())),
+        )
     }
 }
 
 impl ObjectRef<()> {
-    /// Resolves the location of a subobject belonging to this primary object.
+    /// Creates a logical subobject reference belonging to this primary object.
     ///
     /// Because the object type is erased, there are no static guarantees that
     /// this object has any of the requested subobjects or even any at all. This
     /// is instead turned into a descriptor backed runtime check.
     ///
-    /// Constructing the subobject may also fail when the server does not
-    /// advertise the template needed to resolve the relationship.
-    ///
-    /// The parent reference is implicitly added to the returnd child.
+    /// The parent reference is retained for later discovery-based resolution.
     pub fn subobject(
         &self,
         child_type: &GlobalWorkbenchType,
         name: &str,
     ) -> Result<ObjectRef<()>, ObjectError> {
         let descriptor = self.require_descriptor()?;
-        let subobject = descriptor
+        descriptor
             .subobjects()
             .iter()
             .find(|subobject| subobject.object_type() == child_type)
@@ -602,29 +551,11 @@ impl ObjectRef<()> {
                 child_type: child_type.clone(),
             })?;
 
-        let collection = self.subobject_collection(subobject)?;
-        let uri = collection
-            .target
-            .append_segments([name.to_ascii_lowercase()])?;
-        Ok(
-            ObjectRef::erased(name.to_ascii_uppercase(), uri, child_type.clone())
-                .with_collection(collection.clone())
-                .with_parent(self),
-        )
-    }
-}
-
-impl<T> ObjectRef<T> {
-    fn subobject_collection(
-        &self,
-        descriptor: &SubObjectDescriptor,
-    ) -> Result<&ResolvedCollection, ObjectError> {
-        self.subobjects
-            .as_deref()
-            .and_then(|subobjects| subobjects.get(descriptor.object_type()))
-            .ok_or(ObjectError::MissingTemplate {
-                relation: descriptor.relation(),
-            })
+        Ok(ObjectRef::from_parts(
+            name.to_ascii_uppercase(),
+            child_type.clone(),
+            Some(Box::new(self.clone())),
+        ))
     }
 }
 
@@ -655,10 +586,7 @@ mod tests {
 
     #[test]
     fn erased_reference_recovers_its_registered_type() {
-        let program = ObjectRef::<Program>::for_test(
-            "Z_TEST",
-            AdtUri::parse("/sap/bc/adt/programs/programs/Z_TEST").unwrap(),
-        );
+        let program = ObjectRef::<Program>::new("Z_TEST");
         let object = program.erase();
 
         assert_eq!(object.lock(AccessMode::Modify).object, object);
@@ -669,27 +597,18 @@ mod tests {
 
     #[test]
     fn typed_reference_deserialization_validates_its_marker() {
-        let program = ObjectRef::<Program>::for_test(
-            "Z_TEST",
-            AdtUri::parse("/sap/bc/adt/programs/programs/Z_TEST").unwrap(),
-        );
+        let program = ObjectRef::<Program>::new("Z_TEST");
         let serialized = serde_json::to_value(&program).unwrap();
 
+        assert!(serialized.get("uri").is_none());
         assert!(serde_json::from_value::<ObjectRef<Program>>(serialized.clone()).is_ok());
         assert!(serde_json::from_value::<ObjectRef<crate::Class>>(serialized).is_err());
     }
 
     #[test]
     fn reference_deserialization_validates_parent_metadata() {
-        let group = ObjectRef::<FunctionGroup>::new(
-            "Z_TEST_GROUP".to_owned(),
-            AdtUri::parse("/sap/bc/adt/functions/groups/z_test_group").unwrap(),
-        );
-        let module = ObjectRef::<FunctionModule>::new(
-            "ZZZZFUNC".to_owned(),
-            AdtUri::parse("/sap/bc/adt/functions/groups/z_test_group/fmodules/zzzzfunc").unwrap(),
-        )
-        .with_parent(&group);
+        let group = ObjectRef::<FunctionGroup>::new("Z_TEST_GROUP");
+        let module = group.subobject::<FunctionModule>("ZZZZFUNC");
         let serialized = serde_json::to_value(&module).unwrap();
 
         assert!(serde_json::from_value::<ObjectRef<FunctionModule>>(serialized.clone()).is_ok());
@@ -698,15 +617,8 @@ mod tests {
         wrong_parent_type["parent"]["object_type"] = serde_json::json!("PROG/P");
         assert!(serde_json::from_value::<ObjectRef<FunctionModule>>(wrong_parent_type).is_err());
 
-        let mut wrong_parent_uri = serialized.clone();
-        wrong_parent_uri["parent"]["uri"] = serde_json::json!("/sap/bc/adt/functions");
-        assert!(serde_json::from_value::<ObjectRef<FunctionModule>>(wrong_parent_uri).is_err());
-
-        let mut primary_with_parent = serde_json::to_value(ObjectRef::<Program>::for_test(
-            "Z_TEST",
-            AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
-        ))
-        .unwrap();
+        let mut primary_with_parent =
+            serde_json::to_value(ObjectRef::<Program>::new("Z_TEST")).unwrap();
         primary_with_parent["parent"] = serialized["parent"].clone();
         assert!(serde_json::from_value::<ObjectRef<Program>>(primary_with_parent).is_err());
 
@@ -717,11 +629,8 @@ mod tests {
 
     #[test]
     fn unmodeled_erased_reference_retains_runtime_type() {
-        let object = ObjectRef::erased(
-            "Z_UNSUPPORTED".to_owned(),
-            AdtUri::parse("/sap/bc/adt/test/unsupported/z_unsupported").unwrap(),
-            "TEST/X".parse().unwrap(),
-        );
+        let object: ObjectRef<()> =
+            ObjectRef::from_parts("Z_UNSUPPORTED".to_owned(), "TEST/X".parse().unwrap(), None);
 
         assert_eq!(object.object_type().as_str(), "TEST/X");
         assert!(matches!(

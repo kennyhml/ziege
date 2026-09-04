@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    AccessMode, Client, DataElement, DataElementProperties, Logon, MediaTyped, Operation, Ready,
-    ReqwestTransport, WorkbenchVersion,
+    AccessMode, Client, DataElement, DataElementProperties, Discovery, Logon, MediaTyped,
+    ObjectRef, Operation, ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -46,7 +46,7 @@ async fn mock_core_discovery(server: &MockServer) -> Mock<'_> {
         .await
 }
 
-async fn ready_client(server: &MockServer) -> Client<Ready> {
+async fn discovered_client(server: &MockServer) -> Client<Discovery> {
     let transport = ReqwestTransport::builder()
         .destination(server.base_url())
         .sap_client("001")
@@ -82,8 +82,8 @@ async fn data_element_properties_use_one_read_write_representation() {
         })
         .await;
 
-    let client = ready_client(&server).await;
-    let reference = client.object::<DataElement>("ZTFRWTFRT").unwrap();
+    let client = discovered_client(&server).await;
+    let reference = ObjectRef::<DataElement>::new("ZTFRWTFRT");
     let response = reference
         .query()
         .workbench_version(WorkbenchVersion::WorkingArea)
@@ -200,8 +200,8 @@ async fn erased_data_element_update_uses_the_json_consumer_boundary() {
         })
         .await;
 
-    let client = ready_client(&server).await;
-    let reference = client.object::<DataElement>("ZTFRWTFRT").unwrap();
+    let client = discovered_client(&server).await;
+    let reference = ObjectRef::<DataElement>::new("ZTFRWTFRT");
     let object = reference.erase();
     let properties = object.query().execute(&client).await.unwrap();
     assert_eq!(&properties.reference().erase(), &object);

@@ -2,7 +2,7 @@ mod common;
 
 use std::{env, error::Error, io};
 
-use zadt::{Class, Client, Operation, TransportNumber};
+use zadt::{Class, Client, ObjectRef, Operation, TransportNumber};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -31,7 +31,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // Checking deletion of an object
-    let reference = client.object::<Class>(&name)?;
+    let reference = ObjectRef::<Class>::new(&name);
     let checked = reference.deletion_check().execute(&client).await?;
     println!("check: {checked:#?}");
 

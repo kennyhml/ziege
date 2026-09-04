@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Client, EntityTag, Interface, InterfaceCreateProperties, InterfaceProperties, Logon,
-    MediaTyped, Operation, Ready, ReqwestTransport, WorkbenchVersion,
+    Client, Discovery, EntityTag, Interface, InterfaceCreateProperties, InterfaceProperties, Logon,
+    MediaTyped, ObjectRef, Operation, ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -47,7 +47,7 @@ async fn mock_core_discovery(server: &MockServer) -> Mock<'_> {
         .await
 }
 
-async fn ready_client(server: &MockServer) -> Client<Ready> {
+async fn discovered_client(server: &MockServer) -> Client<Discovery> {
     let transport = ReqwestTransport::builder()
         .destination(server.base_url())
         .sap_client("001")
@@ -96,8 +96,8 @@ async fn interface_properties_advertise_source_and_structure() {
         })
         .await;
 
-    let client = ready_client(&server).await;
-    let reference = client.object::<Interface>("IF_ADT_URI_MAPPER").unwrap();
+    let client = discovered_client(&server).await;
+    let reference = ObjectRef::<Interface>::new("IF_ADT_URI_MAPPER");
     let object = reference
         .query()
         .workbench_version(WorkbenchVersion::Active)
@@ -159,16 +159,14 @@ async fn interface_creation_posts_only_the_sparse_properties_payload() {
         })
         .await;
 
-    let client = ready_client(&server).await;
-    let reference = client.object::<Interface>("ZIF_EXAMPLE").unwrap();
+    let client = discovered_client(&server).await;
+    let reference = ObjectRef::<Interface>::new("ZIF_EXAMPLE");
     let properties = InterfaceCreateProperties::builder()
         .description("Created Interface")
         .package("$TMP")
         .build()
         .unwrap();
-    let created = reference.create(properties).execute(&client).await.unwrap();
-
-    assert!(created.is_none());
+    reference.create(properties).execute(&client).await.unwrap();
     logon.assert_async().await;
     discovery.assert_async().await;
     csrf.assert_async().await;

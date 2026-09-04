@@ -3,8 +3,9 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    AccessMode, Client, ConditionalResult, EntityTag, Include, IncludeProperties, Logon,
-    MediaTyped, Operation, Program, ProgramProperties, Ready, ReqwestTransport, WorkbenchVersion,
+    AccessMode, Client, ConditionalResult, Discovery, EntityTag, Include, IncludeProperties, Logon,
+    MediaTyped, ObjectRef, Operation, Program, ProgramProperties, ReqwestTransport,
+    WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -41,7 +42,7 @@ async fn mock_core_discovery(server: &MockServer) -> Mock<'_> {
         .await
 }
 
-async fn ready_client(transport: ReqwestTransport) -> Client<Ready> {
+async fn discovered_client(transport: ReqwestTransport) -> Client<Discovery> {
     let client = Client::new(transport);
     Logon::default().execute(&client).await.unwrap();
     client.discover().await.unwrap()
@@ -88,8 +89,8 @@ async fn program_run_uses_the_advertised_profiled_template() {
         .build()
         .unwrap();
 
-    let client = ready_client(transport).await;
-    let program = client.object::<Program>("z_test").unwrap();
+    let client = discovered_client(transport).await;
+    let program = ObjectRef::<Program>::new("z_test");
     let output = program
         .run()
         .profiler_id("TRACE ID")
@@ -151,8 +152,8 @@ async fn include_properties_query_converts_the_live_ztest_properties() {
         .build()
         .unwrap();
 
-    let client = ready_client(transport).await;
-    let reference = client.object::<Include>("ZTEST").unwrap();
+    let client = discovered_client(transport).await;
+    let reference = ObjectRef::<Include>::new("ZTEST");
     let response = reference
         .query()
         .workbench_version(WorkbenchVersion::Active)
@@ -233,8 +234,8 @@ async fn program_properties_query_converts_the_live_z_test_v3_properties() {
         .build()
         .unwrap();
 
-    let client = ready_client(transport).await;
-    let reference = client.object::<Program>("Z_TEST").unwrap();
+    let client = discovered_client(transport).await;
+    let reference = ObjectRef::<Program>::new("Z_TEST");
     let response = reference.query().execute(&client).await.unwrap();
     assert_eq!(response.media_type(), ProgramProperties::MEDIA_TYPES[0]);
     let program = response.properties();
@@ -339,10 +340,8 @@ async fn program_properties_query_accepts_server_selected_v2() {
         .build()
         .unwrap();
 
-    let client = ready_client(transport).await;
-    let response = client
-        .object::<Program>("Z_TEST")
-        .unwrap()
+    let client = discovered_client(transport).await;
+    let response = ObjectRef::<Program>::new("Z_TEST")
         .query()
         .workbench_version(WorkbenchVersion::WorkingArea)
         .execute(&client)
@@ -388,10 +387,8 @@ async fn program_properties_query_returns_not_modified_for_a_current_etag() {
         .build()
         .unwrap();
 
-    let client = ready_client(transport).await;
-    let response = client
-        .object::<Program>("Z_TEST")
-        .unwrap()
+    let client = discovered_client(transport).await;
+    let response = ObjectRef::<Program>::new("Z_TEST")
         .query()
         .workbench_version(WorkbenchVersion::Inactive)
         .if_none_match(EntityTag::from_static("202607251959580008"))
@@ -403,7 +400,7 @@ async fn program_properties_query_returns_not_modified_for_a_current_etag() {
         &response,
         ConditionalResult::NotModified {
             etag: Some(etag)
-        } if etag == "202607251959580008"
+        } if etag.as_str() == "202607251959580008"
     ));
     assert_eq!(response.not_modified_etag(), Some("202607251959580008"));
     assert!(response.as_modified().is_none());
@@ -538,10 +535,8 @@ async fn program_lock_and_update_share_one_user_session() {
         .build()
         .unwrap();
 
-    let client = ready_client(transport).await;
-    let program = client
-        .object::<Program>("Z_ZIEGE_TEST")
-        .unwrap()
+    let client = discovered_client(transport).await;
+    let program = ObjectRef::<Program>::new("Z_ZIEGE_TEST")
         .query()
         .execute(&client)
         .await
@@ -567,7 +562,7 @@ async fn program_lock_and_update_share_one_user_session() {
         .execute(&session)
         .await
         .unwrap();
-    assert_eq!(object_lock.object().uri(), program.reference().uri());
+    assert_eq!(object_lock.object(), &program.reference().erase());
     assert_eq!(object_lock.handle(), "LOCK-HANDLE-1");
     program
         .unlock(object_lock)

@@ -145,9 +145,6 @@ pub enum ObjectError {
     #[error("object type `{object_type}` requires a parent object")]
     ParentObjectRequired { object_type: GlobalWorkbenchType },
 
-    #[error("object reference for type `{object_type}` has no resolved containing collection")]
-    MissingCollectionContext { object_type: GlobalWorkbenchType },
-
     #[error("invalid parent object for type `{object_type}`: {reason}")]
     InvalidParentObject {
         object_type: GlobalWorkbenchType,
@@ -453,6 +450,9 @@ impl ResponseError {
 #[non_exhaustive]
 pub enum EncodeError {
     #[error(transparent)]
+    Resolve(#[from] ResolveError),
+
+    #[error(transparent)]
     Batch(#[from] BatchError),
 
     #[error(transparent)]
@@ -465,13 +465,10 @@ pub enum EncodeError {
     Cts(#[from] CtsError),
 }
 
-/// An error resolving an encoded operation against client capabilities.
+/// An error resolving operation data against discovery capabilities.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum ResolveError {
-    #[error("operation uses a lock acquired by another user session")]
-    UserSessionMismatch,
-
     #[error(transparent)]
     Compatibility(#[from] CompatibilityError),
 
@@ -485,8 +482,8 @@ pub enum OperationError {
     #[error(transparent)]
     Encode(#[from] EncodeError),
 
-    #[error(transparent)]
-    Resolve(#[from] ResolveError),
+    #[error("operation uses a lock acquired by another user session")]
+    UserSessionMismatch,
 
     #[error(transparent)]
     Transport(#[from] TransportError),

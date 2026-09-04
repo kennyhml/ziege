@@ -2,7 +2,7 @@ use super::super::{
     AbapLanguageVersion, AdvertisedObjectReference, GlobalWorkbenchType, MediaTyped, ObjectRef,
     ObjectType, Source, SourceComponents, ToXml, WorkbenchVersion,
 };
-use crate::resource::AdvertisedLink;
+use crate::{MediaTypes, resource::AdvertisedLink};
 use serde::{Deserialize, Serialize};
 use zadt_macros::{CreateProperties, object_type};
 
@@ -187,11 +187,11 @@ pub struct ClassProperties {
 }
 
 impl MediaTyped for ClassProperties {
-    const MEDIA_TYPES: &'static [&'static str] = &[
+    const MEDIA_TYPES: MediaTypes = MediaTypes::new(&[
         "application/vnd.sap.adt.oo.classes.v4+xml",
         "application/vnd.sap.adt.oo.classes.v3+xml",
         "application/vnd.sap.adt.oo.classes.v2+xml",
-    ];
+    ]);
 }
 
 impl ToXml for ClassProperties {
@@ -540,13 +540,14 @@ impl AsRef<str> for ClassSourceComponent {
 
 impl ObjectRef<Class> {
     #[cfg(test)]
-    pub(crate) fn for_test(name: &str, uri: crate::AdtUri) -> Self {
-        Self::new(name.to_ascii_uppercase(), uri)
+    pub(crate) fn for_test(name: &str) -> Self {
+        Self::new(name)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::ObjectRef;
     use super::*;
     use crate::ObjectType;
 
@@ -756,11 +757,7 @@ mod tests {
     #[test]
     fn serializes_class_properties_as_a_complete_update_payload() {
         let class = parse(CLASS_XML).unwrap();
-        let reference = ObjectRef::<Class>::new(
-            class.name.clone(),
-            crate::AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
-        )
-        .erase();
+        let reference = ObjectRef::<Class>::for_test(&class.name).erase();
         let properties = Class::DESCRIPTOR
             .properties_from_json(&reference, serde_json::to_value(&class).unwrap())
             .unwrap();

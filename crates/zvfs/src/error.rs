@@ -1,5 +1,7 @@
 use thiserror::Error;
-use zadt::{ObjectError, OperationError, RepositoryContentQueryBuilderError, RepositoryFacet};
+use zadt::{
+    ObjectError, OperationError, RepositoryContentQueryBuilderError, RepositoryFacet, ResolveError,
+};
 
 use crate::NodeId;
 
@@ -15,6 +17,9 @@ pub enum VfsError {
 
     #[error(transparent)]
     Object(#[from] ObjectError),
+
+    #[error(transparent)]
+    Resolve(#[from] ResolveError),
 
     #[error("repository facet `{0}` is not advertised by RIS")]
     UnsupportedFacet(RepositoryFacet),

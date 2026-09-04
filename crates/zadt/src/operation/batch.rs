@@ -4,13 +4,10 @@ use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use thiserror::Error;
 use uuid::Uuid;
 
-use super::{
-    Advertised, CollectionLocator, EncodedOperation, Operation, OperationContext, OperationKind,
-    Resolve, Stateful, Stateless,
-};
+use super::{EncodedOperation, Operation, OperationKind, Resolves, Stateful, Stateless};
 use crate::{
-    AdtRequest, AdtResponse, CategoryId, Client, EncodeError, OperationError, OperationResponse,
-    Ready, ResolveError, ResponseError, UserSession, UserSessionId,
+    AdtRequest, AdtResponse, CategoryId, Client, Discovery, EncodeError, OperationError,
+    OperationResponse, ResponseError, UserSession, UserSessionId,
 };
 
 const BATCH_MEDIA_TYPE: &str = "multipart/mixed";
@@ -47,10 +44,8 @@ where
 struct BatchEntry {
     /// The operation that created the request and later decodes it.
     operation: Box<dyn ErasedOperation>,
-    /// The resolved ADT request to be included in the batch request.
-    request: AdtRequest,
-    /// Operation context to be reattached to the response later.
-    context: OperationContext,
+    /// The resolved and encoded operation to be included in the batch request.
+    encoded: EncodedOperation,
 }
 
 /// An executor bound to the execution of the batch request.
@@ -60,13 +55,13 @@ struct BatchEntry {
 /// they can the normalized [`AdtRequest`] is available. This
 /// requires access to resolver such as a user session or client.
 enum BoundExecutor<'a> {
-    Client(&'a Client<Ready>),
-    UserSession(&'a UserSession<Ready>),
+    Client(&'a Client<Discovery>),
+    UserSession(&'a UserSession<Discovery>),
 }
 
 impl BoundExecutor<'_> {
     /// Normalizes access to the underlying client
-    fn client(&self) -> &Client<Ready> {
+    fn client(&self) -> &Client<Discovery> {
         match self {
             Self::Client(client) => client,
             Self::UserSession(session) => session.client(),
@@ -76,7 +71,7 @@ impl BoundExecutor<'_> {
 
 /// A kind-heterogeneous group of ADT operations executed in one HTTP round trip.
 ///
-/// The batch borrows the [`Ready`] client or user session that created it. Each
+/// The batch borrows the [`Client<Discovery>`] or user session that created it. Each
 /// operation is encoded and resolved when passed to [`BatchOperation::push`].
 ///
 /// Individual response types remain available through the returned [`BatchKey`].
@@ -103,13 +98,13 @@ pub struct BatchOperation<'a, K: OperationKind> {
 }
 
 impl<'a> BatchOperation<'a, Stateless> {
-    pub(crate) fn for_client(client: &'a Client<Ready>) -> Self {
+    pub(crate) fn for_client(client: &'a Client<Discovery>) -> Self {
         Self::new(BoundExecutor::Client(client))
     }
 }
 
 impl<'a> BatchOperation<'a, Stateful> {
-    pub(crate) fn for_user_session(session: &'a UserSession<Ready>) -> Self {
+    pub(crate) fn for_user_session(session: &'a UserSession<Discovery>) -> Self {
         Self::new(BoundExecutor::UserSession(session))
     }
 }
@@ -153,17 +148,19 @@ where
     where
         O: Operation<Kind = K> + 'static,
         O::Response: 'static,
-        Client<Ready>: Resolve<O::Target>,
+        Client<Discovery>: Resolves<O::ResolutionRequirement>,
     {
-        let resolved = self.executor.client().resolve(operation.encode()?)?;
+        let resolver = self.executor.client().resolver();
+        let encoded = operation.encode(resolver)?;
+        let bound_user_session = encoded.bound_user_session();
 
         // Stateful requests must belong to the same user session. Type-state
         // guarantees that they cannot be mixed.
-        if let Some(session_id) = resolved.bound_user_session
+        if let Some(session_id) = bound_user_session
             && let BoundExecutor::UserSession(session) = self.executor
             && session_id != session.id()
         {
-            Err(ResolveError::UserSessionMismatch)?;
+            return Err(OperationError::UserSessionMismatch);
         }
 
         let key = BatchKey {
@@ -172,27 +169,27 @@ where
             response: PhantomData::<fn() -> O::Response>,
         };
 
-        if let Some(bound) = resolved.bound_user_session {
+        if let Some(bound) = bound_user_session {
             self.bound_user_session = Some(bound);
         }
 
         self.entries.push(BatchEntry {
             operation: Box::new(operation),
-            request: resolved.request,
-            context: resolved.context,
+            encoded,
         });
         Ok(key)
     }
 
-    fn encode(&self) -> Result<EncodedOperation<Advertised>, EncodeError> {
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
         if self.entries.is_empty() {
             return Err(BatchError::Empty.into());
         }
 
         let (content_type, body) =
-            encode_batch_body(self.entries.iter().map(|entry| &entry.request));
+            encode_batch_body(self.entries.iter().map(|entry| &entry.encoded));
 
-        let mut request = CollectionLocator::core(Self::CATEGORY).operation(Method::POST);
+        let target = resolver.require_core_collection_target(Self::CATEGORY)?;
+        let mut request = EncodedOperation::new(Method::POST, target);
         request.set_accept(BATCH_MEDIA_TYPE);
         request
             .headers_mut()
@@ -227,7 +224,8 @@ where
             .iter()
             .zip(responses)
             .map(|(entry, response)| {
-                let response = OperationResponse::with_context(response, entry.context.clone());
+                let context = entry.encoded.context();
+                let response = OperationResponse::with_context(response, context);
                 let response = match user_session {
                     Some(user_session) => response.in_user_session(user_session),
                     None => response,
@@ -248,25 +246,34 @@ where
     /// The outer batch endpoint is resolved for each execution. This permits a
     /// prepared batch to be reused while retaining stateful session cookies.
     pub async fn execute(&self) -> Result<BatchResponses, OperationError> {
-        let resolved = self.executor.client().resolve(self.encode()?)?;
+        let encoded = self.encode(self.executor.client().discovery())?;
         let response = match &self.executor {
-            BoundExecutor::Client(client) => client.execute_resolved(resolved).await?,
-            BoundExecutor::UserSession(session) => session.execute_resolved(resolved).await?,
+            BoundExecutor::Client(client) => client.execute_encoded(encoded).await?,
+            BoundExecutor::UserSession(session) => session.execute_encoded(encoded).await?,
         };
         Ok(self.decode(response)?)
     }
 }
 
 fn encode_batch_body<'a>(
-    requests: impl IntoIterator<Item = &'a AdtRequest>,
+    operations: impl IntoIterator<Item = &'a EncodedOperation>,
 ) -> (HeaderValue, Vec<u8>) {
     let boundary = format!("batch_{}", Uuid::new_v4());
     let content_type = HeaderValue::from_str(&format!("{BATCH_MEDIA_TYPE}; boundary={boundary}"))
         .expect("a UUID batch boundary is a valid Content-Type parameter");
     let closing_boundary = format!("--{boundary}--");
-    let body = requests
+    let body = operations
         .into_iter()
-        .flat_map(|request| request.format_batch_part(&boundary))
+        .flat_map(|operation| {
+            AdtRequest::from_parts(
+                operation.method().clone(),
+                operation.target().clone(),
+                operation.query().to_vec(),
+                operation.headers().clone(),
+                operation.body().to_vec(),
+            )
+            .format_batch_part(&boundary)
+        })
         .chain(closing_boundary.bytes())
         .collect();
     (content_type, body)
@@ -347,20 +354,20 @@ where
     fn create_batch(&self) -> BatchOperation<'_, K>;
 }
 
-impl CreateBatch<Stateless> for Client<Ready> {
+impl CreateBatch<Stateless> for Client<Discovery> {
     fn create_batch(&self) -> BatchOperation<'_, Stateless> {
         Client::batch(self)
     }
 }
 
-impl UserSession<Ready> {
+impl UserSession<Discovery> {
     /// Creates an empty stateful batch bound to this session.
     pub fn batch(&self) -> BatchOperation<'_, Stateful> {
         BatchOperation::for_user_session(self)
     }
 }
 
-impl CreateBatch<Stateful> for UserSession<Ready> {
+impl CreateBatch<Stateful> for UserSession<Discovery> {
     fn create_batch(&self) -> BatchOperation<'_, Stateful> {
         UserSession::batch(self)
     }
@@ -389,7 +396,7 @@ where
     I::Item: Operation + 'static,
     <I::Item as Operation>::Response: 'static,
     E: CreateBatch<<I::Item as Operation>::Kind>,
-    Client<Ready>: Resolve<<I::Item as Operation>::Target>,
+    Client<Discovery>: Resolves<<I::Item as Operation>::ResolutionRequirement>,
 {
     type Response = <I::Item as Operation>::Response;
 
@@ -656,7 +663,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        AdtUri, Owned, Ready, ResolveError, Stateful, Stateless, Transport, TransportError,
+        AdtUri, Discovery, Independent, RequiresDiscovery, Stateful, Stateless, Transport,
+        TransportError,
         api::discovery::parse_capabilities,
         protocol::{ADT_SESSION_TYPE_HEADER, AdtSessionType},
     };
@@ -670,13 +678,11 @@ mod tests {
     impl Operation for TextOperation {
         type Response = String;
         type Kind = Stateless;
-        type Target = Owned;
+        type ResolutionRequirement = Independent;
 
-        fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-            let mut request = EncodedOperation::owned(
-                Method::GET,
-                AdtUri::parse("/sap/bc/adt/test/text").unwrap(),
-            );
+        fn encode(&self, _resolver: &()) -> Result<EncodedOperation, EncodeError> {
+            let mut request =
+                EncodedOperation::new(Method::GET, AdtUri::parse("/sap/bc/adt/test/text").unwrap());
             request.push_query("name", "hello world");
             request
                 .headers_mut()
@@ -695,10 +701,10 @@ mod tests {
     impl Operation for CountOperation {
         type Response = usize;
         type Kind = Stateless;
-        type Target = Owned;
+        type ResolutionRequirement = Independent;
 
-        fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-            Ok(EncodedOperation::owned(
+        fn encode(&self, _resolver: &()) -> Result<EncodedOperation, EncodeError> {
+            Ok(EncodedOperation::new(
                 Method::GET,
                 AdtUri::parse("/sap/bc/adt/test/count").unwrap(),
             ))
@@ -716,14 +722,14 @@ mod tests {
     impl Operation for MissingAdvertisedOperation {
         type Response = ();
         type Kind = Stateless;
-        type Target = Advertised;
+        type ResolutionRequirement = RequiresDiscovery;
 
-        fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-            Ok(CollectionLocator::new(CategoryId {
+        fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+            let target = resolver.require_collection_target(CategoryId {
                 scheme: "https://example.test/categories",
                 term: "missing",
-            })
-            .operation(Method::GET))
+            })?;
+            Ok(EncodedOperation::new(Method::GET, target))
         }
 
         fn decode(&self, _response: OperationResponse) -> Result<Self::Response, ResponseError> {
@@ -736,16 +742,17 @@ mod tests {
     impl Operation for StatefulTextOperation {
         type Response = String;
         type Kind = Stateful;
-        type Target = Owned;
+        type ResolutionRequirement = Independent;
 
-        fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-            Ok(EncodedOperation::owned(
+        fn encode(&self, _resolver: &()) -> Result<EncodedOperation, EncodeError> {
+            Ok(EncodedOperation::new(
                 Method::GET,
                 AdtUri::parse("/sap/bc/adt/test/stateful").unwrap(),
             ))
         }
 
         fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+            assert!(response.user_session().is_some());
             expect_ok(response).map(|body| String::from_utf8_lossy(&body).into_owned())
         }
     }
@@ -755,10 +762,10 @@ mod tests {
     impl Operation for SessionBoundOperation {
         type Response = ();
         type Kind = Stateful;
-        type Target = Owned;
+        type ResolutionRequirement = Independent;
 
-        fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-            let mut request = EncodedOperation::owned(
+        fn encode(&self, _resolver: &()) -> Result<EncodedOperation, EncodeError> {
+            let mut request = EncodedOperation::new(
                 Method::PUT,
                 AdtUri::parse("/sap/bc/adt/test/session-bound").unwrap(),
             );
@@ -828,7 +835,7 @@ mod tests {
 
     fn fixture_client(
         responses: Vec<AdtResponse>,
-    ) -> (Client<Ready>, Arc<StdMutex<Vec<AdtRequest>>>) {
+    ) -> (Client<Discovery>, Arc<StdMutex<Vec<AdtRequest>>>) {
         let requests = Arc::new(StdMutex::new(Vec::new()));
         let transport = FixtureTransport {
             requests: Arc::clone(&requests),
@@ -886,9 +893,9 @@ mod tests {
 
         assert!(matches!(
             error,
-            OperationError::Resolve(ResolveError::Compatibility(
+            OperationError::Encode(EncodeError::Resolve(crate::ResolveError::Compatibility(
                 crate::CompatibilityError::MissingCollection(_)
-            ))
+            )))
         ));
         assert!(batch.is_empty());
         assert!(requests.lock().unwrap().is_empty());
@@ -971,10 +978,7 @@ content-type:application/xml\r\n\r\n\
             panic!("operation bound to a different user session was accepted");
         };
 
-        assert!(matches!(
-            error,
-            OperationError::Resolve(ResolveError::UserSessionMismatch)
-        ));
+        assert!(matches!(error, OperationError::UserSessionMismatch));
     }
 
     #[tokio::test]

@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
-    BatchOperation, Capabilities, CategoryId, Collection, CompatibilityError, Stateless, Transport,
-    UserSession,
+    AdtUri, BatchOperation, Capabilities, CategoryId, Collection, CompatibilityError, ObjectError,
+    ResolveError, Stateless, TemplateLink, Transport, UserSession,
 };
 
 mod private {
@@ -20,20 +20,21 @@ pub trait ClientState: private::Sealed + Clone + Send + Sync {}
 #[derive(Clone, Debug, Default)]
 pub struct Initial;
 
-/// The client has loaded the server's central and core ADT capabilities.
+/// Central and core ADT discovery data used to resolve operation targets.
 ///
-/// This state records only a local capability snapshot. It does not guarantee
-/// that authentication or the underlying transport remains alive.
+/// This also serves as the client state proving discovery has completed. It is
+/// only a local capability snapshot and does not guarantee that authentication
+/// or the underlying transport remains alive.
 #[derive(Clone, Debug)]
-pub struct Ready {
+pub struct Discovery {
     capabilities: Arc<Capabilities>,
     core_capabilities: Arc<Capabilities>,
 }
 
 impl private::Sealed for Initial {}
-impl private::Sealed for Ready {}
+impl private::Sealed for Discovery {}
 impl ClientState for Initial {}
-impl ClientState for Ready {}
+impl ClientState for Discovery {}
 
 /// A client for executing typed ADT operations.
 ///
@@ -65,10 +66,10 @@ impl Client<Initial> {
         self,
         capabilities: Capabilities,
         core_capabilities: Capabilities,
-    ) -> Client<Ready> {
+    ) -> Client<Discovery> {
         Client {
             transport: self.transport,
-            state: Ready {
+            state: Discovery {
                 capabilities: Arc::new(capabilities),
                 core_capabilities: Arc::new(core_capabilities),
             },
@@ -76,26 +77,50 @@ impl Client<Initial> {
     }
 }
 
-impl Client<Ready> {
+impl Client<Discovery> {
+    /// Returns the discovery data used to resolve advertised ADT resources.
+    pub fn discovery(&self) -> &Discovery {
+        &self.state
+    }
+
     /// Creates an empty stateless batch bound to this client.
     pub fn batch(&self) -> BatchOperation<'_, Stateless> {
         BatchOperation::for_client(self)
     }
+}
 
-    /// Returns the capabilities advertised by ADT.
+impl Discovery {
+    /// Returns the capabilities advertised by central ADT discovery.
     pub fn capabilities(&self) -> &Capabilities {
-        &self.state.capabilities
+        &self.capabilities
     }
 
-    /// Returns the infrastructure capabilities advertised by core discovery.
+    /// Returns the capabilities advertised by core ADT discovery.
     pub fn core_capabilities(&self) -> &Capabilities {
-        &self.state.core_capabilities
+        &self.core_capabilities
     }
 
-    /// Returns the collection advertised for a category identity.
+    /// Returns a central-discovery collection by category identity.
     pub fn collection(&self, category: CategoryId) -> Option<&Collection> {
         self.capabilities()
             .collection(category.scheme, category.term)
+    }
+
+    /// Returns a central-discovery template by collection and relation.
+    pub fn template(&self, category: CategoryId, relation: &str) -> Option<&TemplateLink> {
+        self.capabilities()
+            .template(category.scheme, category.term, relation)
+    }
+
+    pub(crate) fn require_template(
+        &self,
+        category: CategoryId,
+        relation: &'static str,
+    ) -> Result<&TemplateLink, crate::ResolveError> {
+        self.require_collection(category)?;
+        self.template(category, relation)
+            .ok_or(crate::ObjectError::MissingTemplate { relation })
+            .map_err(Into::into)
     }
 
     pub(crate) fn require_collection(
@@ -106,6 +131,16 @@ impl Client<Ready> {
             .ok_or(CompatibilityError::MissingCollection(category))
     }
 
+    pub(crate) fn require_collection_target(
+        &self,
+        category: CategoryId,
+    ) -> Result<AdtUri, ResolveError> {
+        self.require_collection(category)?
+            .target()
+            .map_err(ObjectError::InvalidTarget)
+            .map_err(Into::into)
+    }
+
     pub(crate) fn require_core_collection(
         &self,
         category: CategoryId,
@@ -113,6 +148,16 @@ impl Client<Ready> {
         self.core_capabilities()
             .collection(category.scheme, category.term)
             .ok_or(CompatibilityError::MissingCollection(category))
+    }
+
+    pub(crate) fn require_core_collection_target(
+        &self,
+        category: CategoryId,
+    ) -> Result<AdtUri, ResolveError> {
+        self.require_core_collection(category)?
+            .target()
+            .map_err(ObjectError::InvalidTarget)
+            .map_err(Into::into)
     }
 }
 

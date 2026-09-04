@@ -5,9 +5,10 @@ use std::{cmp::Ordering, sync::Arc};
 use async_lock::MutexGuardArc;
 use futures_util::future::try_join_all;
 use zadt::{
-    BatchKey, Batched, Client, CompatibilityError, Operation, OperationError, Package, Ready,
-    RepositoryContent, RepositoryContentOperation, RepositoryContentQuery, RepositoryFacet,
-    RepositoryObjectEntry, RepositoryPreselection, RepositoryVirtualFolder, ResolveError,
+    BatchKey, Batched, Client, CompatibilityError, Discovery, EncodeError, ObjectRef, Operation,
+    OperationError, Package, RepositoryContent, RepositoryContentOperation, RepositoryContentQuery,
+    RepositoryFacet, RepositoryObjectEntry, RepositoryPreselection, RepositoryVirtualFolder,
+    ResolveError,
 };
 
 use super::VirtualRepositoryTree;
@@ -405,7 +406,7 @@ impl PreparedNode {
         left.cmp(&right).then_with(|| self.label.cmp(&other.label))
     }
 
-    pub(super) fn from_mount(mount: Mount, client: &Client<Ready>) -> Result<Self, VfsError> {
+    pub(super) fn from_mount(mount: Mount, client: &Client<Discovery>) -> Result<Self, VfsError> {
         let Mount {
             label,
             target,
@@ -423,22 +424,25 @@ impl PreparedNode {
                 },
                 object: None,
             },
-            MountTarget::Package(package) => Self {
-                label,
-                kind: NodeKind::Package {
-                    package: package.clone(),
-                    uri: client.object::<Package>(&package)?.uri().clone(),
-                    object_count: None,
-                },
-                // Load sub packages
-                expansion: ExpansionStrategy::Package {
-                    package,
-                    context: ExpansionContext::new(facet_policy, Vec::new()),
-                    // Explicit mounts have no folder metadata, so probe conservatively.
-                    has_child_packages: true,
-                },
-                object: None,
-            },
+            MountTarget::Package(package) => {
+                let reference = ObjectRef::<Package>::new(&package);
+                Self {
+                    label,
+                    kind: NodeKind::Package {
+                        package: package.clone(),
+                        uri: client.discovery().resolve_object_uri(&reference)?,
+                        object_count: None,
+                    },
+                    // Load sub packages
+                    expansion: ExpansionStrategy::Package {
+                        package,
+                        context: ExpansionContext::new(facet_policy, Vec::new()),
+                        // Explicit mounts have no folder metadata, so probe conservatively.
+                        has_child_packages: true,
+                    },
+                    object: None,
+                }
+            }
             MountTarget::Selection(preselections) => Self {
                 label,
                 kind: NodeKind::Mount {
@@ -460,7 +464,7 @@ impl From<RepositoryObjectEntry> for PreparedNode {
             name: entry.name.clone(),
             package: entry.package.clone(),
             object_type: entry.reference.object_type().clone(),
-            uri: entry.reference.uri().clone(),
+            uri: entry.uri().clone(),
             virtual_workbench_uri: entry.virtual_workbench_uri.clone(),
             version: entry.version.clone(),
             expandable: entry.expandable,
@@ -725,9 +729,9 @@ impl VirtualRepositoryTree {
         if requests.len() > 1 {
             match requests.clone().batched(&self.inner.client).await {
                 Ok(responses) => return Ok(responses),
-                Err(OperationError::Resolve(ResolveError::Compatibility(
+                Err(OperationError::Encode(EncodeError::Resolve(ResolveError::Compatibility(
                     CompatibilityError::MissingCollection(_),
-                ))) => {}
+                )))) => {}
                 Err(error) => return Err(error.into()),
             }
         }

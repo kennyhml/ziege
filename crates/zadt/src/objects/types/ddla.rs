@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
-    AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType, MediaTyped, ToXml,
+    AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType, MediaTyped, MediaTypes, ToXml,
     WorkbenchVersion,
 };
 
@@ -107,7 +107,7 @@ pub struct AnnotationDefinitionProperties {
 }
 
 impl MediaTyped for AnnotationDefinitionProperties {
-    const MEDIA_TYPES: &'static [&'static str] = &["application/vnd.sap.adt.ddic.ddla.v1+xml"];
+    const MEDIA_TYPES: MediaTypes = MediaTypes::new(&["application/vnd.sap.adt.ddic.ddla.v1+xml"]);
 }
 
 impl ToXml for AnnotationDefinitionProperties {
@@ -145,10 +145,7 @@ mod tests {
         assert_eq!(properties.name, "");
         assert_eq!(properties.object_type, AnnotationDefinition::WORKBENCH_TYPE);
 
-        let reference = ObjectRef::<AnnotationDefinition>::new(
-            "Z_ANNOTATION_DEFINITION".to_owned(),
-            AdtUri::parse("/sap/bc/adt/ddic/ddla/sources/z_annotation_definition").unwrap(),
-        );
+        let reference = ObjectRef::<AnnotationDefinition>::new("Z_ANNOTATION_DEFINITION");
         properties.assign_identity(&reference);
         let body = properties.to_xml().unwrap();
         let body = std::str::from_utf8(&body).unwrap();
@@ -182,10 +179,8 @@ mod tests {
     fn relative_source_uri_resolves_against_the_object() {
         let properties = properties();
         let object = crate::ObjectSnapshot::new(
-            ObjectRef::<AnnotationDefinition>::new(
-                properties.name.clone(),
-                AdtUri::parse("/sap/bc/adt/ddic/ddla/sources/ui").unwrap(),
-            ),
+            ObjectRef::<AnnotationDefinition>::new(properties.name.clone()),
+            AdtUri::parse("/sap/bc/adt/ddic/ddla/sources/ui").unwrap(),
             crate::WorkbenchVersion::Active,
             AnnotationDefinitionProperties::MEDIA_TYPES[0],
             None,

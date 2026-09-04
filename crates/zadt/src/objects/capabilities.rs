@@ -1,5 +1,5 @@
 use super::{AssignObjectIdentity, MediaTyped, ObjectType, ToXml};
-use crate::{CategoryId, operation::TemplateLocator};
+use crate::{CategoryId, MediaTypes};
 
 /// Marks an object capable of being executed immediately (not a job).
 ///
@@ -17,7 +17,8 @@ pub(crate) trait ImmediateRun: ObjectType {
 /// Discovery metadata for one immediate plain-text object-run operation.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RunCapability {
-    pub(crate) target: TemplateLocator,
+    pub(crate) category: CategoryId,
+    pub(crate) relation: &'static str,
     pub(crate) name_variable: &'static str,
 }
 
@@ -28,7 +29,8 @@ impl RunCapability {
         name_variable: &'static str,
     ) -> Self {
         Self {
-            target: TemplateLocator::new(category, relation),
+            category,
+            relation,
             name_variable,
         }
     }
@@ -54,13 +56,11 @@ pub trait Structure: ObjectType {}
 /// An object family that can be created through its collection resource.
 pub trait Create: ObjectType {
     /// The sparse XML payload accepted during creation.
-    type Payload: AssignObjectIdentity + ToXml + Send + Sync;
+    type Payload: AssignObjectIdentity + Clone + ToXml + Send + Sync;
 
     /// Creation media types in client preference order.
     ///
-    /// Sparse creation payloads default to the preferred complete-properties
-    /// representation. Implementations may override this with additional media
-    /// types only when the same payload is valid for those representations.
-    const CREATE_MEDIA_TYPES: &'static [&'static str] =
-        &[<Self::Properties as MediaTyped>::MEDIA_TYPES[0]];
+    /// By default, sparse creation payloads support the same representations as
+    /// the complete object properties.
+    const CREATE_MEDIA_TYPES: MediaTypes = <Self::Properties as MediaTyped>::MEDIA_TYPES;
 }

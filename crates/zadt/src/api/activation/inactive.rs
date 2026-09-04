@@ -1,18 +1,14 @@
+use std::collections::HashMap;
+
 use http::{Method, StatusCode};
 use serde::Deserialize;
+use stduritemplate::Value;
 
 use crate::{
-    Advertised, AdvertisedObjectReference, CategoryId, EncodeError, EncodedOperation, ObjectError,
-    Operation, OperationResponse, ResponseError, Stateless, User,
-    objects::ObjectReferences,
-    operation::{CollectionLocator, TemplateLocator},
+    AdvertisedObjectReference, CategoryId, Discovery, EncodeError, EncodedOperation, ObjectError,
+    Operation, OperationResponse, RequiresDiscovery, ResolveError, ResponseError, Stateless, User,
+    objects::ObjectReferences, resource::AdtUriTemplate,
 };
-
-const INACTIVE_OBJECTS: CategoryId = CategoryId {
-    scheme: "http://www.sap.com/adt/categories/activation",
-    term: "inactiveobjects",
-};
-const QUERY_RELATION: &str = "http://www.sap.com/adt/relations/activation/inactiveobjects";
 
 /// Retrieves the inactive objects of the given user. If the user is omitted,
 /// the user making the request is used instead.
@@ -31,6 +27,11 @@ pub struct InactiveObjectsQuery {
 }
 
 impl InactiveObjectsQuery {
+    const CATEGORY: CategoryId = CategoryId {
+        scheme: "http://www.sap.com/adt/categories/activation",
+        term: "inactiveobjects",
+    };
+    const RELATION: &str = "http://www.sap.com/adt/relations/activation/inactiveobjects";
     const MEDIA_TYPE: &'static str = "application/xml";
 
     pub fn new() -> Self {
@@ -52,17 +53,35 @@ impl InactiveObjectsQuery {
 impl Operation for InactiveObjectsQuery {
     type Kind = Stateless;
     type Response = ObjectReferences;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
         // Might as well use the template if we got the username even though it
         // does not provide much benefit over just using a query parameter
         let mut request = if let Some(username) = &self.username {
-            let mut target = TemplateLocator::new(INACTIVE_OBJECTS, QUERY_RELATION).target();
-            target.push_variable("USERNAME", username.as_str());
-            EncodedOperation::advertised(Method::GET, target)
+            let link = resolver.require_template(Self::CATEGORY, Self::RELATION)?;
+            let template = AdtUriTemplate::new(link.template());
+            if !template.has_variable("USERNAME") {
+                return Err(
+                    ResolveError::from(ObjectError::UnsupportedTemplateParameter {
+                        parameter: "USERNAME",
+                    })
+                    .into(),
+                );
+            }
+            let variables = HashMap::from([(
+                "USERNAME".to_owned(),
+                Value::String(username.as_str().to_owned()),
+            )]);
+            let (target, query) = template.expand(&variables).map_err(ResolveError::from)?;
+            let mut request = EncodedOperation::new(Method::GET, target);
+            for (name, value) in query {
+                request.push_query(name, value);
+            }
+            request
         } else {
-            CollectionLocator::new(INACTIVE_OBJECTS).operation(Method::GET)
+            let target = resolver.require_collection_target(Self::CATEGORY)?;
+            EncodedOperation::new(Method::GET, target)
         };
         request.set_accept(Self::MEDIA_TYPE);
         Ok(request)
@@ -122,10 +141,10 @@ impl InactiveCtsObjectsQuery {
 impl Operation for InactiveCtsObjectsQuery {
     type Kind = Stateless;
     type Response = InactiveCtsObjects;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut request = self.inner.encode()?;
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        let mut request = self.inner.encode(resolver)?;
         request.set_accept(Self::MEDIA_TYPE);
         Ok(request)
     }
@@ -194,11 +213,49 @@ pub struct InactiveCtsObjectTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{AdtRequest, AdtResponse, Client, TransportError};
+    use async_trait::async_trait;
+    use http::header;
+
+    const DISCOVERY_XML: &[u8] = br#"
+        <app:service xmlns:app="http://www.w3.org/2007/app"
+                xmlns:atom="http://www.w3.org/2005/Atom"
+                xmlns:adtcomp="http://www.sap.com/adt/compatibility">
+            <app:workspace>
+                <atom:title>Activation</atom:title>
+                <app:collection href="/sap/bc/adt/activation/inactiveobjects">
+                    <atom:category scheme="http://www.sap.com/adt/categories/activation"
+                        term="inactiveobjects" />
+                    <adtcomp:templateLinks>
+                        <adtcomp:templateLink
+                            rel="http://www.sap.com/adt/relations/activation/inactiveobjects"
+                            template="/sap/bc/adt/activation/inactiveobjects{?USERNAME}" />
+                    </adtcomp:templateLinks>
+                </app:collection>
+            </app:workspace>
+        </app:service>
+    "#;
 
     const REFERENCES_XML: &[u8] =
         include_bytes!("../../../tests/fixtures/inactive-object-references.xml");
     const CTS_OBJECTS_XML: &[u8] =
         include_bytes!("../../../tests/fixtures/inactive-cts-objects.xml");
+
+    struct UnusedTransport;
+
+    #[async_trait]
+    impl crate::Transport for UnusedTransport {
+        async fn send(&self, _request: AdtRequest) -> Result<AdtResponse, TransportError> {
+            unreachable!("request construction tests do not send requests")
+        }
+    }
+
+    fn discovered_client() -> Client<Discovery> {
+        Client::new(UnusedTransport).with_capabilities(
+            crate::api::discovery::parse_capabilities(DISCOVERY_XML).unwrap(),
+            crate::api::discovery::parse_capabilities(DISCOVERY_XML).unwrap(),
+        )
+    }
 
     #[test]
     fn parses_inactive_object_references() {
@@ -269,12 +326,26 @@ mod tests {
 
     #[test]
     fn user_creates_an_inactive_objects_query_with_preserved_identity() {
+        let client = discovered_client();
         let user = User::new("DEVELOPER");
         let query = user.inactive_objects().with_transports();
 
         assert_eq!(
             query.inner.username.as_ref().map(User::as_str),
             Some("DEVELOPER")
+        );
+        let request = query.encode(client.discovery()).unwrap();
+        assert_eq!(
+            request.target().as_str(),
+            "/sap/bc/adt/activation/inactiveobjects"
+        );
+        assert_eq!(
+            request.query(),
+            [("USERNAME".to_owned(), "DEVELOPER".to_owned())]
+        );
+        assert_eq!(
+            request.headers()[header::ACCEPT],
+            InactiveCtsObjectsQuery::MEDIA_TYPE
         );
     }
 }

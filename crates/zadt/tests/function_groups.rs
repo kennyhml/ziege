@@ -3,9 +3,9 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Client, FunctionGroup, FunctionGroupInclude, FunctionGroupIncludeProperties,
+    Client, Discovery, FunctionGroup, FunctionGroupInclude, FunctionGroupIncludeProperties,
     FunctionGroupProperties, FunctionModule, FunctionModuleProperties, Logon, MediaTyped,
-    Operation, Ready, ReqwestTransport,
+    ObjectRef, Operation, ReqwestTransport,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -48,7 +48,7 @@ async fn mock_core_discovery(server: &MockServer) -> Mock<'_> {
         .await
 }
 
-async fn ready_client(server: &MockServer) -> Client<Ready> {
+async fn discovered_client(server: &MockServer) -> Client<Discovery> {
     let transport = ReqwestTransport::builder()
         .destination(server.base_url())
         .sap_client("001")
@@ -126,14 +126,10 @@ async fn function_group_family_uses_discovered_subobject_targets() {
         })
         .await;
 
-    let client = ready_client(&server).await;
-    let group_reference = client.object::<FunctionGroup>("Z_TEST_GROUP").unwrap();
-    let module_reference = group_reference
-        .subobject::<FunctionModule>("ZZZZFUNC")
-        .unwrap();
-    let include_reference = group_reference
-        .subobject::<FunctionGroupInclude>("LZ_TEST_GROUPTOP")
-        .unwrap();
+    let client = discovered_client(&server).await;
+    let group_reference = ObjectRef::<FunctionGroup>::new("Z_TEST_GROUP");
+    let module_reference = group_reference.subobject::<FunctionModule>("ZZZZFUNC");
+    let include_reference = group_reference.subobject::<FunctionGroupInclude>("LZ_TEST_GROUPTOP");
     let group = group_reference.query().execute(&client).await.unwrap();
     let module = module_reference.query().execute(&client).await.unwrap();
     let include = include_reference.query().execute(&client).await.unwrap();

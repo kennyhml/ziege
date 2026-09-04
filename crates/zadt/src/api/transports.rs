@@ -5,33 +5,11 @@ use http::{Method, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AdtUri, Advertised, CategoryId, CtsError, EncodeError, EncodedOperation, Operation,
-    OperationResponse, PostAction, ResponseError, Stateless, User, operation::CollectionLocator,
+    AdtUri, CategoryId, CtsError, Discovery, EncodeError, EncodedOperation, ObjectError, Operation,
+    OperationResponse, PostAction, RequiresDiscovery, ResolveError, ResponseError, Stateless, User,
     protocol::TEXT_PLAIN_MEDIA_TYPE,
 };
 
-const ABAP_XML_NAMESPACE: &str = "http://www.sap.com/abapxml";
-const LEGACY_TRANSPORT_REFERENCE_PREFIX: &str = "/com.sap.cts/object_record/";
-const TRANSPORTS_CATEGORY: CategoryId = CategoryId {
-    scheme: "http://www.sap.com/adt/categories/cts",
-    term: "transports",
-};
-const TRANSPORT_CHECKS_CATEGORY: CategoryId = CategoryId {
-    scheme: "http://www.sap.com/adt/categories/cts",
-    term: "transportchecks",
-};
-const TRANSPORT_CHECK_MEDIA_TYPE: &str =
-    "application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.transport.service.checkData";
-const TRANSPORT_REQUESTS_MEDIA_TYPE: &str =
-    "application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.CorrectionRequests";
-const TRANSPORT_REQUEST_MEDIA_TYPE: &str =
-    "application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.CorrectionRequest";
-const TRANSPORT_CREATE_LEGACY_MEDIA_TYPE: &str =
-    "application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.CreateCorrectionRequest";
-const TRANSPORT_CREATE_V1_MEDIA_TYPE: &str =
-    "application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.CreateCorrectionRequest.v1";
-const TRANSPORT_CREATE_RESULT_MEDIA_TYPE: &str =
-    "application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.CorrectionRequestResult";
 pub(crate) const TRANSPORT_REQUEST_QUERY: &str = "corrNr";
 
 /// Checks whether and where a repository operation must be recorded in CTS.
@@ -67,7 +45,10 @@ pub struct TransportCheck {
 }
 
 impl TransportCheck {
-    const TARGET: CollectionLocator = CollectionLocator::new(TRANSPORT_CHECKS_CATEGORY);
+    const CATEGORY: CategoryId = CategoryId {
+        scheme: "http://www.sap.com/adt/categories/cts",
+        term: "transportchecks",
+    };
 
     /// Creates a transport check for one repository operation.
     pub fn new(uri: AdtUri, operation: TransportCheckOperation) -> Self {
@@ -90,9 +71,9 @@ impl TransportCheck {
 impl Operation for TransportCheck {
     type Response = TransportCheckResult;
     type Kind = Stateless;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
         let body = TransportCheckRequest::new(
             &self.uri,
             self.operation.as_str(),
@@ -102,12 +83,13 @@ impl Operation for TransportCheck {
         )
         .serialize()?;
 
-        let mut request = Self::TARGET.operation(Method::POST);
+        let target = resolver.require_collection_target(Self::CATEGORY)?;
+        let mut request = EncodedOperation::new(Method::POST, target);
         if let Some(link_up_mode) = self.link_up_mode {
             request.push_query("linkUpMode", link_up_mode.as_str());
         }
-        request.set_accept(TRANSPORT_CHECK_MEDIA_TYPE);
-        request.set_content_type(TRANSPORT_CHECK_MEDIA_TYPE);
+        request.set_accept(TransportCheckResult::MEDIA_TYPE);
+        request.set_content_type(TransportCheckRequest::MEDIA_TYPE);
         request.set_body(body);
         Ok(request)
     }
@@ -118,7 +100,7 @@ impl Operation for TransportCheck {
             return Err(CtsError::MissingTransportCheckResponse.into());
         }
 
-        response.require_content_type(&[TRANSPORT_CHECK_MEDIA_TYPE])?;
+        response.require_content_type(&[TransportCheckResult::MEDIA_TYPE])?;
 
         TransportCheckResult::parse(response.body()).map_err(Into::into)
     }
@@ -153,7 +135,10 @@ impl Default for TransportsQuery {
 }
 
 impl TransportsQuery {
-    const TARGET: CollectionLocator = CollectionLocator::new(TRANSPORTS_CATEGORY);
+    const CATEGORY: CategoryId = CategoryId {
+        scheme: "http://www.sap.com/adt/categories/cts",
+        term: "transports",
+    };
 
     /// Creates a query for the current user's Workbench transports.
     pub fn new() -> Self {
@@ -179,16 +164,17 @@ impl User {
 impl Operation for TransportsQuery {
     type Response = TransportRequests;
     type Kind = Stateless;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut request = Self::TARGET.operation(Method::GET);
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        let target = resolver.require_collection_target(Self::CATEGORY)?;
+        let mut request = EncodedOperation::new(Method::GET, target);
         request.push_query(PostAction::QUERY_PARAMETER, PostAction::Find.as_str());
         if let Some(user) = &self.user {
             request.push_query("user", user.as_str());
         }
         request.push_query("trfunction", self.kind.as_str());
-        request.set_accept(TRANSPORT_REQUESTS_MEDIA_TYPE);
+        request.set_accept(TransportRequests::MEDIA_TYPE);
         Ok(request)
     }
 
@@ -198,7 +184,7 @@ impl Operation for TransportsQuery {
             return Ok(TransportRequests::default());
         }
 
-        response.require_content_type(&[TRANSPORT_REQUESTS_MEDIA_TYPE])?;
+        response.require_content_type(&[TransportRequests::MEDIA_TYPE])?;
 
         TransportRequests::parse(response.body()).map_err(Into::into)
     }
@@ -217,7 +203,10 @@ pub struct TransportPropertiesQuery {
 }
 
 impl TransportPropertiesQuery {
-    const TARGET: CollectionLocator = CollectionLocator::new(TRANSPORTS_CATEGORY);
+    const CATEGORY: CategoryId = CategoryId {
+        scheme: "http://www.sap.com/adt/categories/cts",
+        term: "transports",
+    };
 
     /// Creates a query for one transport request.
     pub fn new(transport_number: impl Into<TransportNumber>) -> Self {
@@ -235,12 +224,16 @@ impl TransportPropertiesQuery {
 impl Operation for TransportPropertiesQuery {
     type Response = Option<TransportRequest>;
     type Kind = Stateless;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let target = Self::TARGET.with_segment(self.transport_number.as_str());
-        let mut request = EncodedOperation::advertised(Method::GET, target);
-        request.set_accept(TRANSPORT_REQUEST_MEDIA_TYPE);
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        let target = resolver
+            .require_collection_target(Self::CATEGORY)?
+            .append_segments([self.transport_number.as_str()])
+            .map_err(ObjectError::InvalidTarget)
+            .map_err(ResolveError::from)?;
+        let mut request = EncodedOperation::new(Method::GET, target);
+        request.set_accept(TransportRequest::MEDIA_TYPE);
         Ok(request)
     }
 
@@ -250,7 +243,7 @@ impl Operation for TransportPropertiesQuery {
             return Ok(None);
         }
 
-        response.require_content_type(&[TRANSPORT_REQUEST_MEDIA_TYPE])?;
+        response.require_content_type(&[TransportRequest::MEDIA_TYPE])?;
 
         TransportRequest::parse(response.body())
             .map(Some)
@@ -296,7 +289,10 @@ pub struct TransportCreate {
 }
 
 impl TransportCreate {
-    const TARGET: CollectionLocator = CollectionLocator::new(TRANSPORTS_CATEGORY);
+    const CATEGORY: CategoryId = CategoryId {
+        scheme: "http://www.sap.com/adt/categories/cts",
+        term: "transports",
+    };
 
     /// Creates a configurable transport request builder.
     pub fn builder() -> TransportCreateBuilder {
@@ -307,9 +303,9 @@ impl TransportCreate {
 impl Operation for TransportCreate {
     type Response = TransportCreation;
     type Kind = Stateless;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
         let body = TransportCreateRequest::new(
             self.package.as_deref(),
             &self.description,
@@ -317,7 +313,8 @@ impl Operation for TransportCreate {
         )
         .serialize()?;
 
-        let mut request = Self::TARGET.operation(Method::POST);
+        let target = resolver.require_collection_target(Self::CATEGORY)?;
+        let mut request = EncodedOperation::new(Method::POST, target);
         if let Some(transport_layer) = &self.transport_layer {
             request.push_query("transportLayer", transport_layer);
         }
@@ -360,14 +357,14 @@ pub enum TransportCreateVersion {
 impl TransportCreateVersion {
     fn request_media_type(self) -> &'static str {
         match self {
-            Self::V1 => TRANSPORT_CREATE_V1_MEDIA_TYPE,
-            Self::Legacy => TRANSPORT_CREATE_LEGACY_MEDIA_TYPE,
+            Self::V1 => TransportCreateRequest::V1_MEDIA_TYPE,
+            Self::Legacy => TransportCreateRequest::LEGACY_MEDIA_TYPE,
         }
     }
 
     fn response_media_type(self) -> &'static str {
         match self {
-            Self::V1 => TRANSPORT_CREATE_RESULT_MEDIA_TYPE,
+            Self::V1 => TransportCreation::MEDIA_TYPE,
             Self::Legacy => TEXT_PLAIN_MEDIA_TYPE,
         }
     }
@@ -628,6 +625,8 @@ pub struct TransportCheckResult {
 }
 
 impl TransportCheckResult {
+    const MEDIA_TYPE: &str = "application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.transport.service.checkData";
+
     pub(crate) fn parse(body: &[u8]) -> Result<Self, CtsError> {
         let raw: RawTransportCheckResponse =
             serde_xml_rs::from_reader(body).map_err(CtsError::InvalidTransportResponse)?;
@@ -776,6 +775,10 @@ pub struct TransportCreation {
 }
 
 impl TransportCreation {
+    const MEDIA_TYPE: &str =
+        "application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.CorrectionRequestResult";
+    const LEGACY_REFERENCE_PREFIX: &str = "/com.sap.cts/object_record/";
+
     pub(crate) fn parse(body: &[u8]) -> Result<Self, CtsError> {
         let raw: RawTransportCreation =
             serde_xml_rs::from_reader(body).map_err(CtsError::InvalidTransportResponse)?;
@@ -802,7 +805,7 @@ impl TransportCreation {
             .map_err(CtsError::InvalidTransportCreationResponseEncoding)?
             .trim();
         let Some(transport_number) = reference
-            .strip_prefix(LEGACY_TRANSPORT_REFERENCE_PREFIX)
+            .strip_prefix(Self::LEGACY_REFERENCE_PREFIX)
             .filter(|number| !number.is_empty() && !number.contains('/'))
         else {
             return Err(CtsError::InvalidTransportCreationReference {
@@ -831,6 +834,9 @@ pub struct TransportCreationMessage {
 }
 
 impl TransportRequest {
+    const MEDIA_TYPE: &str =
+        "application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.CorrectionRequest";
+
     pub(crate) fn parse(body: &[u8]) -> Result<Self, CtsError> {
         let raw: RawTransportRequestResponse =
             serde_xml_rs::from_reader(body).map_err(CtsError::InvalidTransportResponse)?;
@@ -846,6 +852,9 @@ pub struct TransportRequests {
 }
 
 impl TransportRequests {
+    const MEDIA_TYPE: &str =
+        "application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.CorrectionRequests";
+
     pub(crate) fn parse(body: &[u8]) -> Result<Self, CtsError> {
         if body.is_empty() {
             return Ok(Self::default());
@@ -895,6 +904,9 @@ pub(crate) struct TransportCheckRequest<'a> {
 }
 
 impl<'a> TransportCheckRequest<'a> {
+    const MEDIA_TYPE: &'static str = "application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.transport.service.checkData";
+    const ABAP_XML_NAMESPACE: &'static str = "http://www.sap.com/abapxml";
+
     pub(crate) fn new(
         uri: &'a AdtUri,
         operation: &'static str,
@@ -921,7 +933,7 @@ impl<'a> TransportCheckRequest<'a> {
 
     pub(crate) fn serialize(&self) -> Result<String, CtsError> {
         serde_xml_rs::SerdeXml::new()
-            .namespace("asx", ABAP_XML_NAMESPACE)
+            .namespace("asx", Self::ABAP_XML_NAMESPACE)
             .to_string(self)
             .map_err(CtsError::InvalidTransportCheckRequest)
     }
@@ -971,6 +983,11 @@ pub(crate) struct TransportCreateRequest<'a> {
 }
 
 impl<'a> TransportCreateRequest<'a> {
+    const LEGACY_MEDIA_TYPE: &'static str =
+        "application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.CreateCorrectionRequest";
+    const V1_MEDIA_TYPE: &'static str = "application/vnd.sap.as+xml; charset=UTF-8; dataname=com.sap.adt.CreateCorrectionRequest.v1";
+    const ABAP_XML_NAMESPACE: &'static str = "http://www.sap.com/abapxml";
+
     pub(crate) fn new(
         package: Option<&'a str>,
         description: &'a str,
@@ -991,7 +1008,7 @@ impl<'a> TransportCreateRequest<'a> {
 
     pub(crate) fn serialize(&self) -> Result<String, CtsError> {
         serde_xml_rs::SerdeXml::new()
-            .namespace("asx", ABAP_XML_NAMESPACE)
+            .namespace("asx", Self::ABAP_XML_NAMESPACE)
             .to_string(self)
             .map_err(CtsError::InvalidTransportCreationRequest)
     }
@@ -1637,7 +1654,7 @@ mod tests {
                 supported,
                 ..
             } if content_type == TEXT_PLAIN_MEDIA_TYPE
-                && supported == [TRANSPORT_CREATE_RESULT_MEDIA_TYPE]
+                && supported == [TransportCreation::MEDIA_TYPE]
         ));
     }
 }

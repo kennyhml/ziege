@@ -3,7 +3,7 @@ mod common;
 use std::{env, error::Error, io};
 
 use serde_json::json;
-use zadt::{Class, ClassCreateProperties, Client, ObjectSnapshot, ObjectType, Operation};
+use zadt::{Class, ClassCreateProperties, Client, ObjectRef, ObjectType, Operation};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -36,16 +36,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .build()?;
 
             // get a typed object reference and pass the creation payload
-            let mut request = client.object::<Class>(&name)?.create(properties);
+            let mut request = ObjectRef::<Class>::new(&name).create(properties);
 
             // optionally add a transport
             if let Some(transport) = transport.as_deref() {
                 request = request.transport(transport);
             }
 
-            // the snapshot is also typed
-            let result: Option<ObjectSnapshot<Class>> = request.execute(&client).await?;
-            println!("{result:#?}");
+            request.execute(&client).await?;
         }
         "erased" => {
             // build properties via JSON, field names are the xml qualifiers!
@@ -58,8 +56,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             });
 
             // get an erased object reference and pass the creation payload
-            let mut request = client
-                .object_from_wb_type(&Class::WORKBENCH_TYPE, &name)?
+            let mut request = ObjectRef::from_workbench_type(&Class::WORKBENCH_TYPE, &name)?
                 .create(properties)?;
 
             // optionally add a transport
@@ -67,12 +64,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 request = request.transport(transport);
             }
 
-            // the snapshot is also erased
-            let result: Option<ObjectSnapshot<()>> = request.execute(&client).await?;
-            println!("{result:#?}");
+            request.execute(&client).await?;
         }
         _ => return Err(io::Error::new(io::ErrorKind::InvalidInput, usage).into()),
     }
+
+    println!("Created {name}");
 
     Ok(())
 }

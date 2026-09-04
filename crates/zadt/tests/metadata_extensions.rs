@@ -3,8 +3,9 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Client, EntityTag, Logon, MediaTyped, MetadataExtension, MetadataExtensionCreateProperties,
-    MetadataExtensionProperties, Operation, Ready, ReqwestTransport, WorkbenchVersion,
+    Client, Discovery, EntityTag, Logon, MediaTyped, MetadataExtension,
+    MetadataExtensionCreateProperties, MetadataExtensionProperties, ObjectRef, Operation,
+    ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -47,7 +48,7 @@ async fn mock_core_discovery(server: &MockServer) -> Mock<'_> {
         .await
 }
 
-async fn ready_client(server: &MockServer) -> Client<Ready> {
+async fn discovered_client(server: &MockServer) -> Client<Discovery> {
     let transport = ReqwestTransport::builder()
         .destination(server.base_url())
         .sap_client("001")
@@ -93,10 +94,8 @@ async fn metadata_extension_properties_advertise_the_primary_source() {
         })
         .await;
 
-    let client = ready_client(&server).await;
-    let reference = client
-        .object::<MetadataExtension>("C_MDOAPPLICATIONSCOPE")
-        .unwrap();
+    let client = discovered_client(&server).await;
+    let reference = ObjectRef::<MetadataExtension>::new("C_MDOAPPLICATIONSCOPE");
     let object = reference
         .query()
         .workbench_version(WorkbenchVersion::Active)
@@ -162,18 +161,14 @@ async fn metadata_extension_creation_posts_only_the_sparse_properties_payload() 
         })
         .await;
 
-    let client = ready_client(&server).await;
-    let reference = client
-        .object::<MetadataExtension>("Z_METADATA_EXTENSION")
-        .unwrap();
+    let client = discovered_client(&server).await;
+    let reference = ObjectRef::<MetadataExtension>::new("Z_METADATA_EXTENSION");
     let properties = MetadataExtensionCreateProperties::builder()
         .description("Created Metadata Extension")
         .package("$TMP")
         .build()
         .unwrap();
-    let created = reference.create(properties).execute(&client).await.unwrap();
-
-    assert!(created.is_none());
+    reference.create(properties).execute(&client).await.unwrap();
     logon.assert_async().await;
     discovery.assert_async().await;
     csrf.assert_async().await;

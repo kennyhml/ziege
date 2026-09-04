@@ -1,18 +1,14 @@
+use std::collections::HashMap;
+
 use http::{Method, StatusCode};
 use serde::Deserialize;
+use stduritemplate::Value;
 
 use crate::{
-    Advertised, CategoryId, Client, EncodeError, EncodedOperation, Operation, OperationResponse,
-    Ready, ResponseError, Stateless, User, UserError,
-    operation::{CollectionLocator, TemplateLocator},
+    CategoryId, Discovery, EncodeError, EncodedOperation, ObjectError, Operation,
+    OperationResponse, RequiresDiscovery, ResolveError, ResponseError, Stateless, User, UserError,
+    resource::AdtUriTemplate,
 };
-
-const USERS_CATEGORY: CategoryId = CategoryId {
-    scheme: "http://www.sap.com/adt/categories/system/users",
-    term: "users",
-};
-const USERS_MEDIA_TYPE: &str = "application/atom+xml;type=feed";
-const USER_RELATION: &str = "self";
 
 /// Queries users visible in the SAP system user directory.
 ///
@@ -25,7 +21,10 @@ pub struct UsersQuery {
 }
 
 impl UsersQuery {
-    const TARGET: CollectionLocator = CollectionLocator::new(USERS_CATEGORY);
+    const CATEGORY: CategoryId = CategoryId {
+        scheme: "http://www.sap.com/adt/categories/system/users",
+        term: "users",
+    };
 
     /// Creates a query using the backend's default selection and result limit.
     pub fn new() -> Self {
@@ -48,23 +47,25 @@ impl UsersQuery {
 impl Operation for UsersQuery {
     type Response = Users;
     type Kind = Stateless;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut request = Self::TARGET.operation(Method::GET);
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        let target = resolver.require_collection_target(Self::CATEGORY)?;
+
+        let mut request = EncodedOperation::new(Method::GET, target);
         if let Some(query_string) = &self.query_string {
             request.push_query("querystring", query_string);
         }
         if let Some(max_count) = self.max_count {
             request.push_query("maxcount", max_count.to_string());
         }
-        request.set_accept(USERS_MEDIA_TYPE);
+        request.set_accept(Users::MEDIA_TYPE);
         Ok(request)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         response.require_status(StatusCode::OK)?;
-        response.require_content_type(&[USERS_MEDIA_TYPE])?;
+        response.require_content_type(&[Users::MEDIA_TYPE])?;
         Users::parse(response.body()).map_err(Into::into)
     }
 }
@@ -76,7 +77,7 @@ pub struct UserDetailsQuery {
 }
 
 impl UserDetailsQuery {
-    const TARGET: TemplateLocator = TemplateLocator::new(USERS_CATEGORY, USER_RELATION);
+    const RELATION: &str = "self";
 
     fn new(user: User) -> Self {
         Self { user }
@@ -86,19 +87,38 @@ impl UserDetailsQuery {
 impl Operation for UserDetailsQuery {
     type Response = Option<User>;
     type Kind = Stateless;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut target = Self::TARGET.target();
-        target.push_variable("username", self.user.as_str());
-        let mut request = EncodedOperation::advertised(Method::GET, target);
-        request.set_accept(USERS_MEDIA_TYPE);
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        let link = resolver.require_template(UsersQuery::CATEGORY, Self::RELATION)?;
+
+        let template = AdtUriTemplate::new(link.template());
+        if !template.has_variable("username") {
+            return Err(
+                ResolveError::from(ObjectError::UnsupportedTemplateParameter {
+                    parameter: "username",
+                })
+                .into(),
+            );
+        }
+
+        let variables = HashMap::from([(
+            "username".to_owned(),
+            Value::String(self.user.as_str().to_owned()),
+        )]);
+
+        let (target, query) = template.expand(&variables).map_err(ResolveError::from)?;
+        let mut request = EncodedOperation::new(Method::GET, target);
+        for (name, value) in query {
+            request.push_query(name, value);
+        }
+        request.set_accept(Users::MEDIA_TYPE);
         Ok(request)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         response.require_status(StatusCode::OK)?;
-        response.require_content_type(&[USERS_MEDIA_TYPE])?;
+        response.require_content_type(&[Users::MEDIA_TYPE])?;
         let mut users = Users::parse(response.body())?.users;
         if users.len() > 1 {
             return Err(UserError::MultipleUsers {
@@ -127,13 +147,6 @@ impl User {
     }
 }
 
-impl Client<Ready> {
-    /// Creates a query for users visible in this SAP system.
-    pub fn users(&self) -> UsersQuery {
-        UsersQuery::new()
-    }
-}
-
 /// Users returned by the SAP system user directory.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Users {
@@ -141,6 +154,8 @@ pub struct Users {
 }
 
 impl Users {
+    const MEDIA_TYPE: &str = "application/atom+xml;type=feed";
+
     fn parse(body: &[u8]) -> Result<Self, UserError> {
         let feed: RawUsersFeed = serde_xml_rs::from_reader(body)?;
         Ok(Self {
@@ -179,10 +194,29 @@ struct RawUserEntry {
 
 #[cfg(test)]
 mod tests {
+    use async_trait::async_trait;
     use http::{HeaderMap, header};
 
     use super::*;
-    use crate::{AdtResponse, AdtUri};
+    use crate::{AdtRequest, AdtResponse, AdtUri, Client, TransportError};
+
+    const USERS_DISCOVERY_XML: &[u8] = br#"
+        <app:service xmlns:app="http://www.w3.org/2007/app"
+            xmlns:atom="http://www.w3.org/2005/Atom"
+            xmlns:adtcomp="http://www.sap.com/adt/compatibility">
+            <app:workspace>
+                <atom:title>System</atom:title>
+                <app:collection href="/sap/bc/adt/system/users">
+                    <atom:category term="users"
+                        scheme="http://www.sap.com/adt/categories/system/users" />
+                    <adtcomp:templateLinks>
+                        <adtcomp:templateLink rel="self"
+                            template="/sap/bc/adt/system/users/{username}" />
+                    </adtcomp:templateLinks>
+                </app:collection>
+            </app:workspace>
+        </app:service>
+    "#;
 
     const USERS_XML: &[u8] = br#"<?xml version="1.0" encoding="utf-8"?>
         <atom:feed xmlns:atom="http://www.w3.org/2005/Atom">
@@ -198,14 +232,32 @@ mod tests {
         </atom:feed>
     "#;
 
+    struct UnusedTransport;
+
+    #[async_trait]
+    impl crate::Transport for UnusedTransport {
+        async fn send(&self, _request: AdtRequest) -> Result<AdtResponse, TransportError> {
+            unreachable!("request construction tests do not send requests")
+        }
+    }
+
+    fn discovered_client() -> Client<Discovery> {
+        Client::new(UnusedTransport).with_capabilities(
+            crate::api::discovery::parse_capabilities(USERS_DISCOVERY_XML).unwrap(),
+            crate::api::discovery::parse_capabilities(USERS_DISCOVERY_XML).unwrap(),
+        )
+    }
+
     #[test]
     fn client_user_query_uses_the_advertised_collection_and_filters() {
         let mut query = UsersQuery::new();
         query.query("*DEV*").max_count(2);
 
-        let request = query.encode().unwrap();
+        let client = discovered_client();
+        let request = query.encode(client.discovery()).unwrap();
 
         assert_eq!(request.method(), Method::GET);
+        assert_eq!(request.target().as_str(), "/sap/bc/adt/system/users");
         assert_eq!(
             request.query(),
             [
@@ -215,7 +267,7 @@ mod tests {
         );
         assert_eq!(
             request.headers().get(header::ACCEPT).unwrap(),
-            USERS_MEDIA_TYPE
+            Users::MEDIA_TYPE
         );
     }
 
@@ -223,7 +275,7 @@ mod tests {
     fn user_feed_decodes_identity_and_display_name() {
         let query = UsersQuery::new();
         let mut headers = HeaderMap::new();
-        headers.insert(header::CONTENT_TYPE, USERS_MEDIA_TYPE.parse().unwrap());
+        headers.insert(header::CONTENT_TYPE, Users::MEDIA_TYPE.parse().unwrap());
         let response = AdtResponse::new(StatusCode::OK, headers, USERS_XML.to_vec());
         let users = query
             .decode(OperationResponse::new(
@@ -242,12 +294,17 @@ mod tests {
     #[test]
     fn user_details_uses_the_advertised_self_template_and_decodes_one_user() {
         let query = User::new("DEVELOPER").details();
-        let request = query.encode().unwrap();
+        let client = discovered_client();
+        let request = query.encode(client.discovery()).unwrap();
         assert_eq!(request.method(), Method::GET);
-        assert_eq!(request.headers()[header::ACCEPT], USERS_MEDIA_TYPE);
+        assert_eq!(
+            request.target().as_str(),
+            "/sap/bc/adt/system/users/DEVELOPER"
+        );
+        assert_eq!(request.headers()[header::ACCEPT], Users::MEDIA_TYPE);
 
         let mut headers = HeaderMap::new();
-        headers.insert(header::CONTENT_TYPE, USERS_MEDIA_TYPE.parse().unwrap());
+        headers.insert(header::CONTENT_TYPE, Users::MEDIA_TYPE.parse().unwrap());
         let response = AdtResponse::new(
             StatusCode::OK,
             headers,

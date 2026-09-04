@@ -4,18 +4,15 @@ use http::{Method, StatusCode};
 use serde::Deserialize;
 
 use crate::{
-    PostAction, User, UserSessionId,
+    Discovery, PostAction, RequiresDiscovery, User, UserSessionId,
     error::{EncodeError, ObjectError, ResponseError},
     objects::{ObjectRef, ObjectSnapshot, ObjectType},
-    operation::{EncodedOperation, Operation, OperationResponse, Owned, Stateful},
+    operation::{EncodedOperation, Operation, OperationResponse, Stateful},
 };
 
 use super::transports::TransportNumber;
 
-const ACCESS_MODE_QUERY: &str = "accessMode";
 pub(crate) const LOCK_HANDLE_QUERY: &str = "lockHandle";
-const LOCK_RESULT_MEDIA_TYPE: &str =
-    "application/vnd.sap.as+xml; charset=utf-8; dataname=com.sap.adt.lock.Result2";
 
 /// The access requested when locking an ADT repository object.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -60,6 +57,9 @@ pub struct ObjectLock {
 }
 
 impl ObjectLock {
+    const MEDIA_TYPE: &str =
+        "application/vnd.sap.as+xml; charset=utf-8; dataname=com.sap.adt.lock.Result2";
+
     pub(crate) fn parse(
         object: ObjectRef,
         access_mode: AccessMode,
@@ -224,7 +224,7 @@ impl<T> ObjectRef<T> {
 
     /// Creates an operation that releases this object's lock.
     pub fn unlock(&self, object_lock: ObjectLock) -> Result<UnlockRequest, ObjectError> {
-        if self.uri() != object_lock.object().uri() {
+        if !self.same_identity(object_lock.object()) {
             return Err(ObjectError::ObjectLockMismatch {
                 expected: self.to_string(),
                 actual: object_lock.object().to_string(),
@@ -242,7 +242,7 @@ impl<T: ObjectType> ObjectSnapshot<T> {
 
     /// Creates an operation that releases this object's lock.
     pub fn unlock(&self, object_lock: ObjectLock) -> Result<UnlockRequest, ObjectError> {
-        if self.reference().uri() != object_lock.object().uri() {
+        if !self.reference().same_identity(object_lock.object()) {
             return Err(ObjectError::ObjectLockMismatch {
                 expected: self.reference().to_string(),
                 actual: object_lock.object().to_string(),
@@ -279,6 +279,8 @@ pub struct LockRequest {
 }
 
 impl LockRequest {
+    const ACCESS_MODE_QUERY: &str = "accessMode";
+
     pub(crate) fn new(object: ObjectRef, access_mode: AccessMode) -> Self {
         Self {
             object,
@@ -290,13 +292,14 @@ impl LockRequest {
 impl Operation for LockRequest {
     type Response = ObjectLock;
     type Kind = Stateful;
-    type Target = Owned;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut request = EncodedOperation::owned(Method::POST, self.object.uri().clone());
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        let target = resolver.resolve_object_uri(&self.object)?;
+        let mut request = EncodedOperation::new(Method::POST, target);
         request.push_query(PostAction::QUERY_PARAMETER, PostAction::Lock.as_str());
-        request.push_query(ACCESS_MODE_QUERY, self.access_mode.as_str());
-        request.set_accept(LOCK_RESULT_MEDIA_TYPE);
+        request.push_query(Self::ACCESS_MODE_QUERY, self.access_mode.as_str());
+        request.set_accept(ObjectLock::MEDIA_TYPE);
         Ok(request)
     }
 
@@ -327,11 +330,11 @@ impl UnlockRequest {
 impl Operation for UnlockRequest {
     type Response = ();
     type Kind = Stateful;
-    type Target = Owned;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut request =
-            EncodedOperation::owned(Method::POST, self.object_lock.object().uri().clone());
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        let target = resolver.resolve_object_uri(self.object_lock.object())?;
+        let mut request = EncodedOperation::new(Method::POST, target);
         request.push_query(PostAction::QUERY_PARAMETER, PostAction::Unlock.as_str());
         request.push_query(LOCK_HANDLE_QUERY, self.object_lock.handle());
         if let Some(user_session) = self.object_lock.user_session() {
@@ -385,17 +388,14 @@ struct RawLockData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, Program};
+    use crate::{AdtResponse, AdtUri, Program};
+    use http::HeaderMap;
 
     const LOCK_XML: &[u8] = include_bytes!("../../tests/fixtures/object-lock.xml");
 
     #[test]
     fn parses_object_lock_and_transport_metadata() {
-        let object = ObjectRef::erased(
-            "ZTEST".to_owned(),
-            AdtUri::parse("/sap/bc/adt/programs/programs/ztest").unwrap(),
-            "PROG/P".parse().unwrap(),
-        );
+        let object = ObjectRef::<Program>::new("ZTEST").erase();
         let lock = ObjectLock::parse(
             object,
             AccessMode::Modify,
@@ -426,11 +426,7 @@ mod tests {
                 "<LINK_UP_MODE />",
                 "<LINK_UP_MODE>MultipleRequests</LINK_UP_MODE>",
             );
-        let object = ObjectRef::erased(
-            "ZCL_TEST".to_owned(),
-            AdtUri::parse("/sap/bc/adt/oo/classes/zcl_test").unwrap(),
-            "CLAS/OC".parse().unwrap(),
-        );
+        let object = ObjectRef::<crate::Class>::new("ZCL_TEST").erase();
         let lock = ObjectLock::parse(
             object,
             AccessMode::Modify,
@@ -454,27 +450,45 @@ mod tests {
     }
 
     #[test]
-    fn locking_operations_do_not_require_discovery() {
-        fn accepts_operation<O: Operation>() {}
+    fn locking_operations_require_discovery() {
+        fn requires_discovery<O: Operation<ResolutionRequirement = RequiresDiscovery>>() {}
 
-        accepts_operation::<LockRequest>();
-        accepts_operation::<UnlockRequest>();
+        requires_discovery::<LockRequest>();
+        requires_discovery::<UnlockRequest>();
+    }
+
+    #[test]
+    fn lock_decode_preserves_logical_object_identity() {
+        let object = ObjectRef::<Program>::new("ZTEST").erase();
+        let request = LockRequest::new(object.clone(), AccessMode::Modify);
+        let target = AdtUri::parse("/sap/bc/adt/programs/programs/ztest").unwrap();
+        let response = OperationResponse::new(
+            AdtResponse::new(StatusCode::OK, HeaderMap::new(), LOCK_XML.to_vec()),
+            target,
+        );
+
+        let object_lock = request.decode(response).unwrap();
+
+        assert_eq!(object_lock.object(), &object);
     }
 
     #[test]
     fn object_rejects_another_objects_lock_for_unlock() {
-        let first = ObjectRef::<Program>::for_test(
-            "ZFIRST",
-            AdtUri::parse("/sap/bc/adt/programs/programs/ZFIRST").unwrap(),
-        );
-        let second = ObjectRef::<Program>::for_test(
-            "ZSECOND",
-            AdtUri::parse("/sap/bc/adt/programs/programs/ZSECOND").unwrap(),
-        );
+        let first = ObjectRef::<Program>::new("ZFIRST");
+        let second = ObjectRef::<Program>::new("ZSECOND");
         let object_lock = ObjectLock::for_test(first.erase(), AccessMode::Modify);
 
         let error = second.unlock(object_lock).unwrap_err();
 
         assert!(matches!(error, ObjectError::ObjectLockMismatch { .. }));
+    }
+
+    #[test]
+    fn object_accepts_the_same_normalized_logical_identity_for_unlock() {
+        let first = ObjectRef::<Program>::new("ztest");
+        let second = ObjectRef::<Program>::new("ZTEST");
+        let object_lock = ObjectLock::for_test(first.erase(), AccessMode::Modify);
+
+        assert!(second.unlock(object_lock).is_ok());
     }
 }

@@ -3,7 +3,7 @@ use zadt_macros::object_type;
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTyped, ToXml, WorkbenchVersion,
+    MediaTyped, MediaTypes, ToXml, WorkbenchVersion,
 };
 
 #[object_type(
@@ -85,10 +85,10 @@ pub struct PackageProperties {
 }
 
 impl MediaTyped for PackageProperties {
-    const MEDIA_TYPES: &'static [&'static str] = &[
+    const MEDIA_TYPES: MediaTypes = MediaTypes::new(&[
         "application/vnd.sap.adt.packages.v2+xml",
         "application/vnd.sap.adt.packages.v1+xml",
-    ];
+    ]);
 }
 
 impl ToXml for PackageProperties {

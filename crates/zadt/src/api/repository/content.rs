@@ -4,18 +4,11 @@ use serde::{Deserialize, Serialize};
 
 use super::common::{RepositoryFacet, RepositoryPreselection};
 use crate::{
-    AdtUri, Advertised, CategoryId, Client, EncodeError, EncodedOperation, GlobalWorkbenchType,
-    ObjectError, ObjectRef, ObjectType, Operation, OperationResponse, Ready, RepositoryError,
+    AdtUri, CategoryId, Discovery, EncodeError, EncodedOperation, GlobalWorkbenchType, ObjectError,
+    ObjectRef, ObjectType, Operation, OperationResponse, RepositoryError, RequiresDiscovery,
     ResponseError, Stateless,
-    operation::CollectionLocator,
     resource::{AdvertisedLink, Relations},
 };
-
-const VIRTUAL_FOLDERS_NAMESPACE: &str = "http://www.sap.com/adt/ris/virtualFolders";
-pub(super) const REPOSITORY_CONTENT_REQUEST_MEDIA_TYPE: &str =
-    "application/vnd.sap.adt.repository.virtualfolders.request.v1+xml";
-pub(super) const REPOSITORY_CONTENT_RESULT_MEDIA_TYPE: &str =
-    "application/vnd.sap.adt.repository.virtualfolders.result.v1+xml";
 
 /// Fetches one virtual-folder hierarchy layer from the repository information system.
 ///
@@ -73,10 +66,10 @@ impl Default for RepositoryContentQuery {
 }
 
 impl RepositoryContentQuery {
-    const TARGET: CollectionLocator = CollectionLocator::new(CategoryId {
+    const CATEGORY: CategoryId = CategoryId {
         scheme: "http://www.sap.com/adt/categories/repository/virtualfolders",
         term: "contents",
-    });
+    };
 
     /// Creates a query matching all repository object names.
     pub fn new() -> Self {
@@ -89,23 +82,17 @@ impl RepositoryContentQuery {
     }
 }
 
-impl Client<Ready> {
-    /// Creates a repository-content query matching all object names.
-    pub fn repository_content(&self) -> RepositoryContentQuery {
-        RepositoryContentQuery::new()
-    }
-}
-
 impl Operation for RepositoryContentQuery {
     type Response = RepositoryContent;
     type Kind = Stateless;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
         let body =
             RepositoryContentRequest::new(&self.search_pattern, &self.preselections, &self.facets)
                 .serialize()?;
-        let mut request = Self::TARGET.operation(Method::POST);
+        let target = resolver.require_collection_target(Self::CATEGORY)?;
+        let mut request = EncodedOperation::new(Method::POST, target);
         if let Some(ignore) = self.ignore_short_descriptions {
             request.push_query("ignoreShortDescriptions", ignore.to_string());
         }
@@ -115,8 +102,8 @@ impl Operation for RepositoryContentQuery {
         if let Some(operation) = self.operation {
             request.push_query("operation", operation.as_str());
         }
-        request.set_accept(REPOSITORY_CONTENT_RESULT_MEDIA_TYPE);
-        request.set_content_type(REPOSITORY_CONTENT_REQUEST_MEDIA_TYPE);
+        request.set_accept(RepositoryContent::MEDIA_TYPE);
+        request.set_content_type(RepositoryContentRequest::MEDIA_TYPE);
         request.set_body(body);
         Ok(request)
     }
@@ -158,6 +145,9 @@ pub struct RepositoryContent {
 }
 
 impl RepositoryContent {
+    pub(super) const MEDIA_TYPE: &str =
+        "application/vnd.sap.adt.repository.virtualfolders.result.v1+xml";
+
     pub(super) fn parse(body: &[u8], request_uri: &AdtUri) -> Result<Self, RepositoryError> {
         let raw: RawRepositoryContent =
             serde_xml_rs::from_reader(body).map_err(RepositoryError::InvalidResponse)?;
@@ -281,6 +271,7 @@ pub struct RepositoryObjectEntry {
     pub package: String,
     /// A validated, type-erased reference to the ADT object resource.
     pub reference: ObjectRef<()>,
+    uri: AdtUri,
     /// The corresponding virtual Workbench URI, when supplied by SAP.
     pub virtual_workbench_uri: Option<String>,
     pub expandable: bool,
@@ -290,6 +281,11 @@ pub struct RepositoryObjectEntry {
 }
 
 impl RepositoryObjectEntry {
+    /// Returns the authoritative object URI advertised by RIS.
+    pub fn uri(&self) -> &AdtUri {
+        &self.uri
+    }
+
     /// Returns links advertised for this repository object.
     pub fn relations(&self) -> &Relations {
         &self.relations
@@ -297,8 +293,7 @@ impl RepositoryObjectEntry {
 
     /// Converts this RIS entry into a checked static object reference.
     ///
-    /// The conversion verifies the exact Workbench type and preserves the URI
-    /// advertised by RIS rather than reconstructing it through discovery.
+    /// The conversion verifies the exact Workbench type.
     pub fn typed_reference<T: ObjectType>(&self) -> Result<ObjectRef<T>, ObjectError> {
         if self.reference.object_type() != &T::WORKBENCH_TYPE {
             return Err(ObjectError::UnexpectedRepositoryObjectType {
@@ -307,10 +302,7 @@ impl RepositoryObjectEntry {
             });
         }
 
-        Ok(ObjectRef::new(
-            self.name.clone(),
-            self.reference.uri().clone(),
-        ))
+        Ok(self.reference.retag())
     }
 
     /// Returns the runtime-typed object reference advertised by RIS.
@@ -336,7 +328,7 @@ impl TryFrom<RawRepositoryObjectEntry> for RepositoryObjectEntry {
             uri: raw.uri,
             source,
         })?;
-        let reference = ObjectRef::erased(raw.name.clone(), uri, raw.object_type);
+        let reference = ObjectRef::from_parts(raw.name.to_ascii_uppercase(), raw.object_type, None);
         Ok(Self {
             name: raw.name,
             version: raw.version,
@@ -344,8 +336,9 @@ impl TryFrom<RawRepositoryObjectEntry> for RepositoryObjectEntry {
             virtual_workbench_uri: raw.virtual_workbench_uri,
             expandable: raw.expandable,
             description: raw.description,
-            relations: Relations::new(reference.clone(), raw.links),
+            relations: Relations::for_base(uri.clone(), raw.links),
             reference,
+            uri,
         })
     }
 }
@@ -369,6 +362,10 @@ pub(super) struct RepositoryContentRequest<'a> {
 }
 
 impl<'a> RepositoryContentRequest<'a> {
+    pub(super) const MEDIA_TYPE: &'static str =
+        "application/vnd.sap.adt.repository.virtualfolders.request.v1+xml";
+    const NAMESPACE: &'static str = "http://www.sap.com/adt/ris/virtualFolders";
+
     pub(super) fn new(
         search_pattern: &'a str,
         preselections: &'a [RepositoryPreselection],
@@ -383,7 +380,7 @@ impl<'a> RepositoryContentRequest<'a> {
 
     pub(super) fn serialize(&self) -> Result<String, RepositoryError> {
         serde_xml_rs::SerdeXml::new()
-            .namespace("vfs", VIRTUAL_FOLDERS_NAMESPACE)
+            .namespace("vfs", Self::NAMESPACE)
             .to_string(self)
             .map_err(RepositoryError::InvalidRequest)
     }

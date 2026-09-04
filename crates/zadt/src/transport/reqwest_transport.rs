@@ -185,10 +185,7 @@ mod tests {
     };
     use crate::{
         AdtUri,
-        api::session::{
-            HTTP_SESSIONS_PATH, PREFLIGHT_LOGON_PURPOSE, SECURITY_SESSION_HEADER,
-            SESSION_MEDIA_TYPE,
-        },
+        api::session::{HTTP_SESSIONS_PATH, Logon, SECURITY_SESSION_HEADER, SessionInformation},
         protocol::CORE_DISCOVERY_PATH,
     };
     use http::{HeaderMap, HeaderValue, Method, StatusCode, header};
@@ -436,11 +433,11 @@ mod tests {
             .mock_async(|when, then| {
                 when.method(GET)
                     .path(HTTP_SESSIONS_PATH)
-                    .header("sap-adt-purpose", PREFLIGHT_LOGON_PURPOSE)
+                    .header("sap-adt-purpose", Logon::PREFLIGHT_LOGON_PURPOSE)
                     .header("x-sap-security-session", "create")
                     .header("cookie", "sap-usercontext=sap-client=001&sap-language=EN");
                 then.status(200)
-                    .header("content-type", SESSION_MEDIA_TYPE)
+                    .header("content-type", SessionInformation::MEDIA_TYPE)
                     .header("set-cookie", "SAP_SESSIONID_A4H_001=fresh; Path=/")
                     .body(SESSION_XML);
             })
@@ -480,9 +477,9 @@ mod tests {
             .mock_async(|when, then| {
                 when.method(GET)
                     .path(HTTP_SESSIONS_PATH)
-                    .header("sap-adt-purpose", PREFLIGHT_LOGON_PURPOSE);
+                    .header("sap-adt-purpose", Logon::PREFLIGHT_LOGON_PURPOSE);
                 then.status(200)
-                    .header("content-type", SESSION_MEDIA_TYPE)
+                    .header("content-type", SessionInformation::MEDIA_TYPE)
                     .header("set-cookie", "SAP_SESSIONID_A4H_001=fresh; Path=/")
                     .body(SESSION_XML);
             })
@@ -513,9 +510,9 @@ mod tests {
             .mock_async(|when, then| {
                 when.method(GET)
                     .path(HTTP_SESSIONS_PATH)
-                    .header("sap-adt-purpose", PREFLIGHT_LOGON_PURPOSE);
+                    .header("sap-adt-purpose", Logon::PREFLIGHT_LOGON_PURPOSE);
                 then.status(200)
-                    .header("content-type", SESSION_MEDIA_TYPE)
+                    .header("content-type", SessionInformation::MEDIA_TYPE)
                     .header("set-cookie", "SAP_SESSIONID_A4H_001=fresh; Path=/")
                     .body(SESSION_XML);
             })

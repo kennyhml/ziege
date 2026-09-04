@@ -1,5 +1,5 @@
 //! Optimistic and pessimistic concurrency-control decorators.
-use super::{Operation, OperationResponse};
+use super::{Operation, OperationResponse, ResolutionRequirement};
 use crate::{
     EncodeError, EncodedOperation, EntityTag, ObjectError, ObjectLock, ObjectRef, ResponseError,
     Stateful, Stateless, api::locking,
@@ -69,10 +69,13 @@ where
 {
     type Response = ConditionalResult<O::Response>;
     type Kind = O::Kind;
-    type Target = O::Target;
+    type ResolutionRequirement = O::ResolutionRequirement;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut request = self.inner.encode()?;
+    fn encode(
+        &self,
+        resolver: &<Self::ResolutionRequirement as ResolutionRequirement>::Resolver,
+    ) -> Result<EncodedOperation, EncodeError> {
+        let mut request = self.inner.encode(resolver)?;
         request.set_cache_revalidation(Some(&self.etag));
         Ok(request)
     }
@@ -80,7 +83,7 @@ where
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         if response.status() == StatusCode::NOT_MODIFIED {
             return Ok(ConditionalResult::NotModified {
-                etag: response.entity_tag(),
+                etag: response.etag(),
             });
         }
         self.inner.decode(response).map(ConditionalResult::Modified)
@@ -140,10 +143,13 @@ where
 {
     type Kind = O::Kind;
     type Response = PreconditionResult<O::Response>;
-    type Target = O::Target;
+    type ResolutionRequirement = O::ResolutionRequirement;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut request = self.inner.encode()?;
+    fn encode(
+        &self,
+        resolver: &<Self::ResolutionRequirement as ResolutionRequirement>::Resolver,
+    ) -> Result<EncodedOperation, EncodeError> {
+        let mut request = self.inner.encode(resolver)?;
         request
             .headers_mut()
             .insert(header::IF_MATCH, self.etag.as_header_value().clone());
@@ -153,7 +159,7 @@ where
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         if response.status() == StatusCode::PRECONDITION_FAILED {
             return Ok(PreconditionResult::Failed {
-                etag: response.entity_tag(),
+                etag: response.etag(),
             });
         }
         self.inner.decode(response).map(PreconditionResult::Success)
@@ -202,10 +208,13 @@ where
 {
     type Kind = Stateful;
     type Response = O::Response;
-    type Target = O::Target;
+    type ResolutionRequirement = O::ResolutionRequirement;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut request = self.inner.encode()?;
+    fn encode(
+        &self,
+        resolver: &<Self::ResolutionRequirement as ResolutionRequirement>::Resolver,
+    ) -> Result<EncodedOperation, EncodeError> {
+        let mut request = self.inner.encode(resolver)?;
         request.push_query(locking::LOCK_HANDLE_QUERY, self.lock.handle());
         if let Some(user_session) = self.lock.user_session() {
             request.bind_user_session(user_session);

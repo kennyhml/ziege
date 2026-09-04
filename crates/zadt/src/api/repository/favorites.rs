@@ -2,19 +2,10 @@ use http::{Method, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Advertised, AdvertisedObjectReference, CategoryId, EncodeError, EncodedOperation,
-    GlobalWorkbenchType, ObjectRef, Operation, OperationResponse, RepositoryError, ResponseError,
-    Stateless, User, operation::CollectionLocator,
+    AdvertisedObjectReference, CategoryId, Discovery, EncodeError, EncodedOperation,
+    GlobalWorkbenchType, ObjectError, ObjectRef, Operation, OperationResponse, RepositoryError,
+    RequiresDiscovery, ResolveError, ResponseError, Stateless, User,
 };
-
-const CATEGORY: CategoryId = CategoryId {
-    scheme: "http://www.sap.com/adt/categories/repository/virtualfolders",
-    term: "objectFavorites",
-};
-const FAVORITES_NAMESPACE: &str = "http://www.sap.com/adt/ris/vf/favorites";
-pub(super) const FAVORITES_MEDIA_TYPE: &str = "application/vnd.sap.adt.repository.favorites.v1+xml";
-pub(super) const FAVORITES_UPDATE_MEDIA_TYPE: &str =
-    "application/vnd.sap.adt.repository.favorites.modify.v1+xml";
 
 /// Queries a users favorite objects. Because this is stored in a table
 /// (vfs_fav_objects) on the backend, favorites set inside different editors
@@ -32,7 +23,10 @@ pub struct FavoriteObjectsQuery {
 }
 
 impl FavoriteObjectsQuery {
-    const TARGET: CollectionLocator = CollectionLocator::new(CATEGORY);
+    const CATEGORY: CategoryId = CategoryId {
+        scheme: "http://www.sap.com/adt/categories/repository/virtualfolders",
+        term: "objectFavorites",
+    };
 
     pub fn new() -> Self {
         Self { list: None }
@@ -65,21 +59,24 @@ impl User {
 impl Operation for FavoriteObjectsQuery {
     type Kind = Stateless;
     type Response = FavoriteObjectList;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
         let list = self.list.as_deref().unwrap_or("$");
-        let target = Self::TARGET.with_segment(list);
-
-        let mut request = EncodedOperation::advertised(Method::GET, target);
-        request.set_accept(FAVORITES_MEDIA_TYPE);
+        let target = resolver
+            .require_collection_target(Self::CATEGORY)?
+            .append_segments([list])
+            .map_err(ObjectError::InvalidTarget)
+            .map_err(ResolveError::from)?;
+        let mut request = EncodedOperation::new(Method::GET, target);
+        request.set_accept(FavoriteObjectList::MEDIA_TYPE);
         Ok(request)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         response.require_status(StatusCode::OK)?;
 
-        response.require_content_type(&[FAVORITES_MEDIA_TYPE])?;
+        response.require_content_type(&[FavoriteObjectList::MEDIA_TYPE])?;
 
         serde_xml_rs::from_reader(response.body())
             .map_err(RepositoryError::InvalidResponse)
@@ -99,32 +96,33 @@ pub struct FavoriteObjectsUpdate {
     list: String,
 
     /// The list of objects to update or remove, marked by the operation
-    objects: FavoriteObjectList,
+    objects: Vec<PendingFavoriteObject>,
 }
 
 impl FavoriteObjectsUpdate {
-    const TARGET: CollectionLocator = CollectionLocator::new(CATEGORY);
+    const CATEGORY: CategoryId = CategoryId {
+        scheme: "http://www.sap.com/adt/categories/repository/virtualfolders",
+        term: "objectFavorites",
+    };
 
     pub fn new(list: impl Into<String>) -> Self {
         Self {
             list: list.into(),
-            objects: FavoriteObjectList { objects: vec![] },
+            objects: Vec::new(),
         }
     }
 
     pub fn add<T>(&mut self, object: &ObjectRef<T>) -> &mut Self {
-        let mut entry: FavoriteObject = object.into();
-        entry.operation = Some("A".into());
-        entry.list = Some(self.list.clone());
-        self.objects.objects.push(entry);
+        self.objects
+            .push(PendingFavoriteObject::new(object, FavoriteOperation::Add));
         self
     }
 
     pub fn remove<T>(&mut self, object: &ObjectRef<T>) -> &mut Self {
-        let mut entry: FavoriteObject = object.into();
-        entry.operation = Some("R".into());
-        entry.list = Some(self.list.clone());
-        self.objects.objects.push(entry);
+        self.objects.push(PendingFavoriteObject::new(
+            object,
+            FavoriteOperation::Remove,
+        ));
         self
     }
 }
@@ -132,15 +130,23 @@ impl FavoriteObjectsUpdate {
 impl Operation for FavoriteObjectsUpdate {
     type Kind = Stateless;
     type Response = FavoriteObjectList;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let body = self.objects.serialize()?;
-        let target = Self::TARGET.with_segment(self.list.as_str());
-
-        let mut request = EncodedOperation::advertised(Method::POST, target);
-        request.set_accept(FAVORITES_MEDIA_TYPE);
-        request.set_content_type(FAVORITES_UPDATE_MEDIA_TYPE);
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        let objects = self
+            .objects
+            .iter()
+            .map(|object| object.resolve(resolver, &self.list))
+            .collect::<Result<Vec<_>, _>>()?;
+        let body = FavoriteObjectList { objects }.serialize()?;
+        let target = resolver
+            .require_collection_target(Self::CATEGORY)?
+            .append_segments([self.list.as_str()])
+            .map_err(ObjectError::InvalidTarget)
+            .map_err(ResolveError::from)?;
+        let mut request = EncodedOperation::new(Method::POST, target);
+        request.set_accept(FavoriteObjectList::MEDIA_TYPE);
+        request.set_content_type(FavoriteObjectList::UPDATE_MEDIA_TYPE);
         request.set_body(body);
         Ok(request)
     }
@@ -148,11 +154,51 @@ impl Operation for FavoriteObjectsUpdate {
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         response.require_status(StatusCode::OK)?;
 
-        response.require_content_type(&[FAVORITES_MEDIA_TYPE])?;
+        response.require_content_type(&[FavoriteObjectList::MEDIA_TYPE])?;
 
         serde_xml_rs::from_reader(response.body())
             .map_err(RepositoryError::InvalidResponse)
             .map_err(Into::into)
+    }
+}
+
+#[derive(Debug)]
+struct PendingFavoriteObject {
+    reference: ObjectRef<()>,
+    operation: FavoriteOperation,
+}
+
+impl PendingFavoriteObject {
+    fn new<T>(object: &ObjectRef<T>, operation: FavoriteOperation) -> Self {
+        Self {
+            reference: object.erase(),
+            operation,
+        }
+    }
+
+    fn resolve(&self, resolver: &Discovery, list: &str) -> Result<FavoriteObject, ResolveError> {
+        Ok(FavoriteObject {
+            uri: resolver.resolve_object_uri(&self.reference)?.to_string(),
+            object_type: self.reference.object_type().clone(),
+            name: self.reference.name().to_owned(),
+            list: Some(list.to_owned()),
+            operation: Some(self.operation.as_str().to_owned()),
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum FavoriteOperation {
+    Add,
+    Remove,
+}
+
+impl FavoriteOperation {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Add => "A",
+            Self::Remove => "R",
+        }
     }
 }
 
@@ -164,9 +210,14 @@ pub struct FavoriteObjectList {
 }
 
 impl FavoriteObjectList {
+    pub(super) const MEDIA_TYPE: &str = "application/vnd.sap.adt.repository.favorites.v1+xml";
+    pub(super) const UPDATE_MEDIA_TYPE: &str =
+        "application/vnd.sap.adt.repository.favorites.modify.v1+xml";
+    const NAMESPACE: &str = "http://www.sap.com/adt/ris/vf/favorites";
+
     fn serialize(&self) -> Result<String, RepositoryError> {
         serde_xml_rs::SerdeXml::new()
-            .namespace("vf", FAVORITES_NAMESPACE)
+            .namespace("vf", Self::NAMESPACE)
             .namespace("adtcore", "http://www.sap.com/adt/core")
             .to_string(self)
             .map_err(RepositoryError::InvalidRequest)
@@ -190,18 +241,6 @@ pub struct FavoriteObject {
 
     #[serde(rename = "@operation", skip_serializing_if = "Option::is_none")]
     operation: Option<String>,
-}
-
-impl<T> From<&ObjectRef<T>> for FavoriteObject {
-    fn from(value: &ObjectRef<T>) -> Self {
-        Self {
-            uri: value.uri().as_str().to_owned(),
-            object_type: value.object_type().clone(),
-            name: value.name().to_owned(),
-            list: None,
-            operation: None,
-        }
-    }
 }
 
 impl From<FavoriteObject> for AdvertisedObjectReference {

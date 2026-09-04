@@ -2,14 +2,10 @@ use http::{Method, StatusCode};
 use serde::Deserialize;
 
 use crate::{
-    AdtUri, AdvertisedLink, EncodeError, EncodedOperation, Links, ObjectError, ObjectSnapshot,
-    ObjectStructureRef, Operation, OperationResponse, Owned, Relations, ResponseError, Stateless,
-    Structure, WorkbenchVersion, resource::resolve_href,
+    AdtRequest, AdtUri, AdvertisedLink, EncodeError, EncodedOperation, Independent, Links,
+    ObjectError, ObjectSnapshot, ObjectStructureRef, Operation, OperationResponse, Relations,
+    ResponseError, Stateless, Structure, WorkbenchVersion, resource::resolve_href,
 };
-
-const INHERITED_MEMBERS_QUERY: &str = "inheritedMembers";
-const WITH_SHORT_DESCRIPTIONS_QUERY: &str = "withShortDescriptions";
-const OBJECT_STRUCTURE_MEDIA_TYPE: &str = "application/vnd.sap.adt.objectstructure.v2+xml";
 
 /// Fetches the structure representation advertised by an object.
 ///
@@ -36,6 +32,9 @@ pub struct ObjectStructureQuery {
 }
 
 impl ObjectStructureQuery {
+    const INHERITED_MEMBERS_QUERY: &str = "inheritedMembers";
+    const WITH_SHORT_DESCRIPTIONS_QUERY: &str = "withShortDescriptions";
+
     fn new(structure: ObjectStructureRef) -> Self {
         Self {
             resource: structure,
@@ -70,44 +69,51 @@ impl ObjectStructureQuery {
 impl Operation for ObjectStructureQuery {
     type Response = ObjectStructure;
     type Kind = Stateless;
-    type Target = Owned;
+    type ResolutionRequirement = Independent;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut request = EncodedOperation::owned(Method::GET, self.resource.uri.clone());
+    fn encode(&self, _: &()) -> Result<EncodedOperation, EncodeError> {
+        let mut request = AdtRequest::new(Method::GET, self.resource.uri.clone());
+
+        // Two sources here: the advertised query and optional overrides from the caller.
+        // Caller overrides take priority.
         for (name, value) in &self.resource.query {
             if self.workbench_version.is_some() && name == WorkbenchVersion::QUERY_PARAMETER {
                 continue;
             }
-            if self.inherited_members.is_some() && name == INHERITED_MEMBERS_QUERY {
+            if self.inherited_members.is_some() && name == Self::INHERITED_MEMBERS_QUERY {
                 continue;
             }
-            if self.with_short_descriptions.is_some() && name == WITH_SHORT_DESCRIPTIONS_QUERY {
+            if self.with_short_descriptions.is_some() && name == Self::WITH_SHORT_DESCRIPTIONS_QUERY
+            {
                 continue;
             }
             request.push_query(name, value);
         }
+
         if let Some(version) = self.workbench_version {
             request.push_query(WorkbenchVersion::QUERY_PARAMETER, version.as_str());
         }
         if self.with_short_descriptions == Some(true) {
-            request.push_query(WITH_SHORT_DESCRIPTIONS_QUERY, "true");
+            request.push_query(Self::WITH_SHORT_DESCRIPTIONS_QUERY, "true");
         }
+
         // Only the presence of the query parameter makes it expand inherited members
         // Seems like a bug in the ADT handler, so we need a workaround
         if self.inherited_members == Some(true) {
-            request.push_query(INHERITED_MEMBERS_QUERY, "true");
+            request.push_query(Self::INHERITED_MEMBERS_QUERY, "true");
         }
-        request.set_accept(OBJECT_STRUCTURE_MEDIA_TYPE);
-        Ok(request)
+        request.set_accept(ObjectStructure::MEDIA_TYPE);
+        Ok(EncodedOperation::from(request))
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         response.require_status(StatusCode::OK)?;
-        response.require_content_type(&[OBJECT_STRUCTURE_MEDIA_TYPE])?;
+        response.require_content_type(&[ObjectStructure::MEDIA_TYPE])?;
 
         let raw: RawObjectStructureElement =
             serde_xml_rs::from_reader(response.body()).map_err(ObjectError::InvalidResponse)?;
         let root = ObjectStructureElement::from_raw(raw, response.request_target())?;
+
         Ok(ObjectStructure {
             reference: self.resource.clone(),
             root,
@@ -125,9 +131,10 @@ impl ObjectStructureRef {
 impl<T: Structure> ObjectSnapshot<T> {
     pub(crate) fn object_structure_from_parts(
         reference: &crate::ObjectRef<T>,
+        uri: &AdtUri,
         properties: &T::Properties,
     ) -> Result<ObjectStructureQuery, ObjectError> {
-        ObjectStructureRef::from_relations(reference.erase(), properties.links())?
+        ObjectStructureRef::from_relations(reference.erase(), uri, properties.links())?
             .map(|reference| reference.query())
             .ok_or(ObjectError::MissingRelation {
                 relation: ObjectStructureRef::RELATION,
@@ -136,7 +143,7 @@ impl<T: Structure> ObjectSnapshot<T> {
 
     /// Creates a query for the object-structure relation advertised by this object.
     pub fn object_structure(&self) -> Result<ObjectStructureQuery, ObjectError> {
-        Self::object_structure_from_parts(self.reference(), self.properties())
+        Self::object_structure_from_parts(self.reference(), self.uri(), self.properties())
     }
 }
 
@@ -157,6 +164,10 @@ pub struct ObjectStructure {
 
     /// The root element representing the repository object.
     pub root: ObjectStructureElement,
+}
+
+impl ObjectStructure {
+    const MEDIA_TYPE: &str = "application/vnd.sap.adt.objectstructure.v2+xml";
 }
 
 /// One recursively nested element in an object-structure representation.
@@ -310,10 +321,7 @@ mod tests {
     const PROGRAM_XML: &[u8] = include_bytes!("../../tests/fixtures/program-z-test.xml");
 
     fn structure_reference() -> ObjectStructureRef {
-        let object = ObjectRef::<Class>::for_test(
-            "ZMYNEWCLASSV7",
-            AdtUri::parse("/sap/bc/adt/oo/classes/zmynewclassv7").unwrap(),
-        );
+        let object = ObjectRef::<Class>::new("ZMYNEWCLASSV7");
         ObjectStructureRef::new(
             object.erase(),
             AdtUri::parse("/sap/bc/adt/oo/classes/zmynewclassv7/objectstructure").unwrap(),
@@ -322,13 +330,11 @@ mod tests {
 
     #[test]
     fn loaded_classes_resolve_the_advertised_structure_relation() {
-        let reference = ObjectRef::<Class>::for_test(
-            "CL_ADT_URI_MAPPER",
-            AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
-        );
+        let reference = ObjectRef::<Class>::new("CL_ADT_URI_MAPPER");
         let properties: ClassProperties = serde_xml_rs::from_reader(CLASS_XML).unwrap();
         let object = ObjectSnapshot::new(
             reference,
+            AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
             WorkbenchVersion::Active,
             "application/vnd.sap.adt.oo.classes.v4+xml",
             None,
@@ -352,13 +358,11 @@ mod tests {
 
     #[test]
     fn loaded_programs_resolve_the_advertised_structure_relation() {
-        let reference = ObjectRef::<Program>::for_test(
-            "Z_TEST",
-            AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
-        );
+        let reference = ObjectRef::<Program>::new("Z_TEST");
         let properties: ProgramProperties = serde_xml_rs::from_reader(PROGRAM_XML).unwrap();
         let object = ObjectSnapshot::new(
             reference,
+            AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
             WorkbenchVersion::Inactive,
             "application/vnd.sap.adt.programs.programs.v3+xml",
             None,
@@ -380,15 +384,16 @@ mod tests {
             WorkbenchVersion::QUERY_PARAMETER.to_owned(),
             "active".to_owned(),
         ));
-        structure
-            .query
-            .push((INHERITED_MEMBERS_QUERY.to_owned(), "legacy".to_owned()));
+        structure.query.push((
+            ObjectStructureQuery::INHERITED_MEMBERS_QUERY.to_owned(),
+            "legacy".to_owned(),
+        ));
         let query = structure
             .query()
             .workbench_version(WorkbenchVersion::Inactive)
             .inherited_members(true);
 
-        let request = query.encode().unwrap();
+        let request = query.encode(&()).unwrap();
 
         assert_eq!(request.method(), Method::GET);
         assert_eq!(request.target(), &structure.uri);
@@ -401,18 +406,23 @@ mod tests {
         );
         assert_eq!(
             request.headers().get(header::ACCEPT).unwrap(),
-            OBJECT_STRUCTURE_MEDIA_TYPE
+            ObjectStructure::MEDIA_TYPE
         );
     }
 
     #[test]
     fn false_inherited_members_omits_the_presence_based_parameter() {
         let mut structure = structure_reference();
-        structure
-            .query
-            .push((INHERITED_MEMBERS_QUERY.to_owned(), "true".to_owned()));
+        structure.query.push((
+            ObjectStructureQuery::INHERITED_MEMBERS_QUERY.to_owned(),
+            "true".to_owned(),
+        ));
 
-        let request = structure.query().inherited_members(false).encode().unwrap();
+        let request = structure
+            .query()
+            .inherited_members(false)
+            .encode(&())
+            .unwrap();
 
         assert!(request.query().is_empty());
     }
@@ -422,7 +432,7 @@ mod tests {
         let request = structure_reference()
             .query()
             .short_descriptions(true)
-            .encode()
+            .encode(&())
             .unwrap();
 
         assert_eq!(
@@ -438,7 +448,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::CONTENT_TYPE,
-            HeaderValue::from_static(OBJECT_STRUCTURE_MEDIA_TYPE),
+            HeaderValue::from_static(ObjectStructure::MEDIA_TYPE),
         );
         let response = OperationResponse::new(
             AdtResponse::new(StatusCode::OK, headers, STRUCTURE_XML.to_vec()),

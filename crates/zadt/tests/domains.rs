@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Client, Domain, DomainCreateProperties, DomainProperties, EntityTag, Logon, MediaTyped,
-    Operation, Ready, ReqwestTransport, WorkbenchVersion,
+    Client, Discovery, Domain, DomainCreateProperties, DomainProperties, EntityTag, Logon,
+    MediaTyped, ObjectRef, Operation, ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -45,7 +45,7 @@ async fn mock_core_discovery(server: &MockServer) -> Mock<'_> {
         .await
 }
 
-async fn ready_client(server: &MockServer) -> Client<Ready> {
+async fn discovered_client(server: &MockServer) -> Client<Discovery> {
     let transport = ReqwestTransport::builder()
         .destination(server.base_url())
         .sap_client("001")
@@ -81,8 +81,8 @@ async fn domain_properties_preserve_the_nested_v2_contract() {
         })
         .await;
 
-    let client = ready_client(&server).await;
-    let reference = client.object::<Domain>("TRKORR").unwrap();
+    let client = discovered_client(&server).await;
+    let reference = ObjectRef::<Domain>::new("TRKORR");
     let object = reference
         .query()
         .workbench_version(WorkbenchVersion::Active)
@@ -142,16 +142,14 @@ async fn domain_creation_posts_only_the_sparse_properties_payload() {
         })
         .await;
 
-    let client = ready_client(&server).await;
-    let reference = client.object::<Domain>("Z_DOMAIN").unwrap();
+    let client = discovered_client(&server).await;
+    let reference = ObjectRef::<Domain>::new("Z_DOMAIN");
     let properties = DomainCreateProperties::builder()
         .description("Created Domain")
         .package("$TMP")
         .build()
         .unwrap();
-    let created = reference.create(properties).execute(&client).await.unwrap();
-
-    assert!(created.is_none());
+    reference.create(properties).execute(&client).await.unwrap();
     logon.assert_async().await;
     discovery.assert_async().await;
     csrf.assert_async().await;

@@ -3,8 +3,8 @@ use serde::Deserialize;
 
 use super::common::RepositoryFacet;
 use crate::{
-    Advertised, CategoryId, Client, EncodeError, EncodedOperation, Operation, OperationResponse,
-    Ready, RepositoryError, ResponseError, Stateless, operation::CollectionLocator,
+    CategoryId, Discovery, EncodeError, EncodedOperation, Operation, OperationResponse,
+    RepositoryError, RequiresDiscovery, ResponseError, Stateless,
 };
 
 /// Fetches the facets supported by the repository information system.
@@ -19,26 +19,20 @@ use crate::{
 pub struct RepositoryFacetsQuery;
 
 impl RepositoryFacetsQuery {
-    const TARGET: CollectionLocator = CollectionLocator::new(CategoryId {
+    const CATEGORY: CategoryId = CategoryId {
         scheme: "http://www.sap.com/adt/categories/repository/virtualfolders",
         term: "facets",
-    });
-}
-
-impl Client<Ready> {
-    /// Creates a query for the facets supported by the repository information system.
-    pub fn repository_facets(&self) -> RepositoryFacetsQuery {
-        RepositoryFacetsQuery
-    }
+    };
 }
 
 impl Operation for RepositoryFacetsQuery {
     type Response = RepositoryFacets;
     type Kind = Stateless;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        Ok(Self::TARGET.operation(Method::GET))
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        let target = resolver.require_collection_target(Self::CATEGORY)?;
+        Ok(EncodedOperation::new(Method::GET, target))
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {

@@ -3,7 +3,7 @@
 use httpmock::prelude::*;
 use zadt::{
     Client, Operation, RepositoryContentOperation, RepositoryContentQuery, RepositoryFacet,
-    RepositoryPreselection, ReqwestTransport,
+    RepositoryFacetsQuery, RepositoryPreselection, ReqwestTransport,
 };
 
 const CONTENT_XML: &str = include_str!("fixtures/repository-content.xml");
@@ -102,7 +102,7 @@ async fn repository_queries_use_discovered_collections() {
         .execute(&client)
         .await
         .unwrap();
-    let available_facets = client.repository_facets().execute(&client).await.unwrap();
+    let available_facets = RepositoryFacetsQuery.execute(&client).await.unwrap();
     let object_properties = content.objects[0]
         .properties()
         .include_facet(RepositoryFacet::PACKAGE)

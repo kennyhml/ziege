@@ -21,8 +21,8 @@ use std::{collections::HashMap, sync::Arc};
 
 use parking_lot::RwLock;
 use zadt::{
-    Client, Operation, Ready, RepositoryFacet, RepositoryFacetDefinition, RepositoryFacetsQuery,
-    RepositoryObjectEntry,
+    Client, Discovery, Operation, RepositoryFacet, RepositoryFacetDefinition,
+    RepositoryFacetsQuery, RepositoryObjectEntry,
 };
 
 use self::{
@@ -43,7 +43,7 @@ pub struct VirtualRepositoryTree {
 }
 
 struct Inner {
-    client: Client<Ready>,
+    client: Client<Discovery>,
     root: NodeId,
     graph: RwLock<Graph>,
     facets: FacetCatalog,
@@ -51,12 +51,12 @@ struct Inner {
 
 /// Configures and creates a [`VirtualRepositoryTree`].
 pub struct VirtualRepositoryTreeBuilder {
-    client: Client<Ready>,
+    client: Client<Discovery>,
     mounts: Vec<Mount>,
 }
 
 impl VirtualRepositoryTreeBuilder {
-    fn new(client: Client<Ready>) -> Self {
+    fn new(client: Client<Discovery>) -> Self {
         Self {
             client,
             mounts: Vec::new(),
@@ -105,7 +105,7 @@ impl VirtualRepositoryTreeBuilder {
 
 impl VirtualRepositoryTree {
     /// Starts configuring a repository tree backed by an already discovered ADT client.
-    pub fn builder(client: Client<Ready>) -> VirtualRepositoryTreeBuilder {
+    pub fn builder(client: Client<Discovery>) -> VirtualRepositoryTreeBuilder {
         VirtualRepositoryTreeBuilder::new(client)
     }
 

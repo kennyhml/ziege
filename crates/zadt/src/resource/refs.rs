@@ -94,18 +94,23 @@ impl ObjectStructureRef {
 
     pub(crate) fn from_relations(
         object: ObjectRef<()>,
+        object_uri: &AdtUri,
         links: &[AdvertisedLink],
     ) -> Result<Option<Self>, ObjectError> {
         links
             .iter()
             .find(|link| link.relation.as_deref() == Some(Self::RELATION))
-            .map(|link| Self::from_relation(object, link))
+            .map(|link| Self::from_relation(object, object_uri, link))
             .transpose()
     }
 
-    fn from_relation(object: ObjectRef<()>, link: &AdvertisedLink) -> Result<Self, ObjectError> {
+    fn from_relation(
+        object: ObjectRef<()>,
+        object_uri: &AdtUri,
+        link: &AdvertisedLink,
+    ) -> Result<Self, ObjectError> {
         let resolved =
-            resolve_href(object.uri(), &link.href).map_err(|source| ObjectError::InvalidLink {
+            resolve_href(object_uri, &link.href).map_err(|source| ObjectError::InvalidLink {
                 href: link.href.clone(),
                 source,
             })?;
@@ -146,9 +151,10 @@ pub type SourceRef = OwnedResourceRef<kind::Source>;
 
 pub(crate) fn source_from_href(
     object: ObjectRef<()>,
+    object_uri: &AdtUri,
     href: &str,
 ) -> Result<SourceRef, ObjectError> {
-    let resolved = resolve_href(object.uri(), href).map_err(|source| ObjectError::InvalidLink {
+    let resolved = resolve_href(object_uri, href).map_err(|source| ObjectError::InvalidLink {
         href: href.to_owned(),
         source,
     })?;

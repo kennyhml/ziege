@@ -5,25 +5,10 @@ use http::{Method, StatusCode};
 use serde::{Deserialize, Serialize, Serializer};
 
 use crate::{
-    AdtUri, Advertised, AdvertisedLink, CategoryId, Client, EncodeError, EncodedOperation,
-    ObjectError, ObjectRef, Operation, OperationResponse, Ready, ResponseError, Stateless,
-    WorkbenchVersion, operation::CollectionLocator,
+    AdtUri, AdvertisedLink, CategoryId, Discovery, EncodeError, EncodedOperation, ObjectError,
+    ObjectRef, Operation, OperationResponse, RequiresDiscovery, ResponseError, Stateless,
+    WorkbenchVersion,
 };
-
-const CHECK_RUN_CATEGORY: CategoryId = CategoryId {
-    scheme: "http://www.sap.com/adt/categories/check",
-    term: "checkruns",
-};
-const REPORTERS_CATEGORY: CategoryId = CategoryId {
-    scheme: "http://www.sap.com/adt/categories/check",
-    term: "reporters",
-};
-
-const CHECK_OBJECTS_MEDIA_TYPE: &str = "application/vnd.sap.adt.checkobjects+xml";
-const CHECK_MESSAGES_MEDIA_TYPE: &str = "application/vnd.sap.adt.checkmessages+xml";
-const CHECK_REPORTERS_MEDIA_TYPE: &str = "application/vnd.sap.adt.reporters+xml";
-const CHECK_RUN_NAMESPACE: &str = "http://www.sap.com/adt/checkrun";
-const ADT_CORE_NAMESPACE: &str = "http://www.sap.com/adt/core";
 
 /// Retrieves the check-run reporters advertised by the backend.
 ///
@@ -37,34 +22,31 @@ const ADT_CORE_NAMESPACE: &str = "http://www.sap.com/adt/core";
 pub struct CheckRunReportersQuery;
 
 impl CheckRunReportersQuery {
-    const TARGET: CollectionLocator = CollectionLocator::new(REPORTERS_CATEGORY);
+    const CATEGORY: CategoryId = CategoryId {
+        scheme: "http://www.sap.com/adt/categories/check",
+        term: "reporters",
+    };
 
     pub fn new() -> Self {
         Self
     }
 }
 
-impl Client<Ready> {
-    /// Creates a query for the check-run reporters advertised by the backend.
-    pub fn supported_reporters(&self) -> CheckRunReportersQuery {
-        CheckRunReportersQuery::new()
-    }
-}
-
 impl Operation for CheckRunReportersQuery {
     type Kind = Stateless;
     type Response = SupportedCheckReporters;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut request = Self::TARGET.operation(Method::GET);
-        request.set_accept(CHECK_REPORTERS_MEDIA_TYPE);
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        let target = resolver.require_collection_target(Self::CATEGORY)?;
+        let mut request = EncodedOperation::new(Method::GET, target);
+        request.set_accept(SupportedCheckReporterList::MEDIA_TYPE);
         Ok(request)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         response.require_status(StatusCode::OK)?;
-        response.require_content_type(&[CHECK_REPORTERS_MEDIA_TYPE])?;
+        response.require_content_type(&[SupportedCheckReporterList::MEDIA_TYPE])?;
         serde_xml_rs::from_reader::<SupportedCheckReporterList, _>(response.body())
             .map(|reporters| reporters.entries)
             .map_err(ObjectError::InvalidResponse)
@@ -89,7 +71,10 @@ pub struct ObjectCheckRun {
 }
 
 impl ObjectCheckRun {
-    const TARGET: CollectionLocator = CollectionLocator::new(CHECK_RUN_CATEGORY);
+    const CATEGORY: CategoryId = CategoryId {
+        scheme: "http://www.sap.com/adt/categories/check",
+        term: "checkruns",
+    };
 
     pub fn new() -> Self {
         Self::default()
@@ -123,23 +108,24 @@ impl ObjectCheckRun {
 impl Operation for ObjectCheckRun {
     type Kind = Stateless;
     type Response = CheckRunReports;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let body = self.objects.serialize()?;
-        let mut request = Self::TARGET.operation(Method::POST);
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        let body = self.objects.serialize(resolver)?;
+        let target = resolver.require_collection_target(Self::CATEGORY)?;
+        let mut request = EncodedOperation::new(Method::POST, target);
         for reporter in &self.reporters {
             request.push_query("reporters", reporter.as_str());
         }
-        request.set_accept(CHECK_MESSAGES_MEDIA_TYPE);
-        request.set_content_type(CHECK_OBJECTS_MEDIA_TYPE);
+        request.set_accept(CheckRunReports::MEDIA_TYPE);
+        request.set_content_type(CheckObjectList::MEDIA_TYPE);
         request.set_body(body);
         Ok(request)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         response.require_status(StatusCode::OK)?;
-        response.require_content_type(&[CHECK_MESSAGES_MEDIA_TYPE])?;
+        response.require_content_type(&[CheckRunReports::MEDIA_TYPE])?;
         serde_xml_rs::from_reader(response.body())
             .map_err(ObjectError::InvalidResponse)
             .map_err(Into::into)
@@ -174,6 +160,10 @@ struct SupportedCheckReporterList {
     entries: SupportedCheckReporters,
 }
 
+impl SupportedCheckReporterList {
+    const MEDIA_TYPE: &str = "application/vnd.sap.adt.reporters+xml";
+}
+
 /// One advertised check-run reporter and its supported object types.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct SupportedCheckReporter {
@@ -196,43 +186,49 @@ impl From<&SupportedCheckReporter> for CheckRunReporter {
     }
 }
 
-#[derive(Debug, Default, Serialize)]
-#[serde(rename = "chkrun:checkObjectList")]
+#[derive(Debug, Default)]
 struct CheckObjectList {
-    #[serde(rename = "chkrun:checkObject")]
     objects: Vec<CheckRunObject>,
 }
 
 impl CheckObjectList {
-    fn serialize(&self) -> Result<String, ObjectError> {
+    const MEDIA_TYPE: &str = "application/vnd.sap.adt.checkobjects+xml";
+    const CHECK_RUN_NAMESPACE: &str = "http://www.sap.com/adt/checkrun";
+    const ADT_CORE_NAMESPACE: &str = "http://www.sap.com/adt/core";
+
+    fn serialize(&self, resolver: &Discovery) -> Result<String, EncodeError> {
+        let objects = self
+            .objects
+            .iter()
+            .map(|object| -> Result<EncodedCheckRunObject<'_>, EncodeError> {
+                Ok(EncodedCheckRunObject {
+                    uri: resolver.resolve_object_uri(&object.object)?,
+                    version: object.version,
+                    artifacts: (!object.artifacts.is_empty()).then_some(&object.artifacts),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         serde_xml_rs::SerdeXml::new()
-            .namespace("chkrun", CHECK_RUN_NAMESPACE)
-            .namespace("adtcore", ADT_CORE_NAMESPACE)
-            .to_string(self)
+            .namespace("chkrun", Self::CHECK_RUN_NAMESPACE)
+            .namespace("adtcore", Self::ADT_CORE_NAMESPACE)
+            .to_string(&EncodedCheckObjectList { objects })
             .map_err(ObjectError::InvalidRequest)
+            .map_err(Into::into)
     }
 }
 
 /// One repository object included in a check run.
-#[derive(Debug, Serialize)]
+#[derive(Debug)]
 pub struct CheckRunObject {
-    #[serde(rename = "@adtcore:uri")]
-    uri: AdtUri,
-
-    #[serde(rename = "@chkrun:version")]
+    object: ObjectRef<()>,
     version: WorkbenchVersion,
-
-    #[serde(
-        rename = "chkrun:artifacts",
-        skip_serializing_if = "CheckRunArtifacts::is_empty"
-    )]
     artifacts: CheckRunArtifacts,
 }
 
 impl CheckRunObject {
     pub fn new<T>(object: &ObjectRef<T>, version: WorkbenchVersion) -> Self {
         Self {
-            uri: object.uri().clone(),
+            object: object.erase(),
             version,
             artifacts: CheckRunArtifacts::default(),
         }
@@ -243,6 +239,25 @@ impl CheckRunObject {
         self.artifacts.entries.push(artifact);
         self
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename = "chkrun:checkObjectList")]
+struct EncodedCheckObjectList<'a> {
+    #[serde(rename = "chkrun:checkObject")]
+    objects: Vec<EncodedCheckRunObject<'a>>,
+}
+
+#[derive(Serialize)]
+struct EncodedCheckRunObject<'a> {
+    #[serde(rename = "@adtcore:uri")]
+    uri: AdtUri,
+
+    #[serde(rename = "@chkrun:version")]
+    version: WorkbenchVersion,
+
+    #[serde(rename = "chkrun:artifacts", skip_serializing_if = "Option::is_none")]
+    artifacts: Option<&'a CheckRunArtifacts>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -285,6 +300,10 @@ impl CheckRunArtifact {
 pub struct CheckRunReports {
     #[serde(rename = "chkrun:checkReport", default)]
     pub reports: Vec<CheckRunReport>,
+}
+
+impl CheckRunReports {
+    const MEDIA_TYPE: &str = "application/vnd.sap.adt.checkmessages+xml";
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -372,8 +391,30 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtResponse, Program};
+    use crate::{AdtRequest, AdtResponse, Client, Program, TransportError};
+    use async_trait::async_trait;
     use http::{HeaderMap, header};
+
+    const DISCOVERY_XML: &[u8] = br#"
+        <app:service xmlns:app="http://www.w3.org/2007/app"
+                xmlns:atom="http://www.w3.org/2005/Atom">
+            <app:workspace>
+                <atom:title>Checks</atom:title>
+                <app:collection href="/sap/bc/adt/checkruns">
+                    <atom:category scheme="http://www.sap.com/adt/categories/check"
+                        term="checkruns" />
+                </app:collection>
+                <app:collection href="/sap/bc/adt/checkruns/reporters">
+                    <atom:category scheme="http://www.sap.com/adt/categories/check"
+                        term="reporters" />
+                </app:collection>
+                <app:collection href="/sap/bc/adt/programs/programs">
+                    <atom:category scheme="http://www.sap.com/adt/categories/programs"
+                        term="programs" />
+                </app:collection>
+            </app:workspace>
+        </app:service>
+    "#;
 
     const CHECK_REPORTS_XML: &[u8] = br#"
         <chkrun:checkRunReports xmlns:chkrun="http://www.sap.com/adt/checkrun">
@@ -401,16 +442,30 @@ mod tests {
         </chkrun:checkReporters>
     "#;
 
-    fn serialize(objects: &CheckObjectList) -> String {
-        objects.serialize().unwrap()
+    struct UnusedTransport;
+
+    #[async_trait]
+    impl crate::Transport for UnusedTransport {
+        async fn send(&self, _request: AdtRequest) -> Result<AdtResponse, TransportError> {
+            unreachable!("request construction tests do not send requests")
+        }
+    }
+
+    fn discovered_client() -> Client<Discovery> {
+        Client::new(UnusedTransport).with_capabilities(
+            crate::api::discovery::parse_capabilities(DISCOVERY_XML).unwrap(),
+            crate::api::discovery::parse_capabilities(DISCOVERY_XML).unwrap(),
+        )
+    }
+
+    fn serialize(objects: &CheckObjectList, resolver: &Discovery) -> String {
+        objects.serialize(resolver).unwrap()
     }
 
     #[test]
     fn serializes_persisted_and_dirty_check_objects() {
-        let object = ObjectRef::<Program>::for_test(
-            "Z_TEST",
-            AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
-        );
+        let client = discovered_client();
+        let object = ObjectRef::<Program>::new("Z_TEST");
         let source_uri = AdtUri::parse("/sap/bc/adt/programs/programs/z_test/source/main").unwrap();
         let mut run = ObjectCheckRun::new();
         run.push_object(CheckRunObject::new(&object, WorkbenchVersion::Active))
@@ -421,7 +476,7 @@ mod tests {
             )
             .push_reporter(CheckRunReporter::SYNTAX_CHECK_RUNNER);
 
-        let xml = serialize(&run.objects);
+        let xml = serialize(&run.objects, client.discovery());
 
         assert_eq!(xml.matches("<chkrun:checkObject ").count(), 2);
         assert_eq!(xml.matches("<chkrun:artifacts>").count(), 1);
@@ -433,43 +488,52 @@ mod tests {
 
     #[test]
     fn check_run_uses_the_discovered_contract() {
-        let object = ObjectRef::<Program>::for_test(
-            "Z_TEST",
-            AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
-        );
+        let client = discovered_client();
+        let object = ObjectRef::<Program>::new("Z_TEST");
         let mut run = ObjectCheckRun::new();
         run.push_object(CheckRunObject::new(&object, WorkbenchVersion::Active))
             .push_reporter(CheckRunReporter::SYNTAX_CHECK_RUNNER);
 
-        let request = run.encode().unwrap();
+        let request = run.encode(client.discovery()).unwrap();
 
         assert_eq!(request.method(), Method::POST);
+        assert_eq!(request.target().as_str(), "/sap/bc/adt/checkruns");
         assert_eq!(
             request.query(),
             [("reporters".to_owned(), "abapCheckRun".to_owned())]
         );
-        assert_eq!(request.headers()[header::ACCEPT], CHECK_MESSAGES_MEDIA_TYPE);
+        assert_eq!(
+            request.headers()[header::ACCEPT],
+            CheckRunReports::MEDIA_TYPE
+        );
         assert_eq!(
             request.headers()[header::CONTENT_TYPE],
-            CHECK_OBJECTS_MEDIA_TYPE
+            CheckObjectList::MEDIA_TYPE
+        );
+        assert!(
+            std::str::from_utf8(request.body())
+                .unwrap()
+                .contains("adtcore:uri=\"/sap/bc/adt/programs/programs/z_test\"")
         );
     }
 
     #[test]
     fn reporters_query_uses_the_discovered_contract_and_decodes_supported_types() {
+        let client = discovered_client();
         let query = CheckRunReportersQuery::new();
-        let request = query.encode().unwrap();
+        let request = query.encode(client.discovery()).unwrap();
 
         assert_eq!(request.method(), Method::GET);
+        assert_eq!(request.target().as_str(), "/sap/bc/adt/checkruns/reporters");
         assert_eq!(
             request.headers()[header::ACCEPT],
-            CHECK_REPORTERS_MEDIA_TYPE
+            SupportedCheckReporterList::MEDIA_TYPE
         );
 
         let mut headers = HeaderMap::new();
         headers.insert(
             header::CONTENT_TYPE,
-            CHECK_REPORTERS_MEDIA_TYPE.parse().unwrap(),
+            SupportedCheckReporterList::MEDIA_TYPE.parse().unwrap(),
         );
         let response = AdtResponse::new(StatusCode::OK, headers, CHECK_REPORTERS_XML.to_vec());
         let reporters = query
@@ -486,7 +550,7 @@ mod tests {
 
         let mut run = ObjectCheckRun::new();
         run.extend_reporters(&reporters);
-        let request = run.encode().unwrap();
+        let request = run.encode(client.discovery()).unwrap();
         assert_eq!(
             request.query(),
             [
@@ -502,7 +566,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::CONTENT_TYPE,
-            CHECK_MESSAGES_MEDIA_TYPE.parse().unwrap(),
+            CheckRunReports::MEDIA_TYPE.parse().unwrap(),
         );
         let response = AdtResponse::new(StatusCode::OK, headers, CHECK_REPORTS_XML.to_vec());
         let reports = run

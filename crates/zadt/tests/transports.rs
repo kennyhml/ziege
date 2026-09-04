@@ -3,7 +3,7 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    AdtUri, Client, Operation, OperationError, QueryTransportKind, Ready, ReqwestTransport,
+    AdtUri, Client, Discovery, Operation, OperationError, QueryTransportKind, ReqwestTransport,
     ResponseError, TransportCheck, TransportCheckLinkUpMode, TransportCheckOperation,
     TransportCreate, TransportCreateVersion, TransportKind, TransportPropertiesQuery,
     TransportsQuery, User,
@@ -72,7 +72,7 @@ async fn mock_csrf(server: &MockServer) -> Mock<'_> {
         .await
 }
 
-async fn ready_client(server: &MockServer) -> Client<Ready> {
+async fn discovered_client(server: &MockServer) -> Client<Discovery> {
     let transport = ReqwestTransport::builder()
         .destination(server.base_url())
         .sap_client("001")
@@ -113,7 +113,7 @@ async fn transport_check_uses_the_discovered_endpoint_and_link_up_mode() {
         })
         .await;
 
-    let client = ready_client(&server).await;
+    let client = discovered_client(&server).await;
     let result = TransportCheck::builder()
         .uri(AdtUri::parse("/sap/bc/adt/oo/classes/zcl_example/includes/testclasses").unwrap())
         .operation(TransportCheckOperation::Insert)
@@ -151,7 +151,7 @@ async fn transport_check_rejects_an_unexpected_response_media_type() {
         })
         .await;
 
-    let client = ready_client(&server).await;
+    let client = discovered_client(&server).await;
     let error = TransportCheck::new(
         AdtUri::parse("/sap/bc/adt/oo/classes/zcl_example").unwrap(),
         TransportCheckOperation::Modify,
@@ -185,7 +185,7 @@ async fn wildcard_transport_query_uses_the_discovered_cts_collection() {
         })
         .await;
 
-    let client = ready_client(&server).await;
+    let client = discovered_client(&server).await;
     let response = TransportsQuery::builder()
         .kind(QueryTransportKind::All)
         .build()
@@ -220,7 +220,7 @@ async fn explicit_user_query_accepts_the_backends_empty_response() {
         })
         .await;
 
-    let client = ready_client(&server).await;
+    let client = discovered_client(&server).await;
     let user = User::new("OTHER_USER");
     let response = user.transports().execute(&client).await.unwrap();
 
@@ -244,7 +244,7 @@ async fn transport_properties_use_the_singular_asx_contract() {
         })
         .await;
 
-    let client = ready_client(&server).await;
+    let client = discovered_client(&server).await;
     let response = TransportPropertiesQuery::new("DEVK900001")
         .execute(&client)
         .await
@@ -275,7 +275,7 @@ async fn missing_transport_properties_return_none() {
         })
         .await;
 
-    let client = ready_client(&server).await;
+    let client = discovered_client(&server).await;
     let response = TransportPropertiesQuery::new("UNKNOWN")
         .execute(&client)
         .await
@@ -300,7 +300,7 @@ async fn transport_properties_reject_the_list_media_type() {
         })
         .await;
 
-    let client = ready_client(&server).await;
+    let client = discovered_client(&server).await;
     let error = TransportPropertiesQuery::new("DEVK900001")
         .execute(&client)
         .await
@@ -326,7 +326,7 @@ async fn transport_properties_reject_non_success_statuses() {
         })
         .await;
 
-    let client = ready_client(&server).await;
+    let client = discovered_client(&server).await;
     let error = TransportPropertiesQuery::new("DEVK900001")
         .execute(&client)
         .await
@@ -363,7 +363,7 @@ async fn transport_creation_defaults_to_the_v1_asx_contract() {
         })
         .await;
 
-    let client = ready_client(&server).await;
+    let client = discovered_client(&server).await;
     let creation = TransportCreate::builder()
         .description("Create & test")
         .package("ZPACKAGE")
@@ -403,7 +403,7 @@ async fn transport_creation_uses_the_selected_legacy_contract() {
         })
         .await;
 
-    let client = ready_client(&server).await;
+    let client = discovered_client(&server).await;
     let creation = TransportCreate::builder()
         .description("Legacy request")
         .package("ZPACKAGE")

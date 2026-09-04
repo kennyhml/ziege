@@ -3,8 +3,9 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Client, EntityTag, Logon, MediaTyped, Operation, Ready, ReqwestTransport, ServiceDefinition,
-    ServiceDefinitionCreateProperties, ServiceDefinitionProperties, WorkbenchVersion,
+    Client, Discovery, EntityTag, Logon, MediaTyped, ObjectRef, Operation, ReqwestTransport,
+    ServiceDefinition, ServiceDefinitionCreateProperties, ServiceDefinitionProperties,
+    WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -47,7 +48,7 @@ async fn mock_core_discovery(server: &MockServer) -> Mock<'_> {
         .await
 }
 
-async fn ready_client(server: &MockServer) -> Client<Ready> {
+async fn discovered_client(server: &MockServer) -> Client<Discovery> {
     let transport = ReqwestTransport::builder()
         .destination(server.base_url())
         .sap_client("001")
@@ -93,10 +94,8 @@ async fn service_definition_properties_advertise_the_primary_source() {
         })
         .await;
 
-    let client = ready_client(&server).await;
-    let reference = client
-        .object::<ServiceDefinition>("MANAGEDISTRIBUTIONS")
-        .unwrap();
+    let client = discovered_client(&server).await;
+    let reference = ObjectRef::<ServiceDefinition>::new("MANAGEDISTRIBUTIONS");
     let object = reference
         .query()
         .workbench_version(WorkbenchVersion::Active)
@@ -163,18 +162,14 @@ async fn service_definition_creation_posts_only_the_sparse_properties_payload() 
         })
         .await;
 
-    let client = ready_client(&server).await;
-    let reference = client
-        .object::<ServiceDefinition>("Z_SERVICE_DEFINITION")
-        .unwrap();
+    let client = discovered_client(&server).await;
+    let reference = ObjectRef::<ServiceDefinition>::new("Z_SERVICE_DEFINITION");
     let properties = ServiceDefinitionCreateProperties::builder()
         .description("Created Service Definition")
         .package("$TMP")
         .build()
         .unwrap();
-    let created = reference.create(properties).execute(&client).await.unwrap();
-
-    assert!(created.is_none());
+    reference.create(properties).execute(&client).await.unwrap();
     logon.assert_async().await;
     discovery.assert_async().await;
     csrf.assert_async().await;

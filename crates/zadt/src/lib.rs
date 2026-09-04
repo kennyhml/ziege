@@ -64,8 +64,8 @@ pub use api::transports::{
     TransportsQueryBuilder, TransportsQueryBuilderError,
 };
 pub use api::users::{UserDetailsQuery, Users, UsersQuery};
-pub use client::{Client, ClientState, Initial, Ready};
-pub use compatibility::CompatibilityError;
+pub use client::{Client, ClientState, Discovery, Initial};
+pub use compatibility::{CompatibilityError, MediaTypes};
 #[cfg(feature = "reqwest")]
 pub use error::ReqwestTransportBuildError;
 pub use error::{
@@ -100,18 +100,17 @@ pub use objects::{
     MetadataExtensionCreatePropertiesBuilder, MetadataExtensionCreatePropertiesBuilderError,
     MetadataExtensionProperties, ObjectIdentity, ObjectRef, ObjectReferences, ObjectSnapshot,
     ObjectType, Package, PackageAssignment, PackageAttributes, PackageProperties, PackageTransport,
-    PackageUseAccess, PrimaryObjectType, Program, ProgramProperties, ServiceDefinition,
-    ServiceDefinitionCreateProperties, ServiceDefinitionCreatePropertiesBuilder,
+    PackageUseAccess, PrimaryObjectType, Program, ProgramProperties, ResolvedObjectRef,
+    ServiceDefinition, ServiceDefinitionCreateProperties, ServiceDefinitionCreatePropertiesBuilder,
     ServiceDefinitionCreatePropertiesBuilderError, ServiceDefinitionProperties, SnapshotKind,
     Source, SourceComponents, Structure, SubObject, SubObjectDescriptor, SyntaxConfiguration,
     SyntaxLanguage, ToXml, WorkbenchVersion, XmlConversion,
 };
 pub use operation::{
-    Advertised, AdvertisedCollection, AdvertisedTarget, AdvertisedTemplate, BatchError, BatchKey,
-    BatchOperation, BatchResponses, Batched, ConditionalResult, DiscoveryDocument,
-    EncodedOperation, Execute, IfMatch, IfNoneMatch, Locked, Operation, OperationContext,
-    OperationKind, OperationResponse, OperationTarget, Owned, PreconditionResult, Resolve,
-    ResolvedOperation, Stateful, Stateless,
+    BatchError, BatchKey, BatchOperation, BatchResponses, Batched, ConditionalResult,
+    EncodedOperation, Execute, IfMatch, IfNoneMatch, Independent, Locked, Operation,
+    OperationContext, OperationKind, OperationResponse, PreconditionResult, RequiresDiscovery,
+    ResolutionRequirement, Resolves, Stateful, Stateless,
 };
 pub use protocol::{AdtRequest, AdtResponse, EntityTag, PostAction};
 pub use resource::{

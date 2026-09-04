@@ -1,16 +1,9 @@
 use super::run::ObjectRun;
 use crate::{
-    Advertised, CategoryId, EncodeError, EncodedOperation, Operation, OperationResponse,
-    ResponseError, Stateless,
+    CategoryId, Discovery, EncodeError, EncodedOperation, Operation, OperationResponse,
+    RequiresDiscovery, ResponseError, Stateless,
     objects::{Class, ImmediateRun, ObjectRef, ObjectSnapshot, RunCapability},
 };
-
-const CLASS_NAME_VARIABLE: &str = "classname";
-const CLASS_RUN_CATEGORY: CategoryId = CategoryId {
-    scheme: "http://www.sap.com/adt/categories/oo",
-    term: "classrun",
-};
-const CLASS_RUN_RELATION: &str = "http://www.sap.com/adt/relations/oo/classrun";
 
 /// The plain-text console output produced by running an ABAP class.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -36,6 +29,13 @@ pub struct ClassRun {
 }
 
 impl ClassRun {
+    const NAME_VARIABLE: &str = "classname";
+    const CATEGORY: CategoryId = CategoryId {
+        scheme: "http://www.sap.com/adt/categories/oo",
+        term: "classrun",
+    };
+    const RELATION: &str = "http://www.sap.com/adt/relations/oo/classrun";
+
     fn new(class: ObjectRef<Class>) -> Self {
         let run = ObjectRun::typed(&class);
         Self { class, run }
@@ -50,17 +50,20 @@ impl ClassRun {
 }
 
 impl ImmediateRun for Class {
-    const RUN: RunCapability =
-        RunCapability::new(CLASS_RUN_CATEGORY, CLASS_RUN_RELATION, CLASS_NAME_VARIABLE);
+    const RUN: RunCapability = RunCapability::new(
+        ClassRun::CATEGORY,
+        ClassRun::RELATION,
+        ClassRun::NAME_VARIABLE,
+    );
 }
 
 impl Operation for ClassRun {
     type Response = ClassRunResult;
     type Kind = Stateless;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        self.run.encode()
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        self.run.encode(resolver)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {

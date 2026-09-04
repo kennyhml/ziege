@@ -1,6 +1,6 @@
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::{CategoryId, ObjectError, resource::AdvertisedLink};
+use crate::{CategoryId, MediaTypes, ObjectError, resource::AdvertisedLink};
 
 mod capabilities;
 pub(crate) mod descriptors;
@@ -12,7 +12,7 @@ mod workbench;
 pub use capabilities::{Create, Source, SourceComponents, Structure};
 pub(crate) use capabilities::{ImmediateRun, RunCapability};
 pub use descriptors::SubObjectDescriptor;
-pub use reference::{AdvertisedObjectReference, ObjectRef, ObjectReferences};
+pub use reference::{AdvertisedObjectReference, ObjectRef, ObjectReferences, ResolvedObjectRef};
 pub(crate) use snapshot::ErasedProperties;
 pub use snapshot::ObjectSnapshot;
 pub use types::*;
@@ -81,7 +81,7 @@ impl<T> XmlConversion for T where T: ToXml + DeserializeOwned + Send + Sync {}
 /// The ordered media types supported for one complete properties payload.
 pub trait MediaTyped {
     /// Supported media types in client preference order.
-    const MEDIA_TYPES: &'static [&'static str];
+    const MEDIA_TYPES: MediaTypes;
 }
 
 /// A properties representation containing advertised links.
@@ -119,7 +119,7 @@ pub trait ObjectIdentity {
 pub trait AssignObjectIdentity: ObjectIdentity {
     fn assign_identity(&mut self, identity: &impl ObjectIdentity);
 
-    fn assign_reference<T>(&mut self, reference: &ObjectRef<T>) {
+    fn assign_reference<T>(&mut self, reference: &ResolvedObjectRef<T>) {
         self.assign_identity(reference);
     }
 }

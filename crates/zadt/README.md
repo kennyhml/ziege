@@ -12,19 +12,27 @@ ZADT provides typed operations and runtime dispatch for that API.
 
 ### Basics
 
-Create a typed reference from the collection advertised by discovery:
+Create a typed logical reference without consulting a client:
 
 ```rust,ignore
-let class = client.object::<Class>("ZCL_DEMO")?;
+let class = ObjectRef::<Class>::new("ZCL_DEMO");
 ```
 
-Only primary object types can be constructed directly from a discovery
-collection. Subobjects are constructed through a parent reference and the URI
-templates advertised by that parents collection:
+Only primary object types can be constructed directly.
+Subobjects are constructed through a parent reference:
 
 ```rust,ignore
-let group = client.object::<FunctionGroup>("Z_GROUP")?;
-let module = group.subobject::<FunctionModule>("Z_FUNCTION")?;
+let group = ObjectRef::<FunctionGroup>::new("Z_GROUP");
+let module = group.subobject::<FunctionModule>("Z_FUNCTION");
+```
+
+References retain object identity rather than eagerly deriving a resource URI.
+Operations resolve collections, URI templates, media types, and concrete targets
+from the client's discovery data when they are encoded. A concrete URI can also
+be requested explicitly from that data:
+
+```rust,ignore
+let uri = client.discovery().resolve_object_uri(&module)?;
 ```
 
 Operations that only need object identity can use the reference directly:

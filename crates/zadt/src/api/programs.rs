@@ -1,17 +1,10 @@
 use super::run::ObjectRun;
 use crate::{
-    Advertised, CategoryId, EncodeError, EncodedOperation,
+    CategoryId, Discovery, EncodeError, EncodedOperation, RequiresDiscovery,
     error::ResponseError,
     objects::{ImmediateRun, ObjectRef, ObjectSnapshot, Program, RunCapability},
     operation::{Operation, OperationResponse, Stateless},
 };
-
-const PROGRAM_NAME_VARIABLE: &str = "programname";
-const PROGRAM_RUN_CATEGORY: CategoryId = CategoryId {
-    scheme: "http://www.sap.com/adt/categories/programs",
-    term: "programrun",
-};
-const PROGRAM_RUN_RELATION: &str = "http://www.sap.com/adt/relations/programs/programrun";
 
 /// The plain-text console output produced by running an ABAP program.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -53,6 +46,13 @@ pub struct ProgramRun {
 }
 
 impl ProgramRun {
+    const NAME_VARIABLE: &str = "programname";
+    const CATEGORY: CategoryId = CategoryId {
+        scheme: "http://www.sap.com/adt/categories/programs",
+        term: "programrun",
+    };
+    const RELATION: &str = "http://www.sap.com/adt/relations/programs/programrun";
+
     fn new(program: ObjectRef<Program>) -> Self {
         let run = ObjectRun::typed(&program);
         Self { program, run }
@@ -68,19 +68,19 @@ impl ProgramRun {
 
 impl ImmediateRun for Program {
     const RUN: RunCapability = RunCapability::new(
-        PROGRAM_RUN_CATEGORY,
-        PROGRAM_RUN_RELATION,
-        PROGRAM_NAME_VARIABLE,
+        ProgramRun::CATEGORY,
+        ProgramRun::RELATION,
+        ProgramRun::NAME_VARIABLE,
     );
 }
 
 impl Operation for ProgramRun {
     type Response = ProgramRunResult;
     type Kind = Stateless;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        self.run.encode()
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        self.run.encode(resolver)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
@@ -111,11 +111,10 @@ mod tests {
     use http::{HeaderMap, HeaderValue, StatusCode, header};
 
     use super::*;
-    use crate::api::run::PROFILER_ID_QUERY;
     use crate::{
-        AdtRequest, AdtResponse, AdtUri, Client, CompatibilityError, ConditionalResult, EntityTag,
-        Include, IncludeProperties, MediaTyped, ObjectError, ObjectQuery, OperationError,
-        ProgramProperties, Ready, ResolveError, Transport, WorkbenchVersion,
+        AdtRequest, AdtResponse, AdtUri, Client, CompatibilityError, ConditionalResult, Discovery,
+        EntityTag, Include, IncludeProperties, MediaTyped, ObjectError, ObjectQuery,
+        OperationError, ProgramProperties, ResolveError, Transport, WorkbenchVersion,
     };
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
@@ -147,14 +146,14 @@ mod tests {
         }
     }
 
-    fn ready_client(xml: &[u8]) -> Client<Ready> {
+    fn discovered_client(xml: &[u8]) -> Client<Discovery> {
         Client::new(UnusedTransport).with_capabilities(
             crate::api::discovery::parse_capabilities(xml).unwrap(),
             crate::api::discovery::parse_capabilities(xml).unwrap(),
         )
     }
 
-    fn recording_client(xml: &[u8]) -> (Client<Ready>, Arc<Mutex<Vec<AdtRequest>>>) {
+    fn recording_client(xml: &[u8]) -> (Client<Discovery>, Arc<Mutex<Vec<AdtRequest>>>) {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let client = Client::new(RecordingTransport {
             requests: Arc::clone(&requests),
@@ -167,11 +166,7 @@ mod tests {
     }
 
     fn program_properties_query() -> ObjectQuery<Program> {
-        ObjectRef::<Program>::for_test(
-            "Z_TEST",
-            crate::AdtUri::parse("/sap/bc/adt/programs/programs/Z_TEST").unwrap(),
-        )
-        .query()
+        ObjectRef::<Program>::new("Z_TEST").query()
     }
 
     fn program_properties_response(media_type: &'static str) -> OperationResponse {
@@ -189,19 +184,11 @@ mod tests {
     }
 
     fn include_properties_query() -> ObjectQuery<Include> {
-        ObjectRef::<Include>::for_test(
-            "ZTEST",
-            crate::AdtUri::parse("/sap/bc/adt/programs/includes/ZTEST").unwrap(),
-        )
-        .query()
+        ObjectRef::<Include>::new("ZTEST").query()
     }
 
     fn program_run() -> ProgramRun {
-        ObjectRef::<Program>::for_test(
-            "Z_TEST",
-            crate::AdtUri::parse("/sap/bc/adt/programs/programs/Z_TEST").unwrap(),
-        )
-        .run()
+        ObjectRef::<Program>::new("Z_TEST").run()
     }
 
     fn request_target() -> AdtUri {
@@ -214,7 +201,10 @@ mod tests {
 
     #[test]
     fn include_properties_query_defaults_to_v2() {
-        let request = include_properties_query().encode().unwrap();
+        let client = discovered_client(DISCOVERY_XML);
+        let request = include_properties_query()
+            .encode(client.discovery())
+            .unwrap();
 
         assert_eq!(
             request.headers()[header::ACCEPT],
@@ -224,7 +214,10 @@ mod tests {
 
     #[test]
     fn program_properties_query_accepts_every_supported_version() {
-        let request = program_properties_query().encode().unwrap();
+        let client = discovered_client(DISCOVERY_XML);
+        let request = program_properties_query()
+            .encode(client.discovery())
+            .unwrap();
 
         assert_eq!(
             request.headers()[header::ACCEPT],
@@ -235,15 +228,12 @@ mod tests {
     #[tokio::test]
     async fn expands_namespaced_program_run_variables() {
         let (client, requests) = recording_client(DISCOVERY_XML);
-        ObjectRef::<Program>::for_test(
-            "/DMO/PROGRAM",
-            AdtUri::parse("/sap/bc/adt/programs/programs/%2Fdmo%2Fprogram").unwrap(),
-        )
-        .run()
-        .profiler_id("TRACE ID")
-        .execute(&client)
-        .await
-        .unwrap();
+        ObjectRef::<Program>::new("/DMO/PROGRAM")
+            .run()
+            .profiler_id("TRACE ID")
+            .execute(&client)
+            .await
+            .unwrap();
         let requests = requests.lock().unwrap();
         let request = &requests[0];
 
@@ -269,7 +259,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_profiling_when_the_template_does_not_advertise_it() {
-        let client = ready_client(
+        let client = discovered_client(
             br#"<app:service xmlns:app="http://www.w3.org/2007/app"
                     xmlns:atom="http://www.w3.org/2005/Atom"
                     xmlns:adtcomp="http://www.sap.com/adt/compatibility">
@@ -295,9 +285,9 @@ mod tests {
 
         assert!(matches!(
             error,
-            OperationError::Resolve(ResolveError::Object(
+            OperationError::Encode(EncodeError::Resolve(ResolveError::Object(
                 ObjectError::UnsupportedTemplateParameter { parameter }
-            )) if parameter == PROFILER_ID_QUERY
+            ))) if parameter == ObjectRun::PROFILER_ID_QUERY
         ));
     }
 
@@ -321,7 +311,7 @@ mod tests {
 
     #[tokio::test]
     async fn program_run_request_requires_the_discovery_collection() {
-        let client = ready_client(
+        let client = discovered_client(
             br#"<app:service xmlns:app="http://www.w3.org/2007/app"
                     xmlns:atom="http://www.w3.org/2005/Atom">
                     <app:workspace><atom:title>Programs</atom:title></app:workspace>
@@ -331,15 +321,15 @@ mod tests {
 
         assert!(matches!(
             error,
-            OperationError::Resolve(ResolveError::Compatibility(
+            OperationError::Encode(EncodeError::Resolve(ResolveError::Compatibility(
                 CompatibilityError::MissingCollection(category)
-            )) if category == PROGRAM_RUN_CATEGORY
+            ))) if category == ProgramRun::CATEGORY
         ));
     }
 
     #[tokio::test]
     async fn program_run_request_requires_the_relation_template() {
-        let client = ready_client(
+        let client = discovered_client(
             br#"<app:service xmlns:app="http://www.w3.org/2007/app"
                     xmlns:atom="http://www.w3.org/2005/Atom">
                     <app:workspace>
@@ -355,9 +345,11 @@ mod tests {
 
         assert!(matches!(
             error,
-            OperationError::Resolve(ResolveError::Object(ObjectError::MissingTemplate {
-                relation: PROGRAM_RUN_RELATION,
-            }))
+            OperationError::Encode(EncodeError::Resolve(ResolveError::Object(
+                ObjectError::MissingTemplate {
+                    relation: ProgramRun::RELATION,
+                }
+            )))
         ));
     }
 
@@ -458,7 +450,12 @@ mod tests {
                 ProgramProperties::MEDIA_TYPES[0],
             ))
             .unwrap();
-        let request = program.revalidation().unwrap().encode().unwrap();
+        let client = discovered_client(DISCOVERY_XML);
+        let request = program
+            .revalidation()
+            .unwrap()
+            .encode(client.discovery())
+            .unwrap();
 
         assert_eq!(request.headers()[header::IF_NONE_MATCH], "program-etag");
         assert_eq!(

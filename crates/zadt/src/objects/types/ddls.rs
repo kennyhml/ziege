@@ -3,7 +3,7 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTyped, ToXml, WorkbenchVersion,
+    MediaTyped, MediaTypes, ToXml, WorkbenchVersion,
 };
 
 #[object_type(
@@ -131,7 +131,7 @@ pub struct DataDefinitionProperties {
 }
 
 impl MediaTyped for DataDefinitionProperties {
-    const MEDIA_TYPES: &'static [&'static str] = &["application/vnd.sap.adt.ddlSource+xml"];
+    const MEDIA_TYPES: MediaTypes = MediaTypes::new(&["application/vnd.sap.adt.ddlSource+xml"]);
 }
 
 impl ToXml for DataDefinitionProperties {
@@ -146,7 +146,7 @@ impl ToXml for DataDefinitionProperties {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, AssignObjectIdentity, ObjectRef, ObjectType};
+    use crate::{AssignObjectIdentity, ObjectRef, ObjectType};
 
     const DATA_DEFINITION_XML: &str =
         include_str!("../../../tests/fixtures/data-definition-i-businesspartner.xml");
@@ -170,10 +170,7 @@ mod tests {
         assert_eq!(properties.object_type, DataDefinition::WORKBENCH_TYPE);
         assert!(properties.abap_language_version.is_none());
 
-        let reference = ObjectRef::<DataDefinition>::new(
-            "Z_DATA_DEFINITION".to_owned(),
-            AdtUri::parse("/sap/bc/adt/ddic/ddl/sources/z_data_definition").unwrap(),
-        );
+        let reference = ObjectRef::<DataDefinition>::new("Z_DATA_DEFINITION");
         properties.assign_identity(&reference);
         let body = properties.to_xml().unwrap();
         let body = std::str::from_utf8(&body).unwrap();

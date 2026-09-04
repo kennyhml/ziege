@@ -1,9 +1,10 @@
 use http::{Method, StatusCode};
 
 use crate::{
+    AdtRequest,
     error::{EncodeError, ObjectError, ResponseError},
     objects::{ObjectSnapshot, Source, SourceComponents},
-    operation::{EncodedOperation, Operation, OperationResponse, Owned, Stateful, Stateless},
+    operation::{EncodedOperation, Independent, Operation, OperationResponse, Stateful, Stateless},
     protocol::{EntityTag, TEXT_PLAIN_MEDIA_TYPE},
     resource::{SourceRef, refs::source_from_href},
 };
@@ -12,8 +13,6 @@ use super::{
     locking::{LOCK_HANDLE_QUERY, ObjectLock},
     transports::{TRANSPORT_REQUEST_QUERY, TransportNumber},
 };
-
-const SOURCE_UPDATE_MEDIA_TYPE: &str = "text/plain; charset=utf-8";
 
 /// A fetched source representation and its attached metadata.
 #[derive(Debug)]
@@ -75,21 +74,21 @@ pub struct ObjectSourceQuery {
 impl Operation for ObjectSourceQuery {
     type Response = SourceCode;
     type Kind = Stateless;
-    type Target = Owned;
+    type ResolutionRequirement = Independent;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut request = EncodedOperation::owned(Method::GET, self.source.uri.clone());
+    fn encode(&self, _: &()) -> Result<EncodedOperation, EncodeError> {
+        let mut request = AdtRequest::new(Method::GET, self.source.uri.clone());
         for (name, value) in &self.source.query {
             request.push_query(name, value);
         }
         request.set_accept(TEXT_PLAIN_MEDIA_TYPE);
-        Ok(request)
+        Ok(EncodedOperation::from(request))
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         response.require_status(StatusCode::OK)?;
         response.require_content_type(&[TEXT_PLAIN_MEDIA_TYPE])?;
-        let etag = response.entity_tag();
+        let etag = response.etag();
         let content = String::from_utf8(response.into_body())
             .map_err(ObjectError::InvalidResponseEncoding)?;
         Ok(SourceCode::new(self.source.clone(), content, etag))
@@ -99,29 +98,31 @@ impl Operation for ObjectSourceQuery {
 impl<T: Source> ObjectSnapshot<T> {
     pub(crate) fn source_from_parts(
         reference: &crate::ObjectRef<T>,
+        uri: &crate::AdtUri,
         properties: &T::Properties,
     ) -> Result<SourceRef, ObjectError> {
         let href =
             T::source_uri(properties).ok_or(ObjectError::MissingRelation { relation: "source" })?;
-        source_from_href(reference.erase(), href)
+        source_from_href(reference.erase(), uri, href)
     }
 
     /// Resolves the primary source advertised by this loaded object.
     pub fn source(&self) -> Result<SourceRef, ObjectError> {
-        Self::source_from_parts(self.reference(), self.properties())
+        Self::source_from_parts(self.reference(), self.uri(), self.properties())
     }
 }
 
 impl<T: SourceComponents> ObjectSnapshot<T> {
     pub(crate) fn source_component_from_parts(
         reference: &crate::ObjectRef<T>,
+        uri: &crate::AdtUri,
         properties: &T::Properties,
         name: &str,
     ) -> Result<Option<SourceRef>, ObjectError> {
         let Some(href) = T::source_component_uri(properties, name) else {
             return Ok(None);
         };
-        source_from_href(reference.erase(), href).map(Some)
+        source_from_href(reference.erase(), uri, href).map(Some)
     }
 
     /// Resolves one named source component supported by this loaded object family.
@@ -129,7 +130,12 @@ impl<T: SourceComponents> ObjectSnapshot<T> {
         &self,
         name: impl AsRef<str>,
     ) -> Result<Option<SourceRef>, ObjectError> {
-        Self::source_component_from_parts(self.reference(), self.properties(), name.as_ref())
+        Self::source_component_from_parts(
+            self.reference(),
+            self.uri(),
+            self.properties(),
+            name.as_ref(),
+        )
     }
 }
 
@@ -171,6 +177,8 @@ pub struct ObjectSourceUpdate {
 }
 
 impl ObjectSourceUpdate {
+    const MEDIA_TYPE: &str = "text/plain; charset=utf-8";
+
     /// Records this update in the supplied transport request.
     ///
     /// This replaces any transport request inherited from the lock.
@@ -184,25 +192,26 @@ impl ObjectSourceUpdate {
 impl Operation for ObjectSourceUpdate {
     type Response = SourceUpdateResult;
     type Kind = Stateful;
-    type Target = Owned;
+    type ResolutionRequirement = Independent;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut request = EncodedOperation::owned(Method::PUT, self.source.uri.clone());
+    fn encode(&self, _: &()) -> Result<EncodedOperation, EncodeError> {
+        let mut request = AdtRequest::new(Method::PUT, self.source.uri.clone());
         request.push_query(LOCK_HANDLE_QUERY, self.object_lock.handle());
         if let Some(transport_request) = &self.transport_request {
             request.push_query(TRANSPORT_REQUEST_QUERY, transport_request.as_str());
         }
-        if let Some(user_session) = self.object_lock.user_session() {
-            request.bind_user_session(user_session);
-        }
-        request.set_content_type(SOURCE_UPDATE_MEDIA_TYPE);
+        request.set_content_type(Self::MEDIA_TYPE);
         request.set_body(self.content.clone());
-        Ok(request)
+        let mut operation = EncodedOperation::from(request);
+        if let Some(user_session) = self.object_lock.user_session() {
+            operation.bind_user_session(user_session);
+        }
+        Ok(operation)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         response.require_success()?;
-        let etag = response.entity_tag();
+        let etag = response.etag();
         let body = response.into_body();
         let content = (!body.is_empty())
             .then(|| String::from_utf8(body))
@@ -247,7 +256,7 @@ mod tests {
 
     use crate::{
         AccessMode, AdtRequest, AdtResponse, AdtUri, Class, Client, ObjectRef, OperationError,
-        Program, ResolveError, Transport,
+        Program, Transport,
     };
 
     struct UnusedTransport;
@@ -260,10 +269,7 @@ mod tests {
     }
 
     fn program() -> ObjectRef<Program> {
-        ObjectRef::<Program>::for_test(
-            "ZPROGRAM",
-            AdtUri::parse("/sap/bc/adt/programs/programs/zprogram").unwrap(),
-        )
+        ObjectRef::<Program>::new("ZPROGRAM")
     }
 
     fn source_ref<T>(object: &ObjectRef<T>, uri: &str) -> SourceRef {
@@ -320,10 +326,7 @@ mod tests {
 
     #[test]
     fn one_class_lock_can_update_multiple_source_components() {
-        let class = ObjectRef::<Class>::for_test(
-            "ZCL_EXAMPLE",
-            AdtUri::parse("/sap/bc/adt/oo/classes/zcl_example").unwrap(),
-        );
+        let class = ObjectRef::<Class>::new("ZCL_EXAMPLE");
         let object_lock = ObjectLock::for_test(class.erase(), AccessMode::Modify);
         for uri in [
             "/sap/bc/adt/oo/classes/zcl_example/includes/definitions",
@@ -331,7 +334,7 @@ mod tests {
         ] {
             let source = source_ref(&class, uri);
             let update = source.update(&object_lock, "source").unwrap();
-            let request = <ObjectSourceUpdate as Operation>::encode(&update).unwrap();
+            let request = <ObjectSourceUpdate as Operation>::encode(&update, &()).unwrap();
 
             assert_eq!(request.target(), &source.uri);
             assert_eq!(
@@ -343,14 +346,8 @@ mod tests {
 
     #[test]
     fn source_update_rejects_a_lock_for_another_object() {
-        let first = ObjectRef::<Program>::for_test(
-            "ZFIRST",
-            AdtUri::parse("/sap/bc/adt/programs/programs/ZFIRST").unwrap(),
-        );
-        let second = ObjectRef::<Program>::for_test(
-            "ZSECOND",
-            AdtUri::parse("/sap/bc/adt/programs/programs/ZSECOND").unwrap(),
-        );
+        let first = ObjectRef::<Program>::new("ZFIRST");
+        let second = ObjectRef::<Program>::new("ZSECOND");
         let object_lock = ObjectLock::for_test(first.erase(), AccessMode::Modify);
 
         let error = source_ref(&second, "/sap/bc/adt/programs/programs/zsecond/source/main")
@@ -383,7 +380,7 @@ mod tests {
             ObjectLock::for_test_with_transport(program.erase(), AccessMode::Modify, "A4HK900001");
         let update = source.update(&object_lock, "REPORT zprogram.").unwrap();
 
-        let request = <ObjectSourceUpdate as Operation>::encode(&update).unwrap();
+        let request = <ObjectSourceUpdate as Operation>::encode(&update, &()).unwrap();
 
         assert_eq!(request.method(), Method::PUT);
         assert_eq!(request.target(), &source.uri);
@@ -410,7 +407,7 @@ mod tests {
                 .update(&object_lock, "REPORT zprogram.")
                 .unwrap()
                 .transport("A4HK900002");
-            let request = <ObjectSourceUpdate as Operation>::encode(&update).unwrap();
+            let request = <ObjectSourceUpdate as Operation>::encode(&update, &()).unwrap();
 
             assert_eq!(
                 request.query(),
@@ -510,9 +507,6 @@ mod tests {
 
         let error = update.execute(&session).await.unwrap_err();
 
-        assert!(matches!(
-            error,
-            OperationError::Resolve(ResolveError::UserSessionMismatch)
-        ));
+        assert!(matches!(error, OperationError::UserSessionMismatch));
     }
 }

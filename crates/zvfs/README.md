@@ -49,10 +49,10 @@ A4H
 A local-objects mount can be constructed like this:
 
 ```rust,no_run
-use zadt::{Client, Ready, RepositoryFacet, RepositoryPreselection};
+use zadt::{Client, Discovery, RepositoryFacet, RepositoryPreselection};
 use zvfs::{FacetLevel, FacetPolicy, Mount, VfsError, VirtualRepositoryTree};
 
-async fn local_objects_tree(client: Client<Ready>) -> Result<VirtualRepositoryTree, VfsError> {
+async fn local_objects_tree(client: Client<Discovery>) -> Result<VirtualRepositoryTree, VfsError> {
     let preselections = [
         RepositoryPreselection::directly_assigned("$TMP"),
         RepositoryPreselection::new(RepositoryFacet::OWNER, "DEVELOPER"),

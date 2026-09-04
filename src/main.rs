@@ -1,7 +1,9 @@
 use std::{env, error::Error, io};
 
 use tracing_subscriber::EnvFilter;
-use zadt::{Client, FunctionGroup, FunctionModule, Operation, ReqwestTransport, TransportExt};
+use zadt::{
+    Client, FunctionGroup, FunctionModule, ObjectRef, Operation, ReqwestTransport, TransportExt,
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -37,10 +39,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let client = Client::new(transport).discover().await?;
 
-    let object = client.object::<FunctionGroup>("Z_TEST")?;
+    let object = ObjectRef::<FunctionGroup>::new("Z_TEST");
 
     let source = object
-        .subobject::<FunctionModule>("Z_TEST_FUNC")?
+        .subobject::<FunctionModule>("Z_TEST_FUNC")
         .query()
         .execute(&client)
         .await?

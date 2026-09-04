@@ -5,9 +5,9 @@ use http::{Method, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AdtUri, Advertised, AdvertisedLink, CategoryId, EncodeError, EncodedOperation,
+    AdtUri, AdvertisedLink, CategoryId, Discovery, EncodeError, EncodedOperation,
     GlobalWorkbenchType, ObjectError, ObjectRef, ObjectSnapshot, Operation, OperationResponse,
-    ResponseError, SnapshotKind, Stateless, TransportNumber, User, operation::CollectionLocator,
+    RequiresDiscovery, ResolveError, ResponseError, SnapshotKind, Stateless, TransportNumber, User,
 };
 
 /// Checks whether one or more repository objects can be deleted.
@@ -47,11 +47,12 @@ impl DeletionCheck {
 impl Operation for DeletionCheck {
     type Kind = Stateless;
     type Response = DeletionCheckResponse;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut request = CollectionLocator::new(Self::CATEGORY).operation(Method::POST);
-        request.set_body(self.payload.serialize()?);
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        let target = resolver.require_collection_target(Self::CATEGORY)?;
+        let mut request = EncodedOperation::new(Method::POST, target);
+        request.set_body(self.payload.serialize(resolver)?);
         request.set_content_type(DeletionCheckRequest::MEDIA_TYPE);
         request.set_accept(DeletionCheckResponse::MEDIA_TYPE);
         Ok(request)
@@ -124,11 +125,12 @@ impl ObjectDeletion {
 impl Operation for ObjectDeletion {
     type Kind = Stateless;
     type Response = DeletionResult;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut request = CollectionLocator::new(Self::CATEGORY).operation(Method::POST);
-        request.set_body(self.payload.serialize()?);
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        let target = resolver.require_collection_target(Self::CATEGORY)?;
+        let mut request = EncodedOperation::new(Method::POST, target);
+        request.set_body(self.payload.serialize(resolver)?);
         request.set_content_type(DeletionRequest::MEDIA_TYPE);
         request.set_accept(DeletionResult::MEDIA_TYPE);
         Ok(request)
@@ -174,10 +176,8 @@ impl<T: SnapshotKind> ObjectSnapshot<T> {
     }
 }
 
-#[derive(Debug, Default, Serialize)]
-#[serde(rename = "del:checkRequest")]
+#[derive(Debug, Default)]
 pub struct DeletionCheckRequest {
-    #[serde(rename = "del:object")]
     pub objects: Vec<DeletionCheckObject>,
 }
 
@@ -195,12 +195,18 @@ impl DeletionCheckRequest {
     const ADT_CORE_NAMESPACE: &str = "http://www.sap.com/adt/core";
 
     /// Serializes the deletion-check request using the ADT XML namespaces.
-    pub fn serialize(&self) -> Result<String, ObjectError> {
+    pub fn serialize(&self, resolver: &Discovery) -> Result<String, EncodeError> {
+        let objects = self
+            .objects
+            .iter()
+            .map(|object| object.resolve(resolver))
+            .collect::<Result<Vec<_>, _>>()?;
         serde_xml_rs::SerdeXml::new()
             .namespace("del", Self::DELETION_NAMESPACE)
             .namespace("adtcore", Self::ADT_CORE_NAMESPACE)
-            .to_string(self)
+            .to_string(&ResolvedDeletionCheckRequest { objects })
             .map_err(ObjectError::InvalidRequest)
+            .map_err(Into::into)
     }
 }
 
@@ -209,11 +215,9 @@ impl DeletionCheckResponse {
 }
 
 /// Wire payload sent to the ADT deletion endpoint.
-#[derive(Debug, Default, Serialize)]
-#[serde(rename = "del:deletionRequest")]
+#[derive(Debug, Default)]
 pub struct DeletionRequest {
     /// Objects to delete.
-    #[serde(rename = "del:object")]
     pub objects: Vec<DeletionObject>,
 }
 
@@ -223,24 +227,75 @@ impl DeletionRequest {
     const ADT_CORE_NAMESPACE: &str = "http://www.sap.com/adt/core";
 
     /// Serializes the deletion request using the ADT XML namespaces.
-    pub fn serialize(&self) -> Result<String, ObjectError> {
+    pub fn serialize(&self, resolver: &Discovery) -> Result<String, EncodeError> {
+        let objects = self
+            .objects
+            .iter()
+            .map(|object| object.resolve(resolver))
+            .collect::<Result<Vec<_>, _>>()?;
         serde_xml_rs::SerdeXml::new()
             .namespace("del", Self::DELETION_NAMESPACE)
             .namespace("adtcore", Self::ADT_CORE_NAMESPACE)
-            .to_string(self)
+            .to_string(&ResolvedDeletionRequest { objects })
             .map_err(ObjectError::InvalidRequest)
+            .map_err(Into::into)
     }
+}
+
+#[derive(Clone, Debug)]
+enum PendingObjectReference {
+    Uri(AdtUri),
+    Object(ObjectRef<()>),
+}
+
+impl PendingObjectReference {
+    fn resolve(&self, resolver: &Discovery) -> Result<AdtUri, ResolveError> {
+        match self {
+            Self::Uri(uri) => Ok(uri.clone()),
+            Self::Object(object) => resolver.resolve_object_uri(object),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename = "del:checkRequest")]
+struct ResolvedDeletionCheckRequest<'a> {
+    #[serde(rename = "del:object")]
+    objects: Vec<ResolvedDeletionCheckObject<'a>>,
+}
+
+#[derive(Serialize)]
+struct ResolvedDeletionCheckObject<'a> {
+    #[serde(rename = "@adtcore:uri")]
+    uri: AdtUri,
+
+    #[serde(rename = "del:lockHandle")]
+    lock_handle: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+#[serde(rename = "del:deletionRequest")]
+struct ResolvedDeletionRequest<'a> {
+    #[serde(rename = "del:object")]
+    objects: Vec<ResolvedDeletionObject<'a>>,
+}
+
+#[derive(Serialize)]
+struct ResolvedDeletionObject<'a> {
+    #[serde(rename = "@adtcore:uri")]
+    uri: AdtUri,
+
+    #[serde(rename = "del:transportNumber")]
+    transport_number: &'a str,
 }
 
 /// One object to deletion check. It seems URI and lock are the
 /// only mandatory fields. Name and type are possible but are
 /// instead derived from the URI.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug)]
 pub struct DeletionCheckObject {
-    #[serde(rename = "@adtcore:uri")]
-    pub uri: AdtUri,
+    reference: PendingObjectReference,
 
-    #[serde(rename = "del:lockHandle")]
     pub lock_handle: Option<String>,
 }
 
@@ -250,34 +305,55 @@ impl DeletionCheckObject {
         object.into()
     }
 
+    /// Creates a deletion-check entry from a concrete object URI.
+    pub fn from_uri(uri: AdtUri) -> Self {
+        Self {
+            reference: PendingObjectReference::Uri(uri),
+            lock_handle: None,
+        }
+    }
+
     /// Supplies a lock handle retained by the current ADT user session.
     #[must_use]
     pub fn lock_handle(mut self, lock_handle: impl Into<String>) -> Self {
         self.lock_handle = Some(lock_handle.into());
         self
     }
+
+    fn resolve(
+        &self,
+        resolver: &Discovery,
+    ) -> Result<ResolvedDeletionCheckObject<'_>, ResolveError> {
+        Ok(ResolvedDeletionCheckObject {
+            uri: self.reference.resolve(resolver)?,
+            lock_handle: self.lock_handle.as_deref(),
+        })
+    }
 }
 
 impl<T> From<&ObjectRef<T>> for DeletionCheckObject {
     fn from(value: &ObjectRef<T>) -> Self {
         Self {
-            uri: value.uri().clone(),
+            reference: PendingObjectReference::Object(value.erase()),
             lock_handle: None,
         }
     }
 }
 
+impl From<AdtUri> for DeletionCheckObject {
+    fn from(value: AdtUri) -> Self {
+        Self::from_uri(value)
+    }
+}
+
 /// One object in a deletion request.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug)]
 pub struct DeletionObject {
-    /// URI of the object to delete.
-    #[serde(rename = "@adtcore:uri")]
-    pub uri: AdtUri,
+    reference: PendingObjectReference,
 
     /// Transport request that records deletion of a transportable object.
     ///
     /// This remains empty when deleting a local object.
-    #[serde(rename = "del:transportNumber")]
     pub transport_number: String,
 }
 
@@ -287,20 +363,41 @@ impl DeletionObject {
         object.into()
     }
 
+    /// Creates a deletion entry from a concrete object URI.
+    pub fn from_uri(uri: AdtUri) -> Self {
+        Self {
+            reference: PendingObjectReference::Uri(uri),
+            transport_number: String::new(),
+        }
+    }
+
     /// Records this object's deletion in the supplied transport request.
     #[must_use]
     pub fn transport(mut self, transport: impl Into<TransportNumber>) -> Self {
         self.transport_number = transport.into().into();
         self
     }
+
+    fn resolve(&self, resolver: &Discovery) -> Result<ResolvedDeletionObject<'_>, ResolveError> {
+        Ok(ResolvedDeletionObject {
+            uri: self.reference.resolve(resolver)?,
+            transport_number: &self.transport_number,
+        })
+    }
 }
 
 impl<T> From<&ObjectRef<T>> for DeletionObject {
     fn from(value: &ObjectRef<T>) -> Self {
         Self {
-            uri: value.uri().clone(),
+            reference: PendingObjectReference::Object(value.erase()),
             transport_number: String::new(),
         }
+    }
+}
+
+impl From<AdtUri> for DeletionObject {
+    fn from(value: AdtUri) -> Self {
+        Self::from_uri(value)
     }
 }
 
@@ -527,9 +624,29 @@ pub struct DeletionMessage {
 
 #[cfg(test)]
 mod tests {
+    use async_trait::async_trait;
+
     use super::*;
-    use crate::{AdtResponse, Class};
+    use crate::{AdtRequest, AdtResponse, Class, Client, Transport, TransportError};
     use http::{HeaderMap, header};
+
+    const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
+
+    struct UnusedTransport;
+
+    #[async_trait]
+    impl Transport for UnusedTransport {
+        async fn send(&self, _request: AdtRequest) -> Result<AdtResponse, TransportError> {
+            unreachable!("request construction tests do not send requests")
+        }
+    }
+
+    fn discovered_client() -> Client<Discovery> {
+        Client::new(UnusedTransport).with_capabilities(
+            crate::api::discovery::parse_capabilities(DISCOVERY_XML).unwrap(),
+            crate::api::discovery::parse_capabilities(DISCOVERY_XML).unwrap(),
+        )
+    }
 
     const CHECK_RESPONSE: &str = r#"<?xml version="1.0" encoding="UTF-8"?><del:checkResponse xmlns:del="http://www.sap.com/adt/deletion">
   <del:object xmlns:adtcore="http://www.sap.com/adt/core" del:externalStrongReferences="0" del:externalWeakReferences="0" del:isDeletable="true" adtcore:uri="/sap/bc/adt/functions/groups/zgroup123/includes/lzgroup123rrr" adtcore:type="FUGR/I" adtcore:name="LZGROUP123RRR" adtcore:packageName="$TMP">
@@ -623,14 +740,7 @@ mod tests {
     const DELETE_FAILURE_RESPONSE: &str = r#"<?xml version="1.0" encoding="utf-8"?><del:deletionResult xmlns:del="http://www.sap.com/adt/deletion"><del:object del:isDeleted="false" adtcore:uri="/sap/bc/adt/oo/classes/zmissing" adtcore:type="CLAS/OC" adtcore:name="ZMISSING" xmlns:adtcore="http://www.sap.com/adt/core"><del:message del:priority="0" del:type="E"><del:text>Object does not exist</del:text></del:message></del:object></del:deletionResult>"#;
 
     fn class_reference(name: &str) -> ObjectRef<Class> {
-        ObjectRef::new(
-            name.to_owned(),
-            AdtUri::parse(&format!(
-                "/sap/bc/adt/oo/classes/{}",
-                name.to_ascii_lowercase()
-            ))
-            .unwrap(),
-        )
+        ObjectRef::new(name)
     }
 
     fn operation_response(content_type: &'static str, body: &str) -> OperationResponse {
@@ -644,13 +754,14 @@ mod tests {
 
     #[test]
     fn deletion_check_encodes_the_bulk_request_contract() {
+        let client = discovered_client();
         let reference = class_reference("ZMYCLASS");
         let mut check = DeletionCheck::new();
         check
             .push_object(&reference)
             .push_object(DeletionCheckObject::new(&reference).lock_handle("DELETION-LOCK"));
 
-        let request = check.encode().unwrap();
+        let request = check.encode(client.discovery()).unwrap();
 
         assert_eq!(request.method(), Method::POST);
         assert_eq!(
@@ -670,12 +781,13 @@ mod tests {
 
     #[test]
     fn object_deletion_encodes_local_and_transported_objects() {
+        let client = discovered_client();
         let local = class_reference("ZLOCAL");
         let transported = class_reference("ZTRANSPORTED");
         let mut deletion = local.deletion();
         deletion.push_object(DeletionObject::new(&transported).transport("A4HK900148"));
 
-        let request = deletion.encode().unwrap();
+        let request = deletion.encode(client.discovery()).unwrap();
 
         assert_eq!(request.method(), Method::POST);
         assert_eq!(

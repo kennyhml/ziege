@@ -2,15 +2,9 @@ use http::{Method, StatusCode};
 use serde::Deserialize;
 
 use crate::{
-    Advertised, AdvertisedLink, AdvertisedObjectReference, CategoryId, EncodeError,
+    AdvertisedLink, AdvertisedObjectReference, CategoryId, Discovery, EncodeError,
     EncodedOperation, ObjectError, ObjectRef, ObjectSnapshot, ObjectType, Operation,
-    OperationResponse, ResponseError, Stateless, objects::ObjectReferences,
-    operation::CollectionLocator,
-};
-
-const ACTIVATE_OBJECTS: CategoryId = CategoryId {
-    scheme: "http://www.sap.com/adt/categories/activation",
-    term: "activationruns",
+    OperationResponse, RequiresDiscovery, ResponseError, Stateless, objects::ObjectReferences,
 };
 
 #[derive(Debug, Eq, PartialEq)]
@@ -46,6 +40,8 @@ pub struct ActivationRun {
     mode: ActivationRunMode,
     /// Repository objects included in the activation worklist.
     objects: ObjectReferences,
+    /// Logical identities for references added through the object-based API.
+    logical_objects: Vec<(usize, ObjectRef<()>)>,
     /// Whether activation should be forced. Off by default
     forced: Option<bool>,
     /// Whether a request preaudit should be performed. On by default
@@ -53,13 +49,23 @@ pub struct ActivationRun {
 }
 
 impl ActivationRun {
+    const CATEGORY: CategoryId = CategoryId {
+        scheme: "http://www.sap.com/adt/categories/activation",
+        term: "activationruns",
+    };
     const MEDIA_TYPE: &'static str = "application/xml";
 
-    /// Creates an activation or check run for `objects`.
-    pub fn new(mode: ActivationRunMode, objects: ObjectReferences) -> Self {
+    /// Creates an empty activation or check run.
+    pub fn new(mode: ActivationRunMode) -> Self {
+        Self::from_advertised(mode, ObjectReferences::default())
+    }
+
+    /// Creates an activation or check run from references advertised by ADT.
+    pub fn from_advertised(mode: ActivationRunMode, objects: ObjectReferences) -> Self {
         Self {
             mode,
             objects,
+            logical_objects: Vec::new(),
             forced: None,
             preaudit: true,
         }
@@ -77,7 +83,9 @@ impl ActivationRun {
     where
         for<'a> &'a ObjectRef<T>: Into<AdvertisedObjectReference>,
     {
+        let index = self.objects.objects.len();
         self.objects.objects.push(object.into());
+        self.logical_objects.push((index, object.erase()));
         self
     }
 
@@ -94,13 +102,34 @@ impl ActivationRun {
 impl Operation for ActivationRun {
     type Kind = Stateless;
     type Response = ActivationRunMessages;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        for object in &self.objects.objects {
-            let Some(object_type) = object.object_type.as_ref() else {
-                continue;
-            };
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        let mut objects = self.objects.clone();
+        for (index, object) in &self.logical_objects {
+            let reference = &mut objects.objects[*index];
+            reference.uri = Some(resolver.resolve_object_uri(object)?.to_string());
+            reference.parent_uri = object
+                .parent()
+                .map(|parent| resolver.resolve_object_uri(parent))
+                .transpose()?
+                .map(|uri| uri.to_string());
+        }
+
+        for object in &objects.objects {
+            if object.name.is_none() {
+                return Err(ObjectError::IncompleteObjectReference { field: "name" }.into());
+            }
+            let object_type =
+                object
+                    .object_type
+                    .as_ref()
+                    .ok_or(ObjectError::IncompleteObjectReference {
+                        field: "object type",
+                    })?;
+            if object.uri.is_none() {
+                return Err(ObjectError::IncompleteObjectReference { field: "uri" }.into());
+            }
             if crate::objects::descriptors::requires_parent(object_type)
                 && object.parent_uri.is_none()
             {
@@ -112,9 +141,10 @@ impl Operation for ActivationRun {
         }
         let body = serde_xml_rs::SerdeXml::new()
             .namespace("adtcore", "http://www.sap.com/adt/core")
-            .to_string(&self.objects)
+            .to_string(&objects)
             .map_err(ObjectError::InvalidRequest)?;
-        let mut request = CollectionLocator::new(ACTIVATE_OBJECTS).operation(Method::POST);
+        let target = resolver.require_collection_target(Self::CATEGORY)?;
+        let mut request = EncodedOperation::new(Method::POST, target);
         request.push_query("method", self.mode.as_str());
         request.push_query("preaudit", self.preaudit.to_string());
         if let Some(forced) = self.forced {
@@ -145,12 +175,9 @@ where
 {
     /// Creates an activation run for this object.
     pub fn activation(&self) -> ActivationRun {
-        ActivationRun::new(
-            ActivationRunMode::Activate,
-            ObjectReferences {
-                objects: vec![self.into()],
-            },
-        )
+        let mut run = ActivationRun::new(ActivationRunMode::Activate);
+        run.push_object(self);
+        run
     }
 }
 
@@ -236,23 +263,68 @@ pub struct ActivationRunMessageText {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, Class, FunctionGroup, FunctionModule};
+    use crate::{
+        AdtRequest, AdtResponse, Class, Client, FunctionGroup, FunctionModule, TransportError,
+    };
+    use async_trait::async_trait;
     use http::header;
 
+    const DISCOVERY_XML: &[u8] = br#"
+        <app:service xmlns:app="http://www.w3.org/2007/app"
+                xmlns:atom="http://www.w3.org/2005/Atom"
+                xmlns:adtcomp="http://www.sap.com/adt/compatibility">
+            <app:workspace>
+                <atom:title>Activation</atom:title>
+                <app:collection href="/sap/bc/adt/activation">
+                    <atom:category scheme="http://www.sap.com/adt/categories/activation"
+                        term="activationruns" />
+                </app:collection>
+                <app:collection href="/sap/bc/adt/oo/classes">
+                    <atom:category scheme="http://www.sap.com/adt/categories/oo"
+                        term="classes" />
+                </app:collection>
+                <app:collection href="/sap/bc/adt/functions/groups">
+                    <atom:category scheme="http://www.sap.com/adt/categories/functions"
+                        term="groups" />
+                    <adtcomp:templateLinks>
+                        <adtcomp:templateLink
+                            rel="http://www.sap.com/adt/categories/functiongroups/functionmodules"
+                            template="/sap/bc/adt/functions/groups/{groupname}/fmodules" />
+                    </adtcomp:templateLinks>
+                </app:collection>
+            </app:workspace>
+        </app:service>
+    "#;
     const ACTIVATION_MESSAGES_XML: &[u8] =
         include_bytes!("../../../tests/fixtures/activation-run-messages.xml");
+
+    struct UnusedTransport;
+
+    #[async_trait]
+    impl crate::Transport for UnusedTransport {
+        async fn send(&self, _request: AdtRequest) -> Result<AdtResponse, TransportError> {
+            unreachable!("request construction tests do not send requests")
+        }
+    }
+
+    fn discovered_client() -> Client<Discovery> {
+        Client::new(UnusedTransport).with_capabilities(
+            crate::api::discovery::parse_capabilities(DISCOVERY_XML).unwrap(),
+            crate::api::discovery::parse_capabilities(DISCOVERY_XML).unwrap(),
+        )
+    }
+
     #[test]
     fn activation_run_posts_flags_and_namespaced_object_references() {
-        let object = ObjectRef::<Class>::for_test(
-            "Z_SYNTAX_TEST",
-            AdtUri::parse("/sap/bc/adt/oo/classes/z_syntax_test").unwrap(),
-        );
+        let client = discovered_client();
+        let object = ObjectRef::<Class>::new("Z_SYNTAX_TEST");
         let mut run = object.activation();
         run.allow_distinct_transports(true).forced(true);
 
-        let request = run.encode().unwrap();
+        let request = run.encode(client.discovery()).unwrap();
 
         assert_eq!(request.method(), Method::POST);
+        assert_eq!(request.target().as_str(), "/sap/bc/adt/activation");
         assert_eq!(
             request.query(),
             [
@@ -270,37 +342,61 @@ mod tests {
         assert!(body.contains("xmlns:adtcore=\"http://www.sap.com/adt/core\""));
         assert!(body.contains("adtcore:type=\"CLAS/OC\""));
         assert!(body.contains("adtcore:name=\"Z_SYNTAX_TEST\""));
+        assert!(body.contains("adtcore:uri=\"/sap/bc/adt/oo/classes/z_syntax_test\""));
     }
 
     #[test]
     fn child_activation_includes_its_parent_uri() {
-        let group = ObjectRef::<FunctionGroup>::new(
-            "Z_TEST_GROUP".to_owned(),
-            AdtUri::parse("/sap/bc/adt/functions/groups/z_test_group").unwrap(),
-        );
-        let module = ObjectRef::<FunctionModule>::new(
-            "ZZZZFUNC".to_owned(),
-            AdtUri::parse("/sap/bc/adt/functions/groups/z_test_group/fmodules/zzzzfunc").unwrap(),
-        )
-        .with_parent(&group);
+        let client = discovered_client();
+        let group = ObjectRef::<FunctionGroup>::new("Z_TEST_GROUP");
+        let module = group.subobject::<FunctionModule>("ZZZZFUNC");
 
-        let request = module.activation().encode().unwrap();
+        let request = module.activation().encode(client.discovery()).unwrap();
         let body = std::str::from_utf8(request.body()).unwrap();
 
+        assert!(body.contains(
+            "adtcore:uri=\"/sap/bc/adt/functions/groups/z_test_group/fmodules/zzzzfunc\""
+        ));
         assert!(body.contains("adtcore:parentUri=\"/sap/bc/adt/functions/groups/z_test_group\""));
     }
 
     #[test]
     fn child_activation_requires_parent_identity() {
-        let module = ObjectRef::<FunctionModule>::new(
+        let client = discovered_client();
+        let module = ObjectRef::<FunctionModule>::from_parts(
             "ZZZZFUNC".to_owned(),
-            AdtUri::parse("/sap/bc/adt/functions/groups/z_test_group/fmodules/zzzzfunc").unwrap(),
+            FunctionModule::WORKBENCH_TYPE,
+            None,
         );
 
         assert!(matches!(
-            module.activation().encode(),
-            Err(EncodeError::Object(ObjectError::ParentObjectRequired { object_type }))
+            module.activation().encode(client.discovery()),
+            Err(EncodeError::Resolve(crate::ResolveError::Object(
+                ObjectError::ParentObjectRequired { object_type }
+            )))
                 if object_type == FunctionModule::WORKBENCH_TYPE
+        ));
+    }
+
+    #[test]
+    fn advertised_activation_rejects_an_unresolved_reference() {
+        let client = discovered_client();
+        let run = ActivationRun::from_advertised(
+            ActivationRunMode::Activate,
+            ObjectReferences {
+                objects: vec![AdvertisedObjectReference {
+                    name: Some("Z_SYNTAX_TEST".to_owned()),
+                    object_type: Some(Class::WORKBENCH_TYPE),
+                    ..Default::default()
+                }],
+            },
+        );
+
+        assert!(matches!(
+            run.encode(client.discovery()),
+            Err(EncodeError::Object(
+                ObjectError::IncompleteObjectReference { field: "uri" }
+            ))
         ));
     }
 

@@ -813,7 +813,7 @@ fn expand_create_properties(input: DeriveInput) -> Result<TokenStream2> {
         quote! {
             fn assign_reference<T>(
                 &mut self,
-                reference: &crate::objects::ObjectRef<T>,
+                reference: &crate::objects::ResolvedObjectRef<T>,
             ) {
                 self.assign_identity(reference);
                 if let Some(parent) = reference.parent_reference() {

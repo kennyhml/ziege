@@ -3,7 +3,7 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTyped, ToXml, WorkbenchVersion,
+    MediaTyped, MediaTypes, ToXml, WorkbenchVersion,
 };
 
 #[object_type(
@@ -115,7 +115,7 @@ pub struct MetadataExtensionProperties {
 }
 
 impl MediaTyped for MetadataExtensionProperties {
-    const MEDIA_TYPES: &'static [&'static str] = &["application/vnd.sap.adt.ddic.ddlx.v1+xml"];
+    const MEDIA_TYPES: MediaTypes = MediaTypes::new(&["application/vnd.sap.adt.ddic.ddlx.v1+xml"]);
 }
 
 impl ToXml for MetadataExtensionProperties {
@@ -154,10 +154,7 @@ mod tests {
         assert_eq!(properties.object_type, MetadataExtension::WORKBENCH_TYPE);
         assert!(properties.abap_language_version.is_none());
 
-        let reference = ObjectRef::<MetadataExtension>::new(
-            "Z_METADATA_EXTENSION".to_owned(),
-            AdtUri::parse("/sap/bc/adt/ddic/ddlx/sources/z_metadata_extension").unwrap(),
-        );
+        let reference = ObjectRef::<MetadataExtension>::new("Z_METADATA_EXTENSION");
         properties.assign_identity(&reference);
         let body = properties.to_xml().unwrap();
         let body = std::str::from_utf8(&body).unwrap();
@@ -191,10 +188,8 @@ mod tests {
     fn relative_source_uri_resolves_against_the_object() {
         let properties = properties();
         let object = crate::ObjectSnapshot::new(
-            ObjectRef::<MetadataExtension>::new(
-                properties.name.clone(),
-                AdtUri::parse("/sap/bc/adt/ddic/ddlx/sources/c_mdoapplicationscope").unwrap(),
-            ),
+            ObjectRef::<MetadataExtension>::new(properties.name.clone()),
+            AdtUri::parse("/sap/bc/adt/ddic/ddlx/sources/c_mdoapplicationscope").unwrap(),
             crate::WorkbenchVersion::Active,
             MetadataExtensionProperties::MEDIA_TYPES[0],
             None,

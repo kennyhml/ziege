@@ -1,10 +1,10 @@
-use crate::{AdtUri, ObjectRef};
+use crate::AdtUri;
 
 use super::{AdtLink, AdtLinkError, AdvertisedLink};
 
 /// Maps relations of an object reference and enables lazy evaluation
-/// of possible references. While the underlying [`ObjectRef`] could
-/// be a statically known [`ObjectRef<T>`], as the relations can only
+/// of possible references. While the underlying [`crate::ObjectRef`] could
+/// be a statically known [`crate::ObjectRef<T>`], as the relations can only
 /// be found by having a reference to such, it should always be used
 /// as an implementation detail, only to be called on directly in
 /// exceptional cases, such as when access to a relation is not yet
@@ -16,13 +16,6 @@ pub struct Relations {
 }
 
 impl Relations {
-    pub(crate) fn new(owner: ObjectRef, links: Vec<AdvertisedLink>) -> Self {
-        Self {
-            base: owner.uri().clone(),
-            links: links.into_boxed_slice(),
-        }
-    }
-
     pub(crate) fn for_base(base: AdtUri, links: Vec<AdvertisedLink>) -> Self {
         Self {
             base,
@@ -43,13 +36,5 @@ impl Relations {
     /// Resolves advertised links in document order.
     pub fn iter<'a>(&'a self) -> impl ExactSizeIterator<Item = Result<AdtLink, AdtLinkError>> + 'a {
         self.links.iter().map(|link| link.resolve(&self.base))
-    }
-
-    pub(crate) fn find(&self, relation: &str) -> Result<Option<AdtLink>, AdtLinkError> {
-        self.links
-            .iter()
-            .find(|link| link.relation.as_deref() == Some(relation))
-            .map(|link| link.resolve(&self.base))
-            .transpose()
     }
 }

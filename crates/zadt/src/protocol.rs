@@ -245,7 +245,7 @@ impl AdtResponse {
     }
 
     /// Returns the response entity tag when its header value is valid text.
-    pub fn entity_tag(&self) -> Option<EntityTag> {
+    pub fn etag(&self) -> Option<EntityTag> {
         self.headers
             .get(header::ETAG)
             .and_then(EntityTag::from_header_value)
@@ -375,7 +375,7 @@ mod tests {
         headers.insert(header::ETAG, HeaderValue::from_static("response-etag"));
         let response = AdtResponse::new(StatusCode::OK, headers, Vec::new());
 
-        assert_eq!(response.entity_tag().as_deref(), Some("response-etag"));
+        assert_eq!(response.etag().as_deref(), Some("response-etag"));
     }
 
     #[test]

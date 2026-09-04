@@ -2,7 +2,7 @@ mod common;
 
 use std::{env, error::Error};
 
-use zadt::{Client, Operation};
+use zadt::{Client, Operation, UsersQuery};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -11,7 +11,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let username = env::args().nth(1).expect("a username is provided");
 
-    let user_list = client.users().execute(&client).await?;
+    let user_list = UsersQuery::new().execute(&client).await?;
     let user = user_list
         .users
         .iter()

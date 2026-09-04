@@ -1,15 +1,14 @@
+use std::{collections::HashMap, sync::OnceLock};
+
 use http::{Method, StatusCode};
 use serde::Deserialize;
 use url::Url;
 
 use crate::{
-    AdtUri, Client, DiscoveryError, EncodeError, EncodedOperation, Initial, Operation,
-    OperationError, OperationResponse, Owned, Ready, ResponseError, Stateless,
+    AdtRequest, AdtUri, Client, Discovery, DiscoveryError, EncodeError, EncodedOperation,
+    Independent, Initial, Operation, OperationError, OperationResponse, ResponseError, Stateless,
     protocol::CORE_DISCOVERY_PATH,
 };
-
-const DISCOVERY_MEDIA_TYPE: &str = "application/atomsvc+xml";
-const CENTRAL_DISCOVERY_PATH: &str = "/sap/bc/adt/discovery";
 
 /// A stable category identity from an ADT discovery document.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -27,7 +26,7 @@ pub struct CategoryId {
 /// infrastructure collections such as compatibility and batch resources. It
 /// is distinct from [`DiscoveryQuery`], which advertises the domain workspaces
 /// and collections used by most ADT operations. [`Client::discover`] stores
-/// both documents in the resulting [`Ready`] client.
+/// both documents in the resulting [`Client<Discovery>`].
 ///
 /// The endpoint is known in advance, so this operation can execute with any
 /// [`crate::ClientState`]. Executing it returns [`Capabilities`] but does not perform
@@ -45,14 +44,14 @@ pub struct CoreDiscoveryQuery;
 impl Operation for CoreDiscoveryQuery {
     type Response = Capabilities;
     type Kind = Stateless;
-    type Target = Owned;
+    type ResolutionRequirement = Independent;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
+    fn encode(&self, _: &()) -> Result<EncodedOperation, EncodeError> {
         let target = AdtUri::parse(CORE_DISCOVERY_PATH)
             .expect("the core discovery path must be a valid ADT URI");
-        let mut request = EncodedOperation::owned(Method::GET, target);
-        request.set_accept(DISCOVERY_MEDIA_TYPE);
-        Ok(request)
+        let mut request = AdtRequest::new(Method::GET, target);
+        request.set_accept(Capabilities::MEDIA_TYPE);
+        Ok(EncodedOperation::from(request))
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
@@ -69,7 +68,7 @@ impl Operation for CoreDiscoveryQuery {
 ///
 /// The endpoint is known in advance, so this operation can execute with any
 /// [`crate::ClientState`]. [`Client::discover`] executes it and stores the resulting
-/// [`Capabilities`] while transitioning to [`Ready`].
+/// [`Capabilities`] while transitioning to [`Discovery`].
 ///
 /// # Observed server handlers
 ///
@@ -80,17 +79,21 @@ impl Operation for CoreDiscoveryQuery {
 #[derive(Debug, Default)]
 pub struct DiscoveryQuery;
 
+impl DiscoveryQuery {
+    const PATH: &str = "/sap/bc/adt/discovery";
+}
+
 impl Operation for DiscoveryQuery {
     type Response = Capabilities;
     type Kind = Stateless;
-    type Target = Owned;
+    type ResolutionRequirement = Independent;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let target = AdtUri::parse(CENTRAL_DISCOVERY_PATH)
-            .expect("the central discovery path must be a valid ADT URI");
-        let mut request = EncodedOperation::owned(Method::GET, target);
-        request.set_accept(DISCOVERY_MEDIA_TYPE);
-        Ok(request)
+    fn encode(&self, _: &()) -> Result<EncodedOperation, EncodeError> {
+        let target =
+            AdtUri::parse(Self::PATH).expect("the central discovery path must be a valid ADT URI");
+        let mut request = AdtRequest::new(Method::GET, target);
+        request.set_accept(Capabilities::MEDIA_TYPE);
+        Ok(EncodedOperation::from(request))
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
@@ -99,8 +102,8 @@ impl Operation for DiscoveryQuery {
 }
 
 impl Client<Initial> {
-    /// Fetches central and core ADT discovery and returns a ready client.
-    pub async fn discover(self) -> Result<Client<Ready>, OperationError> {
+    /// Fetches central and core ADT discovery and returns a client carrying both.
+    pub async fn discover(self) -> Result<Client<Discovery>, OperationError> {
         let capabilities = DiscoveryQuery.execute(&self).await?;
         let core_capabilities = CoreDiscoveryQuery.execute(&self).await?;
         Ok(self.with_capabilities(capabilities, core_capabilities))
@@ -115,7 +118,9 @@ fn decode_discovery_response(response: OperationResponse) -> Result<Capabilities
 }
 
 pub(crate) fn parse_capabilities(body: &[u8]) -> Result<Capabilities, DiscoveryError> {
-    serde_xml_rs::from_reader(body).map_err(Into::into)
+    let capabilities: Capabilities = serde_xml_rs::from_reader(body)?;
+    capabilities.index();
+    Ok(capabilities)
 }
 
 /// Capabilities advertised by an ADT discovery document.
@@ -128,9 +133,17 @@ pub(crate) fn parse_capabilities(body: &[u8]) -> Result<Capabilities, DiscoveryE
 pub struct Capabilities {
     #[serde(rename = "app:workspace", default)]
     workspaces: Vec<Workspace>,
+    #[serde(skip)]
+    index: OnceLock<CapabilityIndex>,
 }
 
 impl Capabilities {
+    const MEDIA_TYPE: &str = "application/atomsvc+xml";
+
+    fn index(&self) -> &CapabilityIndex {
+        self.index.get_or_init(|| CapabilityIndex::new(self))
+    }
+
     /// Returns all workspaces in document order.
     pub fn workspaces(&self) -> &[Workspace] {
         &self.workspaces
@@ -141,15 +154,61 @@ impl Capabilities {
     /// Category pairs are preferable to workspace or collection titles for
     /// capability lookup because titles are display text and can be localized.
     pub fn collection(&self, scheme: &str, term: &str) -> Option<&Collection> {
+        let &(workspace, collection) = self.index().collections.get(scheme)?.get(term)?;
+        self.workspaces.get(workspace)?.collections.get(collection)
+    }
+
+    /// Finds the first template with `relation` in the identified collection.
+    pub fn template(&self, scheme: &str, term: &str, relation: &str) -> Option<&TemplateLink> {
+        let &(workspace, collection) = self.index().collections.get(scheme)?.get(term)?;
+        let &template = self
+            .index()
+            .templates
+            .get(&(workspace, collection))?
+            .get(relation)?;
         self.workspaces
-            .iter()
-            .flat_map(Workspace::collections)
-            .find(|collection| {
-                collection
-                    .categories
-                    .iter()
-                    .any(|category| category.scheme == scheme && category.term == term)
-            })
+            .get(workspace)?
+            .collections
+            .get(collection)?
+            .template_links
+            .links
+            .get(template)
+    }
+}
+
+#[derive(Debug)]
+struct CapabilityIndex {
+    collections: HashMap<String, HashMap<String, (usize, usize)>>,
+    templates: HashMap<(usize, usize), HashMap<String, usize>>,
+}
+
+impl CapabilityIndex {
+    fn new(capabilities: &Capabilities) -> Self {
+        let mut collections: HashMap<String, HashMap<String, (usize, usize)>> = HashMap::new();
+        let mut templates: HashMap<(usize, usize), HashMap<String, usize>> = HashMap::new();
+        for (workspace_index, workspace) in capabilities.workspaces.iter().enumerate() {
+            for (collection_index, collection) in workspace.collections.iter().enumerate() {
+                for category in &collection.categories {
+                    collections
+                        .entry(category.scheme.clone())
+                        .or_default()
+                        .entry(category.term.clone())
+                        .or_insert((workspace_index, collection_index));
+                }
+                for (template_index, template) in collection.template_links.links.iter().enumerate()
+                {
+                    templates
+                        .entry((workspace_index, collection_index))
+                        .or_default()
+                        .entry(template.relation.clone())
+                        .or_insert(template_index);
+                }
+            }
+        }
+        Self {
+            collections,
+            templates,
+        }
     }
 }
 
@@ -291,6 +350,16 @@ impl TemplateLink {
     pub fn media_type(&self) -> Option<&str> {
         self.media_type.as_deref()
     }
+
+    /// Returns URI-template variable names in declaration order.
+    pub fn variable_names(&self) -> Vec<&str> {
+        crate::resource::AdtUriTemplate::new(&self.template).variable_names()
+    }
+
+    /// Returns whether the template declares `variable`.
+    pub fn has_variable(&self, variable: &str) -> bool {
+        crate::resource::AdtUriTemplate::new(&self.template).has_variable(variable)
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -363,6 +432,18 @@ mod tests {
             "/sap/bc/adt/programs/programrun/{programname}{?profilerId}"
         );
         assert_eq!(run_template.media_type(), Some("text/plain"));
+        assert_eq!(run_template.variable_names(), ["programname", "profilerId"]);
+        assert!(run_template.has_variable("programname"));
+        assert!(std::ptr::eq(
+            run_template,
+            capabilities
+                .template(
+                    "http://www.sap.com/adt/categories/programs",
+                    "programrun",
+                    "http://www.sap.com/adt/relations/programs/programrun",
+                )
+                .unwrap()
+        ));
     }
 
     #[test]

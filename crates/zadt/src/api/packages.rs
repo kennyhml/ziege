@@ -1,23 +1,14 @@
+use std::collections::HashMap;
+
 use http::{Method, StatusCode};
 use serde::Deserialize;
+use stduritemplate::Value;
 
 use crate::{
-    AdtUri, Advertised, AdvertisedObjectReference, CategoryId, Client, EncodeError,
-    EncodedOperation, GlobalWorkbenchType, ObjectError, ObjectRef, ObjectType, Operation,
-    OperationResponse, Package, PrimaryObjectType, Ready, ResponseError, Stateless,
-    operation::{CollectionLocator, TemplateLocator},
-    resource::resolve_href,
-};
-
-const PACKAGE_TYPE_KEY: &str = "DEVCK";
-const PACKAGE_INTERFACE_TYPE: &str = "PINF/KI";
-const PACKAGE_INTERFACE_TYPE_KEY: &str = "PINFKI";
-const PACKAGE_TREE_RELATION: &str = "tree";
-const PACKAGE_TREE_MEDIA_TYPE: &str = "application/vnd.sap.adt.packages.tree.v1+xml";
-const PACKAGE_SETTINGS_MEDIA_TYPE: &str = "application/vnd.sap.adt.packages.settings+xml";
-const PACKAGE_SETTINGS: CategoryId = CategoryId {
-    scheme: "http://www.sap.com/wbobj/packages",
-    term: "settings",
+    AdtUri, AdvertisedObjectReference, CategoryId, Discovery, EncodeError, EncodedOperation,
+    GlobalWorkbenchType, ObjectError, ObjectRef, ObjectType, Operation, OperationResponse, Package,
+    PrimaryObjectType, RequiresDiscovery, ResolveError, ResponseError, Stateless,
+    resource::{AdtUriTemplate, resolve_href},
 };
 
 /// A typed package reference and its optional short description.
@@ -40,6 +31,11 @@ pub struct PackageInterfaceReference {
     pub object_type: String,
     /// The package-interface description, when advertised.
     pub description: Option<String>,
+}
+
+impl PackageInterfaceReference {
+    const OBJECT_TYPE: &str = "PINF/KI";
+    const COMPACT_OBJECT_TYPE: &str = "PINFKI";
 }
 
 /// Which side of a package hierarchy to request.
@@ -70,6 +66,9 @@ pub struct PackageTree {
 }
 
 impl PackageTree {
+    const COMPACT_OBJECT_TYPE: &str = "DEVCK";
+    const MEDIA_TYPE: &str = "application/vnd.sap.adt.packages.tree.v1+xml";
+
     pub(crate) fn parse(body: &[u8], base: &AdtUri) -> Result<Self, ResponseError> {
         let raw: RawPackageTree =
             serde_xml_rs::from_reader(body).map_err(ObjectError::InvalidResponse)?;
@@ -144,6 +143,8 @@ pub struct PackageSettings {
 }
 
 impl PackageSettings {
+    const MEDIA_TYPE: &str = "application/vnd.sap.adt.packages.settings+xml";
+
     pub(crate) fn parse(body: &[u8]) -> Result<Self, ResponseError> {
         let raw: RawPackageSettings =
             serde_xml_rs::from_reader(body).map_err(ObjectError::InvalidResponse)?;
@@ -165,9 +166,9 @@ fn package_reference(
     let href = required(raw.uri, "adtcore:uri")?;
     let object_type = required(raw.object_type, "adtcore:type")?;
     if compact_type {
-        if object_type.as_str() != PACKAGE_TYPE_KEY {
+        if object_type.as_str() != PackageTree::COMPACT_OBJECT_TYPE {
             return Err(ObjectError::UnexpectedCompactObjectType {
-                expected: PACKAGE_TYPE_KEY,
+                expected: PackageTree::COMPACT_OBJECT_TYPE,
                 actual: object_type.to_string(),
             });
         }
@@ -177,13 +178,11 @@ fn package_reference(
             actual: object_type,
         });
     }
-    let target = resolve_href(base, &href)
-        .map_err(|source| ObjectError::InvalidLink {
-            href: href.clone(),
-            source,
-        })?
-        .target;
-    let reference = ObjectRef::<Package>::new(name, target);
+    resolve_href(base, &href).map_err(|source| ObjectError::InvalidLink {
+        href: href.clone(),
+        source,
+    })?;
+    let reference = ObjectRef::<Package>::new(name);
     Ok(Some(PackageReference {
         reference,
         description: raw.description,
@@ -197,11 +196,11 @@ fn package_interface_reference(
     let name = required(raw.name, "adtcore:name")?;
     let href = required(raw.uri, "adtcore:uri")?;
     let object_type = required(raw.object_type, "adtcore:type")?;
-    if object_type.as_str() != PACKAGE_INTERFACE_TYPE
-        && object_type.as_str() != PACKAGE_INTERFACE_TYPE_KEY
+    if object_type.as_str() != PackageInterfaceReference::OBJECT_TYPE
+        && object_type.as_str() != PackageInterfaceReference::COMPACT_OBJECT_TYPE
     {
         return Err(ObjectError::UnexpectedCompactObjectType {
-            expected: PACKAGE_INTERFACE_TYPE,
+            expected: PackageInterfaceReference::OBJECT_TYPE,
             actual: object_type.to_string(),
         });
     }
@@ -280,7 +279,7 @@ pub struct PackageTreeQuery {
 }
 
 impl PackageTreeQuery {
-    const TARGET: TemplateLocator = TemplateLocator::new(Package::CATEGORY, PACKAGE_TREE_RELATION);
+    const RELATION: &str = "tree";
 
     /// Creates a package-tree query with the selected direction.
     pub fn new(package: ObjectRef<Package>, kind: PackageTreeKind) -> Self {
@@ -291,19 +290,42 @@ impl PackageTreeQuery {
 impl Operation for PackageTreeQuery {
     type Response = PackageTree;
     type Kind = Stateless;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut target = Self::TARGET.target();
-        target.push_variable("packagename", self.package.name());
-        target.push_variable("type", self.kind.as_str());
-        let mut request = EncodedOperation::advertised(Method::GET, target);
-        request.set_accept(PACKAGE_TREE_MEDIA_TYPE);
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        let link = resolver.require_template(Package::CATEGORY, Self::RELATION)?;
+        let template = AdtUriTemplate::new(link.template());
+        for name in ["packagename", "type"] {
+            if !template.has_variable(name) {
+                return Err(
+                    ResolveError::from(ObjectError::UnsupportedTemplateParameter {
+                        parameter: name,
+                    })
+                    .into(),
+                );
+            }
+        }
+        let variables = HashMap::from([
+            (
+                "packagename".to_owned(),
+                Value::String(self.package.name().to_owned()),
+            ),
+            (
+                "type".to_owned(),
+                Value::String(self.kind.as_str().to_owned()),
+            ),
+        ]);
+        let (target, query) = template.expand(&variables).map_err(ResolveError::from)?;
+        let mut request = EncodedOperation::new(Method::GET, target);
+        for (name, value) in query {
+            request.push_query(name, value);
+        }
+        request.set_accept(PackageTree::MEDIA_TYPE);
         Ok(request)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        ensure_xml_response(&response, PACKAGE_TREE_MEDIA_TYPE)?;
+        ensure_xml_response(&response, PackageTree::MEDIA_TYPE)?;
         PackageTree::parse(response.body(), response.request_target())
     }
 }
@@ -312,26 +334,27 @@ impl Operation for PackageTreeQuery {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PackageSettingsQuery;
 
-impl Client<Ready> {
-    /// Creates a query for the global package editor settings.
-    pub fn package_settings(&self) -> PackageSettingsQuery {
-        PackageSettingsQuery
-    }
+impl PackageSettingsQuery {
+    const CATEGORY: CategoryId = CategoryId {
+        scheme: "http://www.sap.com/wbobj/packages",
+        term: "settings",
+    };
 }
 
 impl Operation for PackageSettingsQuery {
     type Response = PackageSettings;
     type Kind = Stateless;
-    type Target = Advertised;
+    type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self) -> Result<EncodedOperation<Self::Target>, EncodeError> {
-        let mut request = CollectionLocator::new(PACKAGE_SETTINGS).operation(Method::GET);
-        request.set_accept(PACKAGE_SETTINGS_MEDIA_TYPE);
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        let target = resolver.require_collection_target(Self::CATEGORY)?;
+        let mut request = EncodedOperation::new(Method::GET, target);
+        request.set_accept(PackageSettings::MEDIA_TYPE);
         Ok(request)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        ensure_xml_response(&response, PACKAGE_SETTINGS_MEDIA_TYPE)?;
+        ensure_xml_response(&response, PackageSettings::MEDIA_TYPE)?;
         PackageSettings::parse(response.body())
     }
 }
@@ -366,7 +389,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        AdtRequest, AdtResponse, OperationError, PackageProperties, ResolveError, Transport,
+        AdtRequest, AdtResponse, Client, OperationError, PackageProperties, Transport,
         TransportError,
     };
 
@@ -386,7 +409,7 @@ mod tests {
             let mut headers = HeaderMap::new();
             headers.insert(
                 header::CONTENT_TYPE,
-                HeaderValue::from_static(PACKAGE_TREE_MEDIA_TYPE),
+                HeaderValue::from_static(PackageTree::MEDIA_TYPE),
             );
             Ok(AdtResponse::new(
                 StatusCode::OK,
@@ -396,7 +419,7 @@ mod tests {
         }
     }
 
-    fn ready_client(xml: &[u8]) -> (Client<Ready>, Arc<Mutex<Vec<AdtRequest>>>) {
+    fn discovered_client(xml: &[u8]) -> (Client<Discovery>, Arc<Mutex<Vec<AdtRequest>>>) {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let client = Client::new(RecordingTransport {
             requests: Arc::clone(&requests),
@@ -465,7 +488,7 @@ mod tests {
         assert!(matches!(
             error,
             ResponseError::Object(ObjectError::UnexpectedCompactObjectType {
-                expected: PACKAGE_TYPE_KEY,
+                expected: PackageTree::COMPACT_OBJECT_TYPE,
                 actual,
             }) if actual == "PROGP"
         ));
@@ -483,11 +506,8 @@ mod tests {
 
     #[tokio::test]
     async fn expands_namespaced_package_tree_targets() {
-        let package = ObjectRef::<Package>::new(
-            "/DMO/FLIGHT".to_owned(),
-            AdtUri::parse("/sap/bc/adt/packages/%2Fdmo%2Fflight").unwrap(),
-        );
-        let (client, requests) = ready_client(DISCOVERY_XML);
+        let package = ObjectRef::<Package>::new("/DMO/FLIGHT");
+        let (client, requests) = discovered_client(DISCOVERY_XML);
         PackageTreeQuery::new(package, PackageTreeKind::Super)
             .execute(&client)
             .await
@@ -512,11 +532,8 @@ mod tests {
             "/sap/bc/adt/packages/$tree/{packagename}/{type}",
             1,
         );
-        let (client, requests) = ready_client(discovery.as_bytes());
-        let package = ObjectRef::<Package>::new(
-            "SADT_MAIN".to_owned(),
-            AdtUri::parse("/sap/bc/adt/packages/sadt_main").unwrap(),
-        );
+        let (client, requests) = discovered_client(discovery.as_bytes());
+        let package = ObjectRef::<Package>::new("SADT_MAIN");
 
         PackageTreeQuery::new(package, PackageTreeKind::Sub)
             .execute(&client)
@@ -538,11 +555,8 @@ mod tests {
             "{?packagename}",
             1,
         );
-        let (client, _) = ready_client(discovery.as_bytes());
-        let package = ObjectRef::<Package>::new(
-            "SADT_MAIN".to_owned(),
-            AdtUri::parse("/sap/bc/adt/packages/sadt_main").unwrap(),
-        );
+        let (client, _) = discovered_client(discovery.as_bytes());
+        let package = ObjectRef::<Package>::new("SADT_MAIN");
 
         let error = PackageTreeQuery::new(package, PackageTreeKind::Sub)
             .execute(&client)
@@ -551,9 +565,9 @@ mod tests {
 
         assert!(matches!(
             error,
-            OperationError::Resolve(ResolveError::Object(
+            OperationError::Encode(EncodeError::Resolve(ResolveError::Object(
                 ObjectError::UnsupportedTemplateParameter { parameter: "type" }
-            ))
+            )))
         ));
     }
 
@@ -569,7 +583,7 @@ mod tests {
             AdtUri::parse("/sap/bc/adt/packages/settings").unwrap(),
         );
 
-        let error = ensure_xml_response(&response, PACKAGE_SETTINGS_MEDIA_TYPE).unwrap_err();
+        let error = ensure_xml_response(&response, PackageSettings::MEDIA_TYPE).unwrap_err();
 
         assert!(matches!(
             error,
