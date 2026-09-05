@@ -2,21 +2,21 @@ use super::run::ObjectRun;
 use crate::{
     CategoryId, Discovery, EncodeError, EncodedOperation, Operation, OperationResponse,
     RequiresDiscovery, ResponseError, Stateless,
-    objects::{Class, ImmediateRun, ObjectRef, ObjectSnapshot, RunCapability},
+    objects::{Class, ImmediateRun, ObjectKey, ObjectRef, ObjectSnapshot, RunCapability},
 };
 
 /// The plain-text console output produced by running an ABAP class.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClassRunResult {
     /// The class that was executed.
-    pub reference: ObjectRef<Class>,
+    pub reference: ObjectKey<Class>,
 
     /// The rendered class-run output returned by SAP.
     pub content: String,
 }
 
 impl ClassRunResult {
-    pub(crate) fn new(reference: ObjectRef<Class>, content: String) -> Self {
+    pub(crate) fn new(reference: ObjectKey<Class>, content: String) -> Self {
         Self { reference, content }
     }
 }
@@ -24,7 +24,7 @@ impl ClassRunResult {
 /// Runs an ABAP class and returns its rendered console output.
 #[derive(Debug)]
 pub struct ClassRun {
-    class: ObjectRef<Class>,
+    class: ObjectKey<Class>,
     run: ObjectRun,
 }
 
@@ -36,7 +36,7 @@ impl ClassRun {
     };
     const RELATION: &str = "http://www.sap.com/adt/relations/oo/classrun";
 
-    fn new(class: ObjectRef<Class>) -> Self {
+    fn new(class: ObjectKey<Class>) -> Self {
         let run = ObjectRun::typed(&class);
         Self { class, run }
     }
@@ -72,7 +72,7 @@ impl Operation for ClassRun {
     }
 }
 
-impl ObjectRef<Class> {
+impl ObjectKey<Class> {
     /// Creates an operation that runs this class.
     pub fn run(&self) -> ClassRun {
         ClassRun::new(self.clone())
@@ -83,5 +83,12 @@ impl ObjectSnapshot<Class> {
     /// Creates an operation that runs this loaded class.
     pub fn run(&self) -> ClassRun {
         self.reference().run()
+    }
+}
+
+impl ObjectRef<Class> {
+    /// Creates a name-based run through the advertised class-run template.
+    pub fn run(&self) -> ClassRun {
+        self.key().run()
     }
 }

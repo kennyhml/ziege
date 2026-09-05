@@ -146,7 +146,7 @@ impl ToXml for DataDefinitionProperties {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AssignObjectIdentity, ObjectRef, ObjectType};
+    use crate::{AssignObjectIdentity, ObjectKey, ObjectType};
 
     const DATA_DEFINITION_XML: &str =
         include_str!("../../../tests/fixtures/data-definition-i-businesspartner.xml");
@@ -170,7 +170,7 @@ mod tests {
         assert_eq!(properties.object_type, DataDefinition::WORKBENCH_TYPE);
         assert!(properties.abap_language_version.is_none());
 
-        let reference = ObjectRef::<DataDefinition>::new("Z_DATA_DEFINITION");
+        let reference = ObjectKey::<DataDefinition>::new("Z_DATA_DEFINITION");
         properties.assign_identity(&reference);
         let body = properties.to_xml().unwrap();
         let body = std::str::from_utf8(&body).unwrap();

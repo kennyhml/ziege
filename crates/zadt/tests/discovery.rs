@@ -9,7 +9,7 @@ use zadt::{
     AccessControl, AdtRequest, AdtResponse, AnnotationDefinition, CategoryId, Class, Client,
     CoreDiscoveryQuery, DataDefinition, DataElement, DiscoveryQuery, Domain, FunctionGroup,
     FunctionGroupInclude, FunctionModule, GlobalWorkbenchType, Interface, Logon, MetadataExtension,
-    ObjectError, ObjectRef, ObjectType, Operation, OperationError, ReqwestTransport, ResponseError,
+    ObjectError, ObjectKey, ObjectType, Operation, OperationError, ReqwestTransport, ResponseError,
     ServiceDefinition, Transport, TransportError,
 };
 
@@ -133,7 +133,7 @@ async fn class_references_use_the_discovered_oo_collection() {
     Logon::default().execute(&client).await.unwrap();
     let client = client.discover().await.unwrap();
 
-    let class = ObjectRef::<Class>::new("ZCL_EXAMPLE");
+    let class = ObjectKey::<Class>::new("ZCL_EXAMPLE");
 
     assert_eq!(class.name(), "ZCL_EXAMPLE");
     assert_eq!(
@@ -204,7 +204,7 @@ async fn runtime_object_types_use_the_registered_descriptor() {
         ),
     ] {
         let parsed_type: GlobalWorkbenchType = object_type.parse().unwrap();
-        let object = ObjectRef::from_workbench_type(&parsed_type, name).unwrap();
+        let object = ObjectKey::from_workbench_type(&parsed_type, name).unwrap();
 
         assert_eq!(object.object_type().as_str(), object_type);
         assert_eq!(
@@ -235,14 +235,14 @@ async fn runtime_object_types_use_the_registered_descriptor() {
 
     let child_type: GlobalWorkbenchType = "FUGR/FF".parse().unwrap();
     assert!(matches!(
-        ObjectRef::from_workbench_type(&child_type, "ZZZZFUNC"),
+        ObjectKey::from_workbench_type(&child_type, "ZZZZFUNC"),
         Err(ObjectError::ParentObjectRequired { object_type })
             if object_type.as_str() == "FUGR/FF"
     ));
 
     let unsupported_type: GlobalWorkbenchType = "ENQU/DL".parse().unwrap();
     assert!(matches!(
-        ObjectRef::from_workbench_type(&unsupported_type, "EZABAPGIT"),
+        ObjectKey::from_workbench_type(&unsupported_type, "EZABAPGIT"),
         Err(ObjectError::UnsupportedObjectType { object_type })
             if object_type.as_str() == "ENQU/DL"
     ));
@@ -254,7 +254,7 @@ async fn function_groups_resolve_typed_and_runtime_subobjects() {
     Logon::default().execute(&client).await.unwrap();
     let client = client.discover().await.unwrap();
 
-    let group = ObjectRef::<FunctionGroup>::new("Z_TEST_GROUP");
+    let group = ObjectKey::<FunctionGroup>::new("Z_TEST_GROUP");
     let module = group.subobject::<FunctionModule>("ZZZZFUNC");
     let include = group.subobject::<FunctionGroupInclude>("LZ_TEST_GROUPTOP");
     let namespaced = group.subobject::<FunctionModule>("/DMO/FUNCTION");
@@ -262,9 +262,9 @@ async fn function_groups_resolve_typed_and_runtime_subobjects() {
     let runtime_module = runtime
         .subobject(&FunctionModule::WORKBENCH_TYPE, "ZZZZFUNC")
         .unwrap();
-    let restored_module: ObjectRef<FunctionModule> =
+    let restored_module: ObjectKey<FunctionModule> =
         serde_json::from_value(serde_json::to_value(&module).unwrap()).unwrap();
-    let detached: ObjectRef<FunctionGroup> =
+    let detached: ObjectKey<FunctionGroup> =
         serde_json::from_value(serde_json::to_value(&group).unwrap()).unwrap();
     let resolved_module = client.discovery().resolve_object(&module).unwrap();
 
@@ -272,11 +272,10 @@ async fn function_groups_resolve_typed_and_runtime_subobjects() {
         resolved_module.uri().as_str(),
         "/sap/bc/adt/functions/groups/z_test_group/fmodules/zzzzfunc"
     );
-    assert_eq!(resolved_module.reference(), &module);
-    let resolved_group = resolved_module.parent().unwrap();
-    assert_eq!(resolved_group.reference(), &group.erase());
+    assert_eq!(resolved_module.key(), &module);
+    assert_eq!(resolved_module.key().parent(), Some(&group.erase()));
     assert_eq!(
-        resolved_group.uri().as_str(),
+        resolved_module.parent_uri().unwrap().as_str(),
         "/sap/bc/adt/functions/groups/z_test_group"
     );
     assert_eq!(
@@ -313,7 +312,7 @@ async fn function_group_subobjects_require_the_advertised_template() {
     let client = Client::new(FixtureTransport::new(FUNCTIONS_WITHOUT_SUBOBJECT_TEMPLATES));
     Logon::default().execute(&client).await.unwrap();
     let client = client.discover().await.unwrap();
-    let group = ObjectRef::<FunctionGroup>::new("Z_TEST_GROUP");
+    let group = ObjectKey::<FunctionGroup>::new("Z_TEST_GROUP");
 
     let module = group.subobject::<FunctionModule>("ZZZZFUNC");
     let error = client.discovery().resolve_object_uri(&module).unwrap_err();
@@ -347,7 +346,7 @@ async fn function_group_subobjects_require_the_supported_template_shape() {
     let client = Client::new(FixtureTransport::new(unsupported));
     Logon::default().execute(&client).await.unwrap();
     let client = client.discover().await.unwrap();
-    let group = ObjectRef::<FunctionGroup>::new("Z_TEST_GROUP");
+    let group = ObjectKey::<FunctionGroup>::new("Z_TEST_GROUP");
 
     let module = group.subobject::<FunctionModule>("ZZZZFUNC");
     assert!(matches!(
@@ -366,7 +365,7 @@ async fn function_group_subobjects_require_the_supported_template_shape() {
     Logon::default().execute(&client).await.unwrap();
     let client = client.discover().await.unwrap();
 
-    let group = ObjectRef::<FunctionGroup>::new("Z_TEST_GROUP");
+    let group = ObjectKey::<FunctionGroup>::new("Z_TEST_GROUP");
     let module = group.subobject::<FunctionModule>("ZZZZFUNC");
     assert!(matches!(
         client.discovery().resolve_object_uri(&module),

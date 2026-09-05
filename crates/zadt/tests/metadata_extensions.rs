@@ -4,7 +4,7 @@ use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
     Client, Discovery, EntityTag, Logon, MediaTyped, MetadataExtension,
-    MetadataExtensionCreateProperties, MetadataExtensionProperties, ObjectRef, Operation,
+    MetadataExtensionCreateProperties, MetadataExtensionProperties, ObjectKey, Operation,
     ReqwestTransport, WorkbenchVersion,
 };
 
@@ -95,7 +95,7 @@ async fn metadata_extension_properties_advertise_the_primary_source() {
         .await;
 
     let client = discovered_client(&server).await;
-    let reference = ObjectRef::<MetadataExtension>::new("C_MDOAPPLICATIONSCOPE");
+    let reference = ObjectKey::<MetadataExtension>::new("C_MDOAPPLICATIONSCOPE");
     let object = reference
         .query()
         .workbench_version(WorkbenchVersion::Active)
@@ -162,7 +162,7 @@ async fn metadata_extension_creation_posts_only_the_sparse_properties_payload() 
         .await;
 
     let client = discovered_client(&server).await;
-    let reference = ObjectRef::<MetadataExtension>::new("Z_METADATA_EXTENSION");
+    let reference = ObjectKey::<MetadataExtension>::new("Z_METADATA_EXTENSION");
     let properties = MetadataExtensionCreateProperties::builder()
         .description("Created Metadata Extension")
         .package("$TMP")

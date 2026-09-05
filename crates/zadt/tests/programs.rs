@@ -4,7 +4,7 @@ use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
     AccessMode, Client, ConditionalResult, Discovery, EntityTag, Include, IncludeProperties, Logon,
-    MediaTyped, ObjectRef, Operation, Program, ProgramProperties, ReqwestTransport,
+    MediaTyped, ObjectKey, Operation, Program, ProgramProperties, ReqwestTransport,
     WorkbenchVersion,
 };
 
@@ -90,7 +90,7 @@ async fn program_run_uses_the_advertised_profiled_template() {
         .unwrap();
 
     let client = discovered_client(transport).await;
-    let program = ObjectRef::<Program>::new("z_test");
+    let program = ObjectKey::<Program>::new("z_test");
     let output = program
         .run()
         .profiler_id("TRACE ID")
@@ -153,7 +153,7 @@ async fn include_properties_query_converts_the_live_ztest_properties() {
         .unwrap();
 
     let client = discovered_client(transport).await;
-    let reference = ObjectRef::<Include>::new("ZTEST");
+    let reference = ObjectKey::<Include>::new("ZTEST");
     let response = reference
         .query()
         .workbench_version(WorkbenchVersion::Active)
@@ -235,7 +235,7 @@ async fn program_properties_query_converts_the_live_z_test_v3_properties() {
         .unwrap();
 
     let client = discovered_client(transport).await;
-    let reference = ObjectRef::<Program>::new("Z_TEST");
+    let reference = ObjectKey::<Program>::new("Z_TEST");
     let response = reference.query().execute(&client).await.unwrap();
     assert_eq!(response.media_type(), ProgramProperties::MEDIA_TYPES[0]);
     let program = response.properties();
@@ -341,7 +341,7 @@ async fn program_properties_query_accepts_server_selected_v2() {
         .unwrap();
 
     let client = discovered_client(transport).await;
-    let response = ObjectRef::<Program>::new("Z_TEST")
+    let response = ObjectKey::<Program>::new("Z_TEST")
         .query()
         .workbench_version(WorkbenchVersion::WorkingArea)
         .execute(&client)
@@ -388,7 +388,7 @@ async fn program_properties_query_returns_not_modified_for_a_current_etag() {
         .unwrap();
 
     let client = discovered_client(transport).await;
-    let response = ObjectRef::<Program>::new("Z_TEST")
+    let response = ObjectKey::<Program>::new("Z_TEST")
         .query()
         .workbench_version(WorkbenchVersion::Inactive)
         .if_none_match(EntityTag::from_static("202607251959580008"))
@@ -536,7 +536,7 @@ async fn program_lock_and_update_share_one_user_session() {
         .unwrap();
 
     let client = discovered_client(transport).await;
-    let program = ObjectRef::<Program>::new("Z_ZIEGE_TEST")
+    let program = ObjectKey::<Program>::new("Z_ZIEGE_TEST")
         .query()
         .execute(&client)
         .await

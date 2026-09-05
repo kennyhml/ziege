@@ -1069,6 +1069,49 @@ content-type:application/xml\r\n\r\n\
     }
 
     #[tokio::test]
+    async fn batched_locks_retain_each_inner_request_uri_for_unlock() {
+        let xml = include_str!("../../tests/fixtures/object-lock.xml");
+        let (client, requests) = fixture_client(vec![
+            fixture_response(&[(xml, StatusCode::OK), (xml, StatusCode::OK)]),
+            fixture_response(&[("", StatusCode::OK), ("", StatusCode::OK)]),
+        ]);
+        let key = crate::ObjectKey::<crate::Program>::new("ZTEST");
+        let logical_uri = client.discovery().resolve_object_uri(&key).unwrap();
+        let located =
+            crate::ObjectRef::new(key.clone(), AdtUri::parse("advertised/program").unwrap());
+        let session = client.create_user_session();
+        let mut batch = session.batch();
+        let first = batch.push(key.lock(crate::AccessMode::Modify)).unwrap();
+        let second = batch.push(located.lock(crate::AccessMode::Modify)).unwrap();
+        let mut responses = batch.execute().await.unwrap();
+        let first = responses.take(first).unwrap();
+        let second = responses.take(second).unwrap();
+        assert_eq!(first.object().key(), second.object().key());
+        assert_eq!(first.object().uri(), &logical_uri);
+        assert_eq!(second.object().uri(), located.uri());
+        assert_eq!(first.user_session(), Some(session.id()));
+        assert_eq!(second.user_session(), Some(session.id()));
+        assert!(matches!(
+            located.unlock(first.clone()),
+            Err(crate::ObjectError::ObjectLockMismatch { .. })
+        ));
+
+        let mut unlocks = session.batch();
+        let first = unlocks.push(key.unlock(first).unwrap()).unwrap();
+        let second = unlocks.push(located.unlock(second).unwrap()).unwrap();
+        let mut responses = unlocks.execute().await.unwrap();
+        responses.take(first).unwrap();
+        responses.take(second).unwrap();
+        let requests = requests.lock().unwrap();
+        let body = String::from_utf8_lossy(requests[1].body());
+        for uri in [&logical_uri, located.uri()] {
+            assert!(body.contains(&format!(
+                "POST {uri}?_action=UNLOCK&lockHandle=LOCK-HANDLE-1 HTTP/1.1"
+            )));
+        }
+    }
+
+    #[tokio::test]
     async fn executes_homogeneous_operations_through_a_user_session() {
         let (client, requests) = fixture_client(vec![fixture_response(&[
             ("first", StatusCode::OK),

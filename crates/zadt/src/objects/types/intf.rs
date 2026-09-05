@@ -153,7 +153,7 @@ impl Source for Interface {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AssignObjectIdentity, ObjectRef, ObjectType};
+    use crate::{AssignObjectIdentity, ObjectKey, ObjectType};
 
     const INTERFACE_XML: &str =
         include_str!("../../../tests/fixtures/interface-if-adt-uri-mapper-v5.xml");
@@ -177,7 +177,7 @@ mod tests {
         assert_eq!(properties.object_type, Interface::WORKBENCH_TYPE);
         assert!(properties.abap_language_version.is_none());
 
-        let reference = ObjectRef::<Interface>::new("ZIF_EXAMPLE");
+        let reference = ObjectKey::<Interface>::new("ZIF_EXAMPLE");
         properties.assign_identity(&reference);
         let body = properties.to_xml().unwrap();
         let body = std::str::from_utf8(&body).unwrap();

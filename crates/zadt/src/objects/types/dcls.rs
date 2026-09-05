@@ -130,7 +130,7 @@ impl ToXml for AccessControlProperties {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AssignObjectIdentity, ObjectRef, ObjectType};
+    use crate::{AssignObjectIdentity, ObjectKey, ObjectType};
 
     const ACCESS_CONTROL_XML: &str =
         include_str!("../../../tests/fixtures/access-control-sdsh-cds-domain-val-dcl.xml");
@@ -154,7 +154,7 @@ mod tests {
         assert_eq!(properties.object_type, AccessControl::WORKBENCH_TYPE);
         assert!(properties.abap_language_version.is_none());
 
-        let reference = ObjectRef::<AccessControl>::new("Z_ACCESS_CONTROL");
+        let reference = ObjectKey::<AccessControl>::new("Z_ACCESS_CONTROL");
         properties.assign_identity(&reference);
         let body = properties.to_xml().unwrap();
         let body = std::str::from_utf8(&body).unwrap();

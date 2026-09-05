@@ -1,7 +1,7 @@
 #![cfg(feature = "reqwest")]
 
 use httpmock::{Mock, prelude::*};
-use zadt::{Class, Client, Discovery, ObjectRef, Operation, ReqwestTransport};
+use zadt::{Class, Client, Discovery, ObjectKey, Operation, ReqwestTransport};
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
 const CORE_DISCOVERY_XML: &str = include_str!("fixtures/core-discovery.xml");
@@ -76,7 +76,7 @@ async fn deletion_check_uses_the_discovered_contract() {
         .await;
 
     let client = discovered_client(&server).await;
-    let reference = ObjectRef::<Class>::new("ZMYCLASS");
+    let reference = ObjectKey::<Class>::new("ZMYCLASS");
     let result = reference.deletion_check().execute(&client).await.unwrap();
 
     assert_eq!(result.objects.len(), 1);
@@ -109,7 +109,7 @@ async fn deletion_records_each_object_in_its_transport() {
         .await;
 
     let client = discovered_client(&server).await;
-    let reference = ObjectRef::<Class>::new("ZMYCLASS");
+    let reference = ObjectKey::<Class>::new("ZMYCLASS");
     let result = reference
         .deletion_with_transport("A4HK900148")
         .execute(&client)

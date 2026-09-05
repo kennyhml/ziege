@@ -6,7 +6,9 @@ use stduritemplate::Value;
 use crate::{
     Discovery, EncodeError, EncodedOperation, RequiresDiscovery, ResolveError,
     error::{ObjectError, ResponseError},
-    objects::{GlobalWorkbenchType, ImmediateRun, ObjectRef, ObjectSnapshot, RunCapability},
+    objects::{
+        GlobalWorkbenchType, ImmediateRun, ObjectKey, ObjectRef, ObjectSnapshot, RunCapability,
+    },
     operation::{Operation, OperationResponse, Stateless},
     protocol::TEXT_PLAIN_MEDIA_TYPE,
     resource::AdtUriTemplate,
@@ -16,7 +18,7 @@ use crate::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ObjectRunResult {
     /// The type-erased object that was executed.
-    pub reference: ObjectRef,
+    pub reference: ObjectKey,
 
     /// The exact Workbench type of the executed object.
     pub object_type: GlobalWorkbenchType,
@@ -27,7 +29,7 @@ pub struct ObjectRunResult {
 
 impl ObjectRunResult {
     pub(crate) fn new(
-        reference: ObjectRef,
+        reference: ObjectKey,
         object_type: GlobalWorkbenchType,
         content: String,
     ) -> Self {
@@ -42,7 +44,7 @@ impl ObjectRunResult {
 /// Runs a type-erased repository object through its descriptor capability.
 #[derive(Debug)]
 pub struct ObjectRun {
-    reference: ObjectRef,
+    reference: ObjectKey,
     run: RunCapability,
     profiler_id: Option<String>,
 }
@@ -50,7 +52,7 @@ pub struct ObjectRun {
 impl ObjectRun {
     pub(super) const PROFILER_ID_QUERY: &str = "profilerId";
 
-    pub(crate) fn new(reference: ObjectRef, run: RunCapability) -> Self {
+    pub(crate) fn new(reference: ObjectKey, run: RunCapability) -> Self {
         Self {
             reference,
             run,
@@ -58,7 +60,7 @@ impl ObjectRun {
         }
     }
 
-    pub(crate) fn typed<T: ImmediateRun>(reference: &ObjectRef<T>) -> Self {
+    pub(crate) fn typed<T: ImmediateRun>(reference: &ObjectKey<T>) -> Self {
         Self::new(reference.erase(), T::RUN)
     }
 
@@ -126,7 +128,7 @@ impl Operation for ObjectRun {
     }
 }
 
-impl ObjectRef<()> {
+impl ObjectKey<()> {
     /// Creates an immediate run operation when this object family supports it.
     pub fn run(&self) -> Result<ObjectRun, ObjectError> {
         let run = self
@@ -147,6 +149,13 @@ impl ObjectSnapshot<()> {
     }
 }
 
+impl ObjectRef<()> {
+    /// Creates a name-based run when this object family supports it.
+    pub fn run(&self) -> Result<ObjectRun, ObjectError> {
+        self.key().run()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
@@ -155,7 +164,7 @@ mod tests {
     use async_trait::async_trait;
     use http::{HeaderMap, HeaderValue, StatusCode, header};
 
-    use crate::{AdtRequest, AdtResponse, Class, Client, Discovery, ObjectRef, Program, Transport};
+    use crate::{AdtRequest, AdtResponse, Class, Client, Discovery, ObjectKey, Program, Transport};
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
 
@@ -180,8 +189,8 @@ mod tests {
         }
     }
 
-    fn program() -> ObjectRef<Program> {
-        ObjectRef::<Program>::new("ZPROGRAM")
+    fn program() -> ObjectKey<Program> {
+        ObjectKey::<Program>::new("ZPROGRAM")
     }
 
     fn discovered_client() -> (Client<Discovery>, Arc<Mutex<Vec<AdtRequest>>>) {
@@ -194,6 +203,39 @@ mod tests {
             crate::api::discovery::parse_capabilities(DISCOVERY_XML).unwrap(),
         );
         (client, requests)
+    }
+
+    #[test]
+    fn located_runs_use_name_templates_instead_of_object_uris() {
+        let (client, _) = discovered_client();
+        let uri = crate::AdtUri::parse("/sap/bc/adt/custom/runnable/42").unwrap();
+        let program = ObjectRef::new(program(), uri.clone());
+        let class = ObjectRef::new(ObjectKey::<Class>::new("ZCL_EXAMPLE"), uri);
+        for (typed, erased, expected) in [
+            (
+                program.run().encode(client.discovery()).unwrap(),
+                program
+                    .erase()
+                    .run()
+                    .unwrap()
+                    .encode(client.discovery())
+                    .unwrap(),
+                "/sap/bc/adt/programs/programrun/zprogram",
+            ),
+            (
+                class.run().encode(client.discovery()).unwrap(),
+                class
+                    .erase()
+                    .run()
+                    .unwrap()
+                    .encode(client.discovery())
+                    .unwrap(),
+                "/sap/bc/adt/oo/classrun/zcl_example",
+            ),
+        ] {
+            assert_eq!(typed.target().as_str(), expected);
+            assert_eq!(erased.target(), typed.target());
+        }
     }
 
     #[tokio::test]
@@ -218,7 +260,7 @@ mod tests {
         assert_eq!(program_output.object_type.as_str(), "PROG/P");
         assert_eq!(program_output.content, "program output");
 
-        let class = ObjectRef::<Class>::new("ZCL_EXAMPLE");
+        let class = ObjectKey::<Class>::new("ZCL_EXAMPLE");
         class
             .erase()
             .run()

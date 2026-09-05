@@ -4,7 +4,7 @@ use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
     Client, DataDefinition, DataDefinitionCreateProperties, DataDefinitionProperties, Discovery,
-    EntityTag, Logon, MediaTyped, ObjectRef, Operation, ReqwestTransport, WorkbenchVersion,
+    EntityTag, Logon, MediaTyped, ObjectKey, Operation, ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -93,7 +93,7 @@ async fn data_definition_properties_advertise_the_primary_source() {
         .await;
 
     let client = discovered_client(&server).await;
-    let reference = ObjectRef::<DataDefinition>::new("I_BUSINESSPARTNER");
+    let reference = ObjectKey::<DataDefinition>::new("I_BUSINESSPARTNER");
     let object = reference
         .query()
         .workbench_version(WorkbenchVersion::Active)
@@ -158,7 +158,7 @@ async fn data_definition_creation_posts_only_the_sparse_properties_payload() {
         .await;
 
     let client = discovered_client(&server).await;
-    let reference = ObjectRef::<DataDefinition>::new("Z_DATA_DEFINITION");
+    let reference = ObjectKey::<DataDefinition>::new("Z_DATA_DEFINITION");
     let properties = DataDefinitionCreateProperties::builder()
         .description("Created Data Definition")
         .package("$TMP")

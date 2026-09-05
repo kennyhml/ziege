@@ -4,7 +4,7 @@ use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
     AccessMode, Client, DataElement, DataElementProperties, Discovery, Logon, MediaTyped,
-    ObjectRef, Operation, ReqwestTransport, WorkbenchVersion,
+    ObjectKey, Operation, ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -83,7 +83,7 @@ async fn data_element_properties_use_one_read_write_representation() {
         .await;
 
     let client = discovered_client(&server).await;
-    let reference = ObjectRef::<DataElement>::new("ZTFRWTFRT");
+    let reference = ObjectKey::<DataElement>::new("ZTFRWTFRT");
     let response = reference
         .query()
         .workbench_version(WorkbenchVersion::WorkingArea)
@@ -201,10 +201,10 @@ async fn erased_data_element_update_uses_the_json_consumer_boundary() {
         .await;
 
     let client = discovered_client(&server).await;
-    let reference = ObjectRef::<DataElement>::new("ZTFRWTFRT");
+    let reference = ObjectKey::<DataElement>::new("ZTFRWTFRT");
     let object = reference.erase();
     let properties = object.query().execute(&client).await.unwrap();
-    assert_eq!(&properties.reference().erase(), &object);
+    assert_eq!(properties.reference().key(), &object);
     let mut edited_properties = properties.properties().unwrap();
     edited_properties["@adtcore:description"] = "Updated description".into();
     let session = client.create_user_session();

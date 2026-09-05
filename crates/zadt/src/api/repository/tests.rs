@@ -3,8 +3,8 @@ use http::{HeaderMap, Method, StatusCode, header};
 
 use super::{content::RepositoryContentRequest, *};
 use crate::{
-    AccessMode, AdtRequest, AdtResponse, AdtUri, Class, Client, CompatibilityError, DataElement,
-    Discovery, EncodeError, Include, ObjectError, ObjectRef, ObjectType, Operation, OperationError,
+    AdtRequest, AdtResponse, AdtUri, Class, Client, CompatibilityError, DataElement, Discovery,
+    EncodeError, Include, ObjectError, ObjectKey, ObjectRef, ObjectType, Operation, OperationError,
     OperationResponse, Package, Program, RepositoryError, ResolveError, Transport, TransportError,
 };
 
@@ -193,7 +193,7 @@ fn favorite_objects_response_decodes_objects() {
 #[test]
 fn favorite_objects_update_serializes_transactions() {
     let client = repository_client();
-    let object = ObjectRef::<Program>::new("Z_TEST").erase();
+    let object = ObjectKey::<Program>::new("Z_TEST").erase();
     let mut update = FavoriteObjectsUpdate::new("TEAM");
     update.add(&object).remove(&object);
 
@@ -220,9 +220,83 @@ fn favorite_objects_update_serializes_transactions() {
 }
 
 #[test]
+fn located_parentless_ris_children_preserve_their_uri_in_secondary_operations() {
+    let client = repository_client();
+    let base = AdtUri::parse("/sap/bc/adt/repository/contents").unwrap();
+    let uri = "/sap/bc/adt/custom/children/42";
+    let xml = std::str::from_utf8(CONTENT_XML)
+        .unwrap()
+        .replace("type=\"CLAS/OC\"", "type=\"FUGR/FF\"")
+        .replace("/sap/bc/adt/oo/classes/zcl_demo", uri);
+    let content = RepositoryContent::parse(xml.as_bytes(), &base).unwrap();
+    let entry = &content.objects[0];
+    let object = entry.object();
+    let typed = ObjectRef::<crate::FunctionModule>::try_from(entry).unwrap();
+    assert_eq!(object.uri().as_str(), uri);
+    assert_eq!(entry.uri(), object.uri());
+    assert_eq!(typed.uri(), object.uri());
+    assert!(typed.key().parent().is_none());
+    assert!(object.key().parent().is_none());
+    assert!(object.parent_uri().is_none());
+    assert_eq!(typed.erase(), object);
+
+    for request in [
+        RepositoryObjectPropertiesQuery::from_ref(&typed)
+            .encode(client.discovery())
+            .unwrap(),
+        RepositoryObjectPropertiesQuery::from_ref(&object)
+            .encode(client.discovery())
+            .unwrap(),
+        entry.properties().encode(client.discovery()).unwrap(),
+        typed
+            .transport_requests()
+            .encode(client.discovery())
+            .unwrap(),
+        object
+            .transport_requests()
+            .encode(client.discovery())
+            .unwrap(),
+    ] {
+        assert_eq!(request.query(), [("uri".to_owned(), uri.to_owned())]);
+    }
+    let mut update = FavoriteObjectsUpdate::new("TEAM");
+    update
+        .add_ref(&typed)
+        .remove_ref(&typed)
+        .add_ref(&object)
+        .remove_ref(&object);
+    let request = update.encode(client.discovery()).unwrap();
+    let body = std::str::from_utf8(request.body()).unwrap();
+    assert_eq!(body.matches(&format!("adtcore:uri=\"{uri}\"")).count(), 4);
+    assert!(body.contains("operation=\"A\""));
+    assert!(body.contains("operation=\"R\""));
+}
+
+#[test]
+fn ris_property_summary_preserves_the_advertised_object_location() {
+    let base = AdtUri::parse("/sap/bc/adt/repository/objectproperties").unwrap();
+    let uri = "/sap/bc/adt/custom/objects/42";
+    let xml = std::str::from_utf8(OBJECT_PROPERTIES_XML)
+        .unwrap()
+        .replace("/sap/bc/adt/oo/classes/cl_adt_uri_mapper", uri);
+    let properties = RepositoryObjectProperties::parse(xml.as_bytes(), &base).unwrap();
+    assert_eq!(properties.object.reference.uri().as_str(), uri);
+    assert_eq!(
+        properties
+            .object
+            .reference
+            .typed::<Class>()
+            .unwrap()
+            .uri()
+            .as_str(),
+        uri
+    );
+}
+
+#[test]
 fn object_properties_request_repeats_included_facets() {
     let client = repository_client();
-    let object = ObjectRef::<Program>::new("Z_TEST");
+    let object = ObjectKey::<Program>::new("Z_TEST");
     assert_eq!(
         client
             .discovery()
@@ -306,7 +380,7 @@ fn object_properties_use_the_native_adt_identity_relation() {
 #[test]
 fn assigned_transports_request_and_response_match_the_ris_contract() {
     let client = repository_client();
-    let object = ObjectRef::<Program>::new("Z_TEST");
+    let object = ObjectKey::<Program>::new("Z_TEST");
     let query = object.transport_requests();
     let request = query.encode(client.discovery()).unwrap();
 
@@ -527,7 +601,7 @@ fn runtime_repository_objects_preserve_the_ris_identity() {
 
     assert_eq!(object, entry.reference);
     assert_eq!(object.typed::<Class>().unwrap().name(), entry.name);
-    assert_eq!(object.lock(AccessMode::Modify).object, entry.reference);
+    assert_eq!(object.uri(), entry.uri());
 }
 
 #[test]
@@ -693,7 +767,7 @@ fn returns_the_complete_package_hierarchy_in_response_order() {
     let hierarchy = properties.package_hierarchy();
 
     assert_eq!(
-        hierarchy.iter().map(ObjectRef::name).collect::<Vec<_>>(),
+        hierarchy.iter().map(ObjectKey::name).collect::<Vec<_>>(),
         ["BASIS", "SRIS", "SRIS_ADT"]
     );
     assert_eq!(

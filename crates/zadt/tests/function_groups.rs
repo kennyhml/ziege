@@ -5,7 +5,7 @@ use httpmock::prelude::*;
 use zadt::{
     Client, Discovery, FunctionGroup, FunctionGroupInclude, FunctionGroupIncludeProperties,
     FunctionGroupProperties, FunctionModule, FunctionModuleProperties, Logon, MediaTyped,
-    ObjectRef, Operation, ReqwestTransport,
+    ObjectKey, ObjectRef, Operation, ReqwestTransport,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -127,7 +127,7 @@ async fn function_group_family_uses_discovered_subobject_targets() {
         .await;
 
     let client = discovered_client(&server).await;
-    let group_reference = ObjectRef::<FunctionGroup>::new("Z_TEST_GROUP");
+    let group_reference = ObjectKey::<FunctionGroup>::new("Z_TEST_GROUP");
     let module_reference = group_reference.subobject::<FunctionModule>("ZZZZFUNC");
     let include_reference = group_reference.subobject::<FunctionGroupInclude>("LZ_TEST_GROUPTOP");
     let group = group_reference.query().execute(&client).await.unwrap();
@@ -166,4 +166,48 @@ async fn function_group_family_uses_discovered_subobject_targets() {
     module_properties.assert_async().await;
     include_properties.assert_async().await;
     module_source.assert_async().await;
+}
+
+#[tokio::test]
+async fn repository_child_queries_retain_the_advertised_uri_without_a_parent_key() {
+    let server = MockServer::start_async().await;
+    let _logon = mock_logon(&server).await;
+    let _discovery = mock_discovery(&server).await;
+    let _core_discovery = mock_core_discovery(&server).await;
+    let uri = "/sap/bc/adt/custom/functions/zzzzfunc";
+    let module_properties = server
+        .mock_async(|when, then| {
+            when.method(GET).path(uri);
+            then.status(200)
+                .header("content-type", FunctionModuleProperties::MEDIA_TYPES[0])
+                .body(MODULE_XML);
+        })
+        .await;
+    let client = discovered_client(&server).await;
+    let body = format!(
+        r#"<vfs:virtualFoldersResult xmlns:vfs="http://www.sap.com/adt/ris/virtualFolders" objectCount="1">
+            <vfs:object name="ZZZZFUNC" package="$TMP" type="FUGR/FF"
+                uri="{uri}" expandable="false" />
+        </vfs:virtualFoldersResult>"#
+    );
+    let content = zadt::RepositoryContentQuery::new()
+        .decode(zadt::OperationResponse::new(
+            zadt::AdtResponse::new(
+                http::StatusCode::OK,
+                http::HeaderMap::new(),
+                body.into_bytes(),
+            ),
+            zadt::AdtUri::parse("/sap/bc/adt/repository/informationsystem/virtualfolders/contents")
+                .unwrap(),
+        ))
+        .unwrap();
+    let reference = ObjectRef::<FunctionModule>::try_from(&content.objects[0]).unwrap();
+    assert_eq!(reference.uri().as_str(), uri);
+    assert!(reference.key().parent().is_none());
+    assert!(reference.parent_uri().is_none());
+
+    let snapshot = reference.query().execute(&client).await.unwrap();
+    assert_eq!(snapshot.reference(), &reference);
+    assert_eq!(snapshot.uri(), reference.uri());
+    module_properties.assert_async().await;
 }

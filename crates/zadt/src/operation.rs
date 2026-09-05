@@ -612,4 +612,45 @@ mod tests {
         ));
         assert_eq!(requests.lock().unwrap().len(), 1);
     }
+
+    #[tokio::test]
+    async fn executed_lock_retains_the_located_uri_and_user_session() {
+        let requests = Arc::new(StdMutex::new(Vec::new()));
+        let transport = ContextFixtureTransport {
+            requests: Arc::clone(&requests),
+            responses: StdMutex::new(VecDeque::from([
+                AdtResponse::new(
+                    StatusCode::OK,
+                    HeaderMap::new(),
+                    include_bytes!("../tests/fixtures/object-lock.xml").to_vec(),
+                ),
+                AdtResponse::new(StatusCode::OK, HeaderMap::new(), Vec::new()),
+            ])),
+        };
+        let empty = br#"<app:service xmlns:app="http://www.w3.org/2007/app" />"#;
+        let session = Client::new(transport)
+            .with_capabilities(
+                crate::api::discovery::parse_capabilities(empty).unwrap(),
+                crate::api::discovery::parse_capabilities(empty).unwrap(),
+            )
+            .create_user_session();
+        let reference = crate::ObjectRef::new(
+            crate::ObjectKey::<crate::Program>::new("ZTEST"),
+            AdtUri::parse("advertised/program").unwrap(),
+        );
+        let lock = reference
+            .lock(crate::AccessMode::Modify)
+            .execute(&session)
+            .await
+            .unwrap();
+        assert_eq!(lock.object(), &reference.erase());
+        assert_eq!(lock.user_session(), Some(session.id()));
+        reference
+            .unlock(lock)
+            .unwrap()
+            .execute(&session)
+            .await
+            .unwrap();
+        assert_eq!(requests.lock().unwrap().len(), 2);
+    }
 }

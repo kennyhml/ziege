@@ -1,5 +1,5 @@
 use super::super::{
-    AbapLanguageVersion, AdvertisedObjectReference, GlobalWorkbenchType, MediaTyped, ObjectRef,
+    AbapLanguageVersion, AdvertisedObjectReference, GlobalWorkbenchType, MediaTyped, ObjectKey,
     ObjectType, Source, SourceComponents, ToXml, WorkbenchVersion,
 };
 use crate::{MediaTypes, resource::AdvertisedLink};
@@ -538,7 +538,7 @@ impl AsRef<str> for ClassSourceComponent {
     }
 }
 
-impl ObjectRef<Class> {
+impl ObjectKey<Class> {
     #[cfg(test)]
     pub(crate) fn for_test(name: &str) -> Self {
         Self::new(name)
@@ -547,7 +547,7 @@ impl ObjectRef<Class> {
 
 #[cfg(test)]
 mod tests {
-    use super::ObjectRef;
+    use super::ObjectKey;
     use super::*;
     use crate::ObjectType;
 
@@ -757,7 +757,7 @@ mod tests {
     #[test]
     fn serializes_class_properties_as_a_complete_update_payload() {
         let class = parse(CLASS_XML).unwrap();
-        let reference = ObjectRef::<Class>::for_test(&class.name).erase();
+        let reference = ObjectKey::<Class>::for_test(&class.name).erase();
         let properties = Class::DESCRIPTOR
             .properties_from_json(&reference, serde_json::to_value(&class).unwrap())
             .unwrap();

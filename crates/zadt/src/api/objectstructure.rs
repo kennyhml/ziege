@@ -314,14 +314,19 @@ mod tests {
     use super::*;
     use http::{HeaderMap, HeaderValue, StatusCode, header};
 
-    use crate::{AdtResponse, Class, ClassProperties, ObjectRef, Program, ProgramProperties};
+    use crate::{
+        AdtResponse, Class, ClassProperties, ObjectKey, ObjectRef, Program, ProgramProperties,
+    };
 
     const STRUCTURE_XML: &[u8] = include_bytes!("../../tests/fixtures/object-structure-class.xml");
     const CLASS_XML: &[u8] = include_bytes!("../../tests/fixtures/class-cl-adt-uri-mapper-v4.xml");
     const PROGRAM_XML: &[u8] = include_bytes!("../../tests/fixtures/program-z-test.xml");
 
     fn structure_reference() -> ObjectStructureRef {
-        let object = ObjectRef::<Class>::new("ZMYNEWCLASSV7");
+        let object = ObjectRef::new(
+            ObjectKey::<Class>::new("ZMYNEWCLASSV7"),
+            AdtUri::parse("/sap/bc/adt/oo/classes/zmynewclassv7").unwrap(),
+        );
         ObjectStructureRef::new(
             object.erase(),
             AdtUri::parse("/sap/bc/adt/oo/classes/zmynewclassv7/objectstructure").unwrap(),
@@ -330,11 +335,13 @@ mod tests {
 
     #[test]
     fn loaded_classes_resolve_the_advertised_structure_relation() {
-        let reference = ObjectRef::<Class>::new("CL_ADT_URI_MAPPER");
+        let reference = ObjectKey::<Class>::new("CL_ADT_URI_MAPPER");
         let properties: ClassProperties = serde_xml_rs::from_reader(CLASS_XML).unwrap();
         let object = ObjectSnapshot::new(
-            reference,
-            AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
+            ObjectRef::new(
+                reference,
+                AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
+            ),
             WorkbenchVersion::Active,
             "application/vnd.sap.adt.oo.classes.v4+xml",
             None,
@@ -343,6 +350,7 @@ mod tests {
 
         let query = object.object_structure().unwrap();
 
+        assert_eq!(query.resource.object, object.reference().erase());
         assert_eq!(
             query.resource.uri.as_str(),
             "/sap/bc/adt/oo/classes/cl_adt_uri_mapper/objectstructure"
@@ -358,11 +366,13 @@ mod tests {
 
     #[test]
     fn loaded_programs_resolve_the_advertised_structure_relation() {
-        let reference = ObjectRef::<Program>::new("Z_TEST");
+        let reference = ObjectKey::<Program>::new("Z_TEST");
         let properties: ProgramProperties = serde_xml_rs::from_reader(PROGRAM_XML).unwrap();
         let object = ObjectSnapshot::new(
-            reference,
-            AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
+            ObjectRef::new(
+                reference,
+                AdtUri::parse("/sap/bc/adt/programs/programs/z_test").unwrap(),
+            ),
             WorkbenchVersion::Inactive,
             "application/vnd.sap.adt.programs.programs.v3+xml",
             None,
@@ -374,6 +384,34 @@ mod tests {
         assert_eq!(
             query.resource.uri.as_str(),
             "/sap/bc/adt/programs/programs/z_test/objectstructure"
+        );
+    }
+
+    #[test]
+    fn structure_helpers_preserve_the_located_owner_and_parent_metadata() {
+        let reference = ObjectRef::new(
+            ObjectKey::<Class>::new("CL_ADT_URI_MAPPER"),
+            AdtUri::parse("advertised/class").unwrap(),
+        )
+        .with_parent_uri(AdtUri::parse("advertised/parent").unwrap());
+        let properties: ClassProperties = serde_xml_rs::from_reader(CLASS_XML).unwrap();
+        let object = ObjectSnapshot::new(
+            reference.clone(),
+            WorkbenchVersion::Active,
+            "application/vnd.sap.adt.oo.classes.v4+xml",
+            None,
+            properties,
+        );
+        let query = object.object_structure().unwrap();
+        assert_eq!(query.resource.object, reference.erase());
+        assert_eq!(query.resource.object.parent_uri(), reference.parent_uri());
+        assert_eq!(
+            query.resource.uri.as_str(),
+            "/sap/bc/adt/advertised/class/objectstructure"
+        );
+        assert_eq!(
+            object.into_erased().object_structure().unwrap().resource,
+            query.resource
         );
     }
 

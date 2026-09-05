@@ -4,7 +4,7 @@ use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
     Client, Discovery, EntityTag, Interface, InterfaceCreateProperties, InterfaceProperties, Logon,
-    MediaTyped, ObjectRef, Operation, ReqwestTransport, WorkbenchVersion,
+    MediaTyped, ObjectKey, Operation, ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -97,7 +97,7 @@ async fn interface_properties_advertise_source_and_structure() {
         .await;
 
     let client = discovered_client(&server).await;
-    let reference = ObjectRef::<Interface>::new("IF_ADT_URI_MAPPER");
+    let reference = ObjectKey::<Interface>::new("IF_ADT_URI_MAPPER");
     let object = reference
         .query()
         .workbench_version(WorkbenchVersion::Active)
@@ -160,7 +160,7 @@ async fn interface_creation_posts_only_the_sparse_properties_payload() {
         .await;
 
     let client = discovered_client(&server).await;
-    let reference = ObjectRef::<Interface>::new("ZIF_EXAMPLE");
+    let reference = ObjectKey::<Interface>::new("ZIF_EXAMPLE");
     let properties = InterfaceCreateProperties::builder()
         .description("Created Interface")
         .package("$TMP")

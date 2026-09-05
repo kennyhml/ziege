@@ -4,7 +4,7 @@ use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
     Class, ClassProperties, Client, ConditionalResult, Discovery, EntityTag, Logon, MediaTyped,
-    ObjectRef, ObjectSnapshot, Operation, ReqwestTransport, WorkbenchVersion,
+    ObjectKey, ObjectSnapshot, Operation, ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -57,7 +57,7 @@ async fn class_run_uses_the_advertised_plain_text_contract() {
         .await;
 
     let client = discovered_client(transport(&server)).await;
-    let class = ObjectRef::<Class>::new("CL_ADT_URI_MAPPER");
+    let class = ObjectKey::<Class>::new("CL_ADT_URI_MAPPER");
     let output = class
         .run()
         .profiler_id("TRACE ID")
@@ -97,7 +97,7 @@ async fn repository_object_properties_forward_through_the_typed_query() {
         .await;
 
     let client = discovered_client(transport(&server)).await;
-    let object = ObjectRef::<Class>::new("CL_ADT_URI_MAPPER").erase();
+    let object = ObjectKey::<Class>::new("CL_ADT_URI_MAPPER").erase();
     let properties: ObjectSnapshot<()> = object
         .query()
         .workbench_version(WorkbenchVersion::Active)
@@ -129,7 +129,7 @@ async fn repository_object_properties_forward_through_the_typed_query() {
     assert_eq!(class.reference().name(), "CL_ADT_URI_MAPPER");
     assert_eq!(class.uri(), properties.uri());
     assert_eq!(class.workbench_version(), WorkbenchVersion::Active);
-    assert_eq!(class.reference().erase(), object);
+    assert_eq!(class.reference().key().erase(), object);
     logon.assert_async().await;
     discovery.assert_async().await;
     metadata.assert_async().await;
@@ -205,7 +205,7 @@ async fn class_properties_query_converts_the_live_v4_manifest() {
         .await;
 
     let client = discovered_client(transport(&server)).await;
-    let reference = ObjectRef::<Class>::new("CL_ADT_URI_MAPPER");
+    let reference = ObjectKey::<Class>::new("CL_ADT_URI_MAPPER");
     let response = reference
         .query()
         .workbench_version(WorkbenchVersion::Active)
@@ -269,7 +269,7 @@ async fn class_properties_query_accepts_server_selected_v2_and_v3() {
         .await;
 
     let client = discovered_client(transport(&server)).await;
-    let reference = ObjectRef::<Class>::new("CL_ADT_URI_MAPPER");
+    let reference = ObjectKey::<Class>::new("CL_ADT_URI_MAPPER");
     let response = reference
         .query()
         .workbench_version(WorkbenchVersion::Active)
@@ -309,7 +309,7 @@ async fn class_properties_query_returns_not_modified_for_a_current_etag() {
         .await;
 
     let client = discovered_client(transport(&server)).await;
-    let reference = ObjectRef::<Class>::new("CX_ROOT");
+    let reference = ObjectKey::<Class>::new("CX_ROOT");
     let response = reference
         .query()
         .workbench_version(WorkbenchVersion::Active)

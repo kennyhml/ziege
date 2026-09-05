@@ -2,7 +2,7 @@ use super::run::ObjectRun;
 use crate::{
     CategoryId, Discovery, EncodeError, EncodedOperation, RequiresDiscovery,
     error::ResponseError,
-    objects::{ImmediateRun, ObjectRef, ObjectSnapshot, Program, RunCapability},
+    objects::{ImmediateRun, ObjectKey, ObjectRef, ObjectSnapshot, Program, RunCapability},
     operation::{Operation, OperationResponse, Stateless},
 };
 
@@ -10,14 +10,14 @@ use crate::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProgramRunResult {
     /// The program that was executed.
-    pub reference: ObjectRef<Program>,
+    pub reference: ObjectKey<Program>,
 
     /// The rendered program output returned by SAP.
     pub content: String,
 }
 
 impl ProgramRunResult {
-    pub(crate) fn new(reference: ObjectRef<Program>, content: String) -> Self {
+    pub(crate) fn new(reference: ObjectKey<Program>, content: String) -> Self {
         Self { reference, content }
     }
 }
@@ -41,7 +41,7 @@ impl ProgramRunResult {
 #[derive(Debug)]
 pub struct ProgramRun {
     /// The executable program to run.
-    program: ObjectRef<Program>,
+    program: ObjectKey<Program>,
     run: ObjectRun,
 }
 
@@ -53,7 +53,7 @@ impl ProgramRun {
     };
     const RELATION: &str = "http://www.sap.com/adt/relations/programs/programrun";
 
-    fn new(program: ObjectRef<Program>) -> Self {
+    fn new(program: ObjectKey<Program>) -> Self {
         let run = ObjectRun::typed(&program);
         Self { program, run }
     }
@@ -89,7 +89,7 @@ impl Operation for ProgramRun {
     }
 }
 
-impl ObjectRef<Program> {
+impl ObjectKey<Program> {
     /// Creates an operation that runs this program.
     pub fn run(&self) -> ProgramRun {
         ProgramRun::new(self.clone())
@@ -100,6 +100,13 @@ impl ObjectSnapshot<Program> {
     /// Creates an operation that runs this loaded program.
     pub fn run(&self) -> ProgramRun {
         self.reference().run()
+    }
+}
+
+impl ObjectRef<Program> {
+    /// Creates a name-based run through the advertised program-run template.
+    pub fn run(&self) -> ProgramRun {
+        self.key().run()
     }
 }
 
@@ -166,7 +173,7 @@ mod tests {
     }
 
     fn program_properties_query() -> ObjectQuery<Program> {
-        ObjectRef::<Program>::new("Z_TEST").query()
+        ObjectKey::<Program>::new("Z_TEST").query()
     }
 
     fn program_properties_response(media_type: &'static str) -> OperationResponse {
@@ -184,11 +191,11 @@ mod tests {
     }
 
     fn include_properties_query() -> ObjectQuery<Include> {
-        ObjectRef::<Include>::new("ZTEST").query()
+        ObjectKey::<Include>::new("ZTEST").query()
     }
 
     fn program_run() -> ProgramRun {
-        ObjectRef::<Program>::new("Z_TEST").run()
+        ObjectKey::<Program>::new("Z_TEST").run()
     }
 
     fn request_target() -> AdtUri {
@@ -228,7 +235,7 @@ mod tests {
     #[tokio::test]
     async fn expands_namespaced_program_run_variables() {
         let (client, requests) = recording_client(DISCOVERY_XML);
-        ObjectRef::<Program>::new("/DMO/PROGRAM")
+        ObjectKey::<Program>::new("/DMO/PROGRAM")
             .run()
             .profiler_id("TRACE ID")
             .execute(&client)

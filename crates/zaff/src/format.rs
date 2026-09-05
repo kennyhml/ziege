@@ -503,7 +503,7 @@ pub(crate) fn decode_properties<P>(
 where
     P: MediaTyped + DeserializeOwned,
 {
-    if !P::MEDIA_TYPES.contains(&properties.media_type()) {
+    if !P::MEDIA_TYPES.contains(properties.media_type()) {
         return Err(ProjectionError::UnsupportedPropertiesMediaType {
             object_type,
             media_type: properties.media_type().to_owned(),

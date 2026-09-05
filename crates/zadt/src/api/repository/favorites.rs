@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AdvertisedObjectReference, CategoryId, Discovery, EncodeError, EncodedOperation,
-    GlobalWorkbenchType, ObjectError, ObjectRef, Operation, OperationResponse, RepositoryError,
-    RequiresDiscovery, ResolveError, ResponseError, Stateless, User,
+    GlobalWorkbenchType, ObjectError, ObjectKey, ObjectRef, Operation, OperationResponse,
+    RepositoryError, RequiresDiscovery, ResolveError, ResponseError, Stateless, User,
+    objects::ObjectTarget,
 };
 
 /// Queries a users favorite objects. Because this is stored in a table
@@ -112,15 +113,35 @@ impl FavoriteObjectsUpdate {
         }
     }
 
-    pub fn add<T>(&mut self, object: &ObjectRef<T>) -> &mut Self {
-        self.objects
-            .push(PendingFavoriteObject::new(object, FavoriteOperation::Add));
+    pub fn add<T>(&mut self, object: &ObjectKey<T>) -> &mut Self {
+        self.objects.push(PendingFavoriteObject::new(
+            object.erase().into(),
+            FavoriteOperation::Add,
+        ));
         self
     }
 
-    pub fn remove<T>(&mut self, object: &ObjectRef<T>) -> &mut Self {
+    pub fn remove<T>(&mut self, object: &ObjectKey<T>) -> &mut Self {
         self.objects.push(PendingFavoriteObject::new(
-            object,
+            object.erase().into(),
+            FavoriteOperation::Remove,
+        ));
+        self
+    }
+
+    /// Adds an object using its advertised URI.
+    pub fn add_ref<T>(&mut self, object: &ObjectRef<T>) -> &mut Self {
+        self.objects.push(PendingFavoriteObject::new(
+            object.erase().into(),
+            FavoriteOperation::Add,
+        ));
+        self
+    }
+
+    /// Removes an object using its advertised URI.
+    pub fn remove_ref<T>(&mut self, object: &ObjectRef<T>) -> &mut Self {
+        self.objects.push(PendingFavoriteObject::new(
+            object.erase().into(),
             FavoriteOperation::Remove,
         ));
         self
@@ -164,23 +185,23 @@ impl Operation for FavoriteObjectsUpdate {
 
 #[derive(Debug)]
 struct PendingFavoriteObject {
-    reference: ObjectRef<()>,
+    reference: ObjectTarget<()>,
     operation: FavoriteOperation,
 }
 
 impl PendingFavoriteObject {
-    fn new<T>(object: &ObjectRef<T>, operation: FavoriteOperation) -> Self {
+    fn new(reference: ObjectTarget<()>, operation: FavoriteOperation) -> Self {
         Self {
-            reference: object.erase(),
+            reference,
             operation,
         }
     }
 
     fn resolve(&self, resolver: &Discovery, list: &str) -> Result<FavoriteObject, ResolveError> {
         Ok(FavoriteObject {
-            uri: resolver.resolve_object_uri(&self.reference)?.to_string(),
-            object_type: self.reference.object_type().clone(),
-            name: self.reference.name().to_owned(),
+            uri: self.reference.resolve_uri(resolver)?.to_string(),
+            object_type: self.reference.key().object_type().clone(),
+            name: self.reference.key().name().to_owned(),
             list: Some(list.to_owned()),
             operation: Some(self.operation.as_str().to_owned()),
         })

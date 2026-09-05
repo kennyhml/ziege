@@ -7,8 +7,8 @@ pub(crate) type ErasedProperties = Arc<dyn Any + Send + Sync>;
 
 /// An immutable snapshot of a loaded ADT object representation.
 ///
-/// Unlike [`ObjectRef<T>`], this value includes the concrete resource URI,
-/// Workbench version, and object properties returned by ADT. The type parameter
+/// Unlike [`ObjectRef<T>`], this value includes the Workbench version and object
+/// properties returned by ADT. The type parameter
 /// `T` selects the property type and the operations available for that object
 /// family. [`ObjectSnapshot<()>`] stores the object family and its concrete
 /// properties at runtime.
@@ -25,7 +25,6 @@ pub(crate) type ErasedProperties = Arc<dyn Any + Send + Sync>;
 /// that only need the object identity can use [`ObjectSnapshot::reference`].
 pub struct ObjectSnapshot<T: SnapshotKind = ()> {
     reference: ObjectRef<T>,
-    uri: AdtUri,
     workbench_version: WorkbenchVersion,
     media_type: &'static str,
     etag: Option<EntityTag>,
@@ -40,7 +39,7 @@ impl<T: SnapshotKind> ObjectSnapshot<T> {
 
     /// Returns the concrete URI from which this snapshot was loaded.
     pub fn uri(&self) -> &AdtUri {
-        &self.uri
+        self.reference.uri()
     }
 
     /// Returns the Workbench version represented by this snapshot.
@@ -63,7 +62,6 @@ impl<T: ObjectType> ObjectSnapshot<T> {
     /// Creates a new snapshot for an internally parsed query result.
     pub(crate) fn new(
         reference: ObjectRef<T>,
-        uri: AdtUri,
         workbench_version: WorkbenchVersion,
         media_type: &'static str,
         etag: Option<EntityTag>,
@@ -71,7 +69,6 @@ impl<T: ObjectType> ObjectSnapshot<T> {
     ) -> Self {
         Self {
             reference,
-            uri,
             workbench_version,
             media_type,
             etag,
@@ -90,7 +87,6 @@ impl<T: ObjectType> ObjectSnapshot<T> {
     pub fn into_erased(self) -> ObjectSnapshot<()> {
         ObjectSnapshot::<()>::new_erased(
             self.reference.erase(),
-            self.uri,
             self.workbench_version,
             self.media_type,
             self.etag,
@@ -106,7 +102,6 @@ where
     fn clone(&self) -> Self {
         Self {
             reference: self.reference.clone(),
-            uri: self.uri.clone(),
             workbench_version: self.workbench_version,
             media_type: self.media_type,
             etag: self.etag.clone(),
@@ -129,7 +124,6 @@ impl ObjectSnapshot<()> {
     /// Constructs a snapshot with properties retained behind its runtime descriptor.
     pub(crate) fn new_erased(
         reference: ObjectRef<()>,
-        uri: AdtUri,
         workbench_version: WorkbenchVersion,
         media_type: &'static str,
         etag: Option<EntityTag>,
@@ -137,7 +131,6 @@ impl ObjectSnapshot<()> {
     ) -> Self {
         Self {
             reference,
-            uri,
             workbench_version,
             media_type,
             etag,
@@ -152,7 +145,7 @@ impl ObjectSnapshot<()> {
     pub fn properties(&self) -> Result<serde_json::Value, ObjectError> {
         self.reference
             .require_descriptor()?
-            .properties_to_json(&self.reference, &self.properties)
+            .properties_to_json(self.reference.key(), &self.properties)
     }
 
     /// Restores a concrete loaded object after validating its runtime type.
@@ -176,7 +169,6 @@ impl ObjectSnapshot<()> {
 
         Ok(ObjectSnapshot::new(
             reference,
-            self.uri,
             self.workbench_version,
             self.media_type,
             self.etag,
@@ -210,7 +202,6 @@ impl fmt::Debug for ObjectSnapshot<()> {
         formatter
             .debug_struct("ObjectSnapshot")
             .field("reference", &self.reference)
-            .field("uri", &self.uri)
             .field("workbench_version", &self.workbench_version)
             .field("media_type", &self.media_type)
             .field("etag", &self.etag)
@@ -229,11 +220,52 @@ where
         formatter
             .debug_struct("ObjectSnapshot")
             .field("reference", &self.reference)
-            .field("uri", &self.uri)
             .field("workbench_version", &self.workbench_version)
             .field("media_type", &self.media_type)
             .field("etag", &self.etag)
             .field("properties", &self.properties)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{FunctionGroup, FunctionModule, ObjectKey, XmlConversion};
+
+    #[test]
+    fn snapshot_conversions_preserve_the_located_reference() {
+        let reference = ObjectRef::new(
+            ObjectKey::<FunctionGroup>::new("Z_TEST_GROUP").subobject::<FunctionModule>("ZZZZFUNC"),
+            AdtUri::parse("advertised/module").unwrap(),
+        )
+        .with_parent_uri(AdtUri::parse("advertised/group").unwrap());
+        let properties = <FunctionModule as ObjectType>::Properties::from_xml(include_bytes!(
+            "../../tests/fixtures/function-module-zzzzfunc.xml"
+        ))
+        .unwrap();
+        let snapshot = ObjectSnapshot::new(
+            reference.clone(),
+            WorkbenchVersion::Active,
+            "application/vnd.sap.adt.functions.fmodules.v3+xml",
+            None,
+            properties,
+        );
+        let erased = snapshot.clone().into_erased();
+        assert_eq!(erased.reference().key(), &reference.key().erase());
+        assert_eq!(erased.uri(), reference.uri());
+        assert_eq!(erased.reference().parent_uri(), reference.parent_uri());
+        assert!(erased.properties().is_ok());
+        for source in [snapshot.source().unwrap(), erased.source().unwrap()] {
+            assert_eq!(source.object.key(), &reference.key().erase());
+            assert_eq!(source.object.uri(), reference.uri());
+            assert_eq!(source.object.parent_uri(), reference.parent_uri());
+        }
+        let typed = erased.try_into_typed::<FunctionModule>().unwrap();
+        assert_eq!(typed.reference().key(), reference.key());
+        assert_eq!(typed.uri(), reference.uri());
+        assert_eq!(typed.reference().parent_uri(), reference.parent_uri());
+        assert_eq!(typed.workbench_version(), snapshot.workbench_version());
+        assert_eq!(typed.media_type(), snapshot.media_type());
     }
 }

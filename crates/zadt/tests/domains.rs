@@ -4,7 +4,7 @@ use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
     Client, Discovery, Domain, DomainCreateProperties, DomainProperties, EntityTag, Logon,
-    MediaTyped, ObjectRef, Operation, ReqwestTransport, WorkbenchVersion,
+    MediaTyped, ObjectKey, Operation, ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -82,7 +82,7 @@ async fn domain_properties_preserve_the_nested_v2_contract() {
         .await;
 
     let client = discovered_client(&server).await;
-    let reference = ObjectRef::<Domain>::new("TRKORR");
+    let reference = ObjectKey::<Domain>::new("TRKORR");
     let object = reference
         .query()
         .workbench_version(WorkbenchVersion::Active)
@@ -143,7 +143,7 @@ async fn domain_creation_posts_only_the_sparse_properties_payload() {
         .await;
 
     let client = discovered_client(&server).await;
-    let reference = ObjectRef::<Domain>::new("Z_DOMAIN");
+    let reference = ObjectKey::<Domain>::new("Z_DOMAIN");
     let properties = DomainCreateProperties::builder()
         .description("Created Domain")
         .package("$TMP")

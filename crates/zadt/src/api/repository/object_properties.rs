@@ -4,16 +4,18 @@ use serde::Deserialize;
 use super::{common::RepositoryFacet, content::RepositoryObjectEntry};
 use crate::{
     AdtUri, CategoryId, Discovery, EncodeError, EncodedOperation, GlobalWorkbenchType, ObjectError,
-    ObjectRef, ObjectSnapshot, ObjectType, Operation, OperationResponse, Package, RepositoryError,
-    RequiresDiscovery, ResponseError, Stateless, TransportNumber, TransportStatus, User,
+    ObjectKey, ObjectRef, ObjectSnapshot, ObjectType, Operation, OperationResponse, Package,
+    RepositoryError, RequiresDiscovery, ResponseError, Stateless, TransportNumber, TransportStatus,
+    User,
+    objects::ObjectTarget,
     resource::{AdvertisedLink, Relations, resolve_href},
 };
 
 /// Fetches uniform RIS properties for an arbitrary repository object.
 ///
-/// The repository object can be supplied as an [`ObjectRef`] or directly as an
-/// [`AdtUri`]. Logical object references are resolved through discovery when the
-/// query is encoded. For example, `?uri=/sap/bc/adt/programs/programs/ZPROG`
+/// The repository object can be supplied as an [`ObjectKey`], a located
+/// [`ObjectRef`], or directly as an [`AdtUri`]. Logical keys are resolved through
+/// discovery when the query is encoded. For example, `?uri=/sap/bc/adt/programs/programs/ZPROG`
 /// returns the properties of the program `ZPROG`.
 ///
 /// These properties are RIS centric and thus only provide generic repository information,
@@ -31,13 +33,13 @@ pub struct RepositoryObjectPropertiesQuery {
 
 #[derive(Clone, Debug)]
 enum RepositoryObjectTarget {
-    Object(ObjectRef),
+    Object(ObjectTarget<()>),
     Uri(AdtUri),
 }
 
 impl RepositoryObjectTarget {
-    fn for_object<T>(object: &ObjectRef<T>) -> Self {
-        Self::Object(object.erase())
+    fn for_object<T>(object: &ObjectKey<T>) -> Self {
+        Self::Object(object.erase().into())
     }
 
     fn for_uri(uri: AdtUri) -> Self {
@@ -46,7 +48,7 @@ impl RepositoryObjectTarget {
 
     fn resolve(&self, resolver: &Discovery) -> Result<AdtUri, EncodeError> {
         match self {
-            Self::Object(object) => Ok(resolver.resolve_object_uri(object)?),
+            Self::Object(object) => Ok(object.resolve_uri(resolver)?),
             Self::Uri(uri) => Ok(uri.clone()),
         }
     }
@@ -60,9 +62,17 @@ impl RepositoryObjectPropertiesQuery {
     const URI_QUERY: &str = "uri";
 
     /// Creates a property query for a validated object reference.
-    pub fn new<T>(object: &ObjectRef<T>) -> Self {
+    pub fn new<T>(object: &ObjectKey<T>) -> Self {
         Self {
             target: RepositoryObjectTarget::for_object(object),
+            facets: Vec::new(),
+        }
+    }
+
+    /// Creates a property query preserving the object's advertised location.
+    pub fn from_ref<T>(object: &ObjectRef<T>) -> Self {
+        Self {
+            target: RepositoryObjectTarget::Object(object.erase().into()),
             facets: Vec::new(),
         }
     }
@@ -109,7 +119,7 @@ impl Operation for RepositoryObjectPropertiesQuery {
 impl RepositoryObjectEntry {
     /// Creates a uniform RIS property query for this listed object.
     pub fn properties(&self) -> RepositoryObjectPropertiesQuery {
-        RepositoryObjectPropertiesQuery::for_uri(self.uri().clone())
+        RepositoryObjectPropertiesQuery::from_ref(&self.reference)
     }
 }
 
@@ -133,9 +143,16 @@ impl AssignedTransportsQuery {
     const URI_QUERY: &str = "uri";
 
     /// Creates a query for the transport requests assigned to an object.
-    pub fn new<T>(object: &ObjectRef<T>) -> Self {
+    pub fn new<T>(object: &ObjectKey<T>) -> Self {
         Self {
             target: RepositoryObjectTarget::for_object(object),
+        }
+    }
+
+    /// Creates a query preserving the object's advertised location.
+    pub fn from_ref<T>(object: &ObjectRef<T>) -> Self {
+        Self {
+            target: RepositoryObjectTarget::Object(object.erase().into()),
         }
     }
 
@@ -170,9 +187,16 @@ impl Operation for AssignedTransportsQuery {
     }
 }
 
-impl<T> ObjectRef<T> {
+impl<T> ObjectKey<T> {
     pub fn transport_requests(&self) -> AssignedTransportsQuery {
         AssignedTransportsQuery::new(self)
+    }
+}
+
+impl<T> ObjectRef<T> {
+    /// Queries transport requests using this object's advertised URI.
+    pub fn transport_requests(&self) -> AssignedTransportsQuery {
+        AssignedTransportsQuery::from_ref(self)
     }
 }
 
@@ -243,11 +267,11 @@ impl RepositoryObjectProperties {
     /// The first entry is the root package and the final entry is the package
     /// directly containing the object. An empty hierarchy means package
     /// properties were not requested or the object has no package assignment.
-    pub fn package_hierarchy(&self) -> Vec<ObjectRef<Package>> {
+    pub fn package_hierarchy(&self) -> Vec<ObjectKey<Package>> {
         self.properties
             .iter()
             .filter(|property| property.facet == RepositoryFacet::PACKAGE)
-            .map(|property| ObjectRef::new(property.value.clone()))
+            .map(|property| ObjectKey::new(property.value.clone()))
             .collect()
     }
 }
@@ -289,11 +313,12 @@ impl RepositoryObjectProperties {
     }
 
     fn from_raw(raw: RawRepositoryObjectProperties, object_uri: &AdtUri) -> Self {
-        let reference = ObjectRef::from_parts(
+        let key = ObjectKey::from_parts(
             raw.object.name.to_ascii_uppercase(),
             raw.object.object_type.clone(),
             None,
         );
+        let reference = ObjectRef::new(key, object_uri.clone());
         let properties = raw
             .properties
             .into_iter()

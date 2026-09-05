@@ -420,9 +420,7 @@ mod test_support {
     }
 
     pub fn reference<T: ObjectType>(name: &str, uri: &str) -> ObjectRef<T> {
-        repository_entry(name, T::WORKBENCH_TYPE.as_str(), uri)
-            .typed_reference::<T>()
-            .unwrap()
+        ObjectRef::try_from(&repository_entry(name, T::WORKBENCH_TYPE.as_str(), uri)).unwrap()
     }
 
     pub fn properties<T>(
@@ -719,6 +717,23 @@ mod tests {
             original_properties["adtcore:packageRef"]
         );
         assert_eq!(original_properties["@adtcore:description"], "URI Mapper");
+
+        let relocated = test_support::reference::<Class>(
+            reference.name(),
+            "/sap/bc/adt/custom/classes/cl_adt_uri_mapper",
+        );
+        assert_eq!(relocated.key(), reference.key());
+        let relocated_properties = test_support::erased_properties(
+            &relocated,
+            ClassProperties::MEDIA_TYPES[0],
+            "relocated-etag",
+            CLASS_XML,
+        );
+        assert_eq!(relocated_properties.reference().uri(), relocated.uri());
+        assert!(matches!(
+            metadata.render_properties(&relocated_properties),
+            Err(ProjectionError::PropertiesBindingMismatch { .. })
+        ));
 
         let other = test_support::reference::<Class>("CL_OTHER", "/sap/bc/adt/oo/classes/cl_other");
         let other_xml = String::from_utf8_lossy(CLASS_XML).replacen(

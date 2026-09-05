@@ -226,3 +226,35 @@ where
         self.inner.decode(response)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{AccessMode, AdtUri, FunctionGroup, FunctionModule, ObjectKey};
+
+    #[test]
+    fn locked_construction_checks_uri_but_not_parent_metadata() {
+        let owner = ObjectRef::new(
+            ObjectKey::<FunctionGroup>::new("ZFIRST").subobject::<FunctionModule>("ZMODULE"),
+            AdtUri::parse("advertised/module").unwrap(),
+        );
+        let target = ObjectRef::new(
+            ObjectKey::<FunctionGroup>::new("ZSECOND").subobject::<FunctionModule>("ZMODULE"),
+            owner.uri().clone(),
+        )
+        .with_parent_uri(AdtUri::parse("advertised/parent").unwrap());
+        let lock = ObjectLock::for_test(owner.erase(), AccessMode::Modify);
+        assert!(Locked::try_new((), lock.clone(), &target).is_ok());
+
+        let other = ObjectRef::new(owner.key().clone(), AdtUri::parse("other/module").unwrap());
+        assert!(matches!(
+            Locked::try_new((), lock, &other),
+            Err(ObjectError::ObjectLockMismatch { .. })
+        ));
+        let show = ObjectLock::for_test(owner.erase(), AccessMode::Show);
+        assert!(matches!(
+            Locked::try_new((), show, &target),
+            Err(ObjectError::ObjectLockNotModifiable)
+        ));
+    }
+}

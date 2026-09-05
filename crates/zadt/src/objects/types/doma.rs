@@ -228,7 +228,7 @@ pub struct DomainFixedValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AssignObjectIdentity, ObjectRef, ObjectType};
+    use crate::{AssignObjectIdentity, ObjectKey, ObjectType};
 
     const DOMAIN_TRKORR_XML: &str = include_str!("../../../tests/fixtures/domain-trkorr.xml");
     const DOMAIN_XFELD_XML: &str = include_str!("../../../tests/fixtures/domain-xfeld.xml");
@@ -252,7 +252,7 @@ mod tests {
         assert_eq!(properties.object_type, Domain::WORKBENCH_TYPE);
         assert!(properties.abap_language_version.is_none());
 
-        let reference = ObjectRef::<Domain>::new("Z_DOMAIN");
+        let reference = ObjectKey::<Domain>::new("Z_DOMAIN");
         properties.assign_identity(&reference);
         let body = properties.to_xml().unwrap();
         let body = std::str::from_utf8(&body).unwrap();

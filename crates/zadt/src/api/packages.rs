@@ -6,8 +6,9 @@ use stduritemplate::Value;
 
 use crate::{
     AdtUri, AdvertisedObjectReference, CategoryId, Discovery, EncodeError, EncodedOperation,
-    GlobalWorkbenchType, ObjectError, ObjectRef, ObjectType, Operation, OperationResponse, Package,
-    PrimaryObjectType, RequiresDiscovery, ResolveError, ResponseError, Stateless,
+    GlobalWorkbenchType, ObjectError, ObjectKey, ObjectRef, ObjectType, Operation,
+    OperationResponse, Package, PrimaryObjectType, RequiresDiscovery, ResolveError, ResponseError,
+    Stateless,
     resource::{AdtUriTemplate, resolve_href},
 };
 
@@ -178,11 +179,13 @@ fn package_reference(
             actual: object_type,
         });
     }
-    resolve_href(base, &href).map_err(|source| ObjectError::InvalidLink {
-        href: href.clone(),
-        source,
-    })?;
-    let reference = ObjectRef::<Package>::new(name);
+    let uri = resolve_href(base, &href)
+        .map_err(|source| ObjectError::InvalidLink {
+            href: href.clone(),
+            source,
+        })?
+        .target;
+    let reference = ObjectRef::new(ObjectKey::<Package>::new(name), uri);
     Ok(Some(PackageReference {
         reference,
         description: raw.description,
@@ -274,7 +277,7 @@ struct RawPackageSettings {
 #[derive(Clone, Debug)]
 pub struct PackageTreeQuery {
     /// The package at which tree traversal starts.
-    pub package: ObjectRef<Package>,
+    pub package: ObjectKey<Package>,
 
     /// Whether ancestors or immediate subpackages are requested.
     pub kind: PackageTreeKind,
@@ -284,7 +287,7 @@ impl PackageTreeQuery {
     const RELATION: &str = "tree";
 
     /// Creates a package-tree query with the selected direction.
-    pub fn new(package: ObjectRef<Package>, kind: PackageTreeKind) -> Self {
+    pub fn new(package: ObjectKey<Package>, kind: PackageTreeKind) -> Self {
         Self { package, kind }
     }
 }
@@ -361,7 +364,7 @@ impl Operation for PackageSettingsQuery {
     }
 }
 
-impl ObjectRef<Package> {
+impl ObjectKey<Package> {
     /// Creates a query for this package and all of its ancestors.
     pub fn super_tree(&self) -> PackageTreeQuery {
         PackageTreeQuery::new(self.clone(), PackageTreeKind::Super)
@@ -370,6 +373,18 @@ impl ObjectRef<Package> {
     /// Creates a query for this package's immediate subpackages.
     pub fn sub_tree(&self) -> PackageTreeQuery {
         PackageTreeQuery::new(self.clone(), PackageTreeKind::Sub)
+    }
+}
+
+impl ObjectRef<Package> {
+    /// Creates a name-based query for this package and its ancestors.
+    pub fn super_tree(&self) -> PackageTreeQuery {
+        self.key().super_tree()
+    }
+
+    /// Creates a name-based query for this package's immediate subpackages.
+    pub fn sub_tree(&self) -> PackageTreeQuery {
+        self.key().sub_tree()
     }
 }
 
@@ -477,6 +492,28 @@ mod tests {
     }
 
     #[test]
+    fn package_references_retain_noncanonical_advertised_locations() {
+        let base = AdtUri::parse("/sap/bc/adt/custom/tree").unwrap();
+        let package = package_reference(
+            AdvertisedObjectReference {
+                name: Some("Z_PACKAGE".to_owned()),
+                object_type: Some(Package::WORKBENCH_TYPE),
+                uri: Some("packages/42".to_owned()),
+                ..Default::default()
+            },
+            &base,
+            false,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(package.reference.name(), "Z_PACKAGE");
+        assert_eq!(
+            package.reference.uri().as_str(),
+            "/sap/bc/adt/custom/tree/packages/42"
+        );
+    }
+
+    #[test]
     fn parses_live_package_tree() {
         let base = AdtUri::parse("/sap/bc/adt/packages/$tree").unwrap();
         let tree = PackageTree::parse(SUPER_TREE_XML, &base).unwrap();
@@ -527,7 +564,7 @@ mod tests {
 
     #[tokio::test]
     async fn expands_namespaced_package_tree_targets() {
-        let package = ObjectRef::<Package>::new("/DMO/FLIGHT");
+        let package = ObjectKey::<Package>::new("/DMO/FLIGHT");
         let (client, requests) = discovered_client(DISCOVERY_XML);
         PackageTreeQuery::new(package, PackageTreeKind::Super)
             .execute(&client)
@@ -554,7 +591,7 @@ mod tests {
             1,
         );
         let (client, requests) = discovered_client(discovery.as_bytes());
-        let package = ObjectRef::<Package>::new("SADT_MAIN");
+        let package = ObjectKey::<Package>::new("SADT_MAIN");
 
         PackageTreeQuery::new(package, PackageTreeKind::Sub)
             .execute(&client)
@@ -577,7 +614,7 @@ mod tests {
             1,
         );
         let (client, _) = discovered_client(discovery.as_bytes());
-        let package = ObjectRef::<Package>::new("SADT_MAIN");
+        let package = ObjectKey::<Package>::new("SADT_MAIN");
 
         let error = PackageTreeQuery::new(package, PackageTreeKind::Sub)
             .execute(&client)

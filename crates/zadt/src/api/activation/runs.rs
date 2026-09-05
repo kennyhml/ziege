@@ -3,8 +3,9 @@ use serde::Deserialize;
 
 use crate::{
     AdvertisedLink, AdvertisedObjectReference, CategoryId, Discovery, EncodeError,
-    EncodedOperation, ObjectError, ObjectRef, ObjectSnapshot, ObjectType, Operation,
-    OperationResponse, RequiresDiscovery, ResponseError, Stateless, objects::ObjectReferences,
+    EncodedOperation, ObjectError, ObjectKey, ObjectRef, ObjectSnapshot, ObjectType, Operation,
+    OperationResponse, RequiresDiscovery, ResponseError, Stateless,
+    objects::{ObjectReferences, ObjectTarget},
 };
 
 #[derive(Debug, Eq, PartialEq)]
@@ -40,8 +41,8 @@ pub struct ActivationRun {
     mode: ActivationRunMode,
     /// Repository objects included in the activation worklist.
     objects: ObjectReferences,
-    /// Logical identities for references added through the object-based API.
-    logical_objects: Vec<(usize, ObjectRef<()>)>,
+    /// Targets for references added through the object-based API.
+    targets: Vec<(usize, ObjectTarget<()>)>,
     /// Whether activation should be forced. Off by default
     forced: Option<bool>,
     /// Whether a request preaudit should be performed. On by default
@@ -65,7 +66,7 @@ impl ActivationRun {
         Self {
             mode,
             objects,
-            logical_objects: Vec::new(),
+            targets: Vec::new(),
             forced: None,
             preaudit: true,
         }
@@ -79,13 +80,21 @@ impl ActivationRun {
     }
 
     /// Adds an object to the activation list
-    pub fn push_object<T>(&mut self, object: &ObjectRef<T>) -> &mut Self
+    pub fn push_object<T>(&mut self, object: &ObjectKey<T>) -> &mut Self
     where
-        for<'a> &'a ObjectRef<T>: Into<AdvertisedObjectReference>,
+        for<'a> &'a ObjectKey<T>: Into<AdvertisedObjectReference>,
     {
         let index = self.objects.objects.len();
         self.objects.objects.push(object.into());
-        self.logical_objects.push((index, object.erase()));
+        self.targets.push((index, object.erase().into()));
+        self
+    }
+
+    /// Adds an object at its advertised location to the activation list.
+    pub fn push_ref<T>(&mut self, object: &ObjectRef<T>) -> &mut Self {
+        let index = self.objects.objects.len();
+        self.objects.objects.push(object.into());
+        self.targets.push((index, object.erase().into()));
         self
     }
 
@@ -106,14 +115,20 @@ impl Operation for ActivationRun {
 
     fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
         let mut objects = self.objects.clone();
-        for (index, object) in &self.logical_objects {
+        for (index, target) in &self.targets {
+            let object = target.resolve(resolver)?;
             let reference = &mut objects.objects[*index];
-            reference.uri = Some(resolver.resolve_object_uri(object)?.to_string());
-            reference.parent_uri = object
-                .parent()
-                .map(|parent| resolver.resolve_object_uri(parent))
-                .transpose()?
-                .map(|uri| uri.to_string());
+            reference.uri = Some(object.uri().to_string());
+            if crate::objects::descriptors::requires_parent(object.object_type()) {
+                reference.parent_uri = Some(
+                    object
+                        .resolve_parent_uri(resolver)?
+                        .ok_or_else(|| ObjectError::ParentObjectRequired {
+                            object_type: object.object_type().clone(),
+                        })?
+                        .to_string(),
+                );
+            }
         }
 
         for object in &objects.objects {
@@ -169,9 +184,9 @@ impl Operation for ActivationRun {
     }
 }
 
-impl<T> ObjectRef<T>
+impl<T> ObjectKey<T>
 where
-    for<'a> &'a ObjectRef<T>: Into<AdvertisedObjectReference>,
+    for<'a> &'a ObjectKey<T>: Into<AdvertisedObjectReference>,
 {
     /// Creates an activation run for this object.
     pub fn activation(&self) -> ActivationRun {
@@ -185,6 +200,15 @@ impl<T: ObjectType> ObjectSnapshot<T> {
     /// Creates an activation run for this loaded object.
     pub fn activation(&self) -> ActivationRun {
         self.reference().activation()
+    }
+}
+
+impl<T> ObjectRef<T> {
+    /// Creates an activation run preserving this object's advertised location.
+    pub fn activation(&self) -> ActivationRun {
+        let mut run = ActivationRun::new(ActivationRunMode::Activate);
+        run.push_ref(self);
+        run
     }
 }
 
@@ -318,7 +342,7 @@ mod tests {
     #[test]
     fn activation_run_posts_flags_and_namespaced_object_references() {
         let client = discovered_client();
-        let object = ObjectRef::<Class>::new("Z_SYNTAX_TEST");
+        let object = ObjectKey::<Class>::new("Z_SYNTAX_TEST");
         let mut run = object.activation();
         run.allow_distinct_transports(true).forced(true);
 
@@ -349,7 +373,7 @@ mod tests {
     #[test]
     fn child_activation_includes_its_parent_uri() {
         let client = discovered_client();
-        let group = ObjectRef::<FunctionGroup>::new("Z_TEST_GROUP");
+        let group = ObjectKey::<FunctionGroup>::new("Z_TEST_GROUP");
         let module = group.subobject::<FunctionModule>("ZZZZFUNC");
 
         let request = module.activation().encode(client.discovery()).unwrap();
@@ -364,7 +388,7 @@ mod tests {
     #[test]
     fn child_activation_requires_parent_identity() {
         let client = discovered_client();
-        let module = ObjectRef::<FunctionModule>::from_parts(
+        let module = ObjectKey::<FunctionModule>::from_parts(
             "ZZZZFUNC".to_owned(),
             FunctionModule::WORKBENCH_TYPE,
             None,
@@ -377,6 +401,110 @@ mod tests {
             )))
                 if object_type == FunctionModule::WORKBENCH_TYPE
         ));
+    }
+
+    #[test]
+    fn located_child_activation_prefers_the_advertised_parent_uri() {
+        let client = discovered_client();
+        let key =
+            ObjectKey::<FunctionGroup>::new("Z_TEST_GROUP").subobject::<FunctionModule>("ZZZZFUNC");
+        let object = ObjectRef::new(
+            key,
+            crate::AdtUri::parse("/sap/bc/adt/custom/objects/42").unwrap(),
+        )
+        .with_parent_uri(crate::AdtUri::parse("/sap/bc/adt/custom/owners/17").unwrap());
+
+        let request = object.activation().encode(client.discovery()).unwrap();
+        let body = std::str::from_utf8(request.body()).unwrap();
+        assert!(body.contains("adtcore:uri=\"/sap/bc/adt/custom/objects/42\""));
+        assert!(body.contains("adtcore:parentUri=\"/sap/bc/adt/custom/owners/17\""));
+        assert!(!body.contains("/sap/bc/adt/functions/groups/"));
+    }
+
+    #[test]
+    fn unregistered_child_activation_preserves_the_advertised_parent_uri() {
+        let client = discovered_client();
+        let object = ObjectRef::new(
+            ObjectKey::<()>::from_parts(
+                "Z_TEST".to_owned(),
+                "CLAS/OCN/definitions".parse().unwrap(),
+                None,
+            ),
+            crate::AdtUri::parse("/sap/bc/adt/custom/definitions/42").unwrap(),
+        )
+        .with_parent_uri(crate::AdtUri::parse("/sap/bc/adt/custom/classes/17").unwrap());
+
+        let request = object.activation().encode(client.discovery()).unwrap();
+        let body = std::str::from_utf8(request.body()).unwrap();
+        assert!(body.contains("adtcore:type=\"CLAS/OCN/definitions\""));
+        assert!(body.contains("adtcore:uri=\"/sap/bc/adt/custom/definitions/42\""));
+        assert!(body.contains("adtcore:parentUri=\"/sap/bc/adt/custom/classes/17\""));
+    }
+
+    #[test]
+    fn located_child_activation_falls_back_to_the_logical_parent() {
+        let client = discovered_client();
+        let key =
+            ObjectKey::<FunctionGroup>::new("Z_TEST_GROUP").subobject::<FunctionModule>("ZZZZFUNC");
+        let object = ObjectRef::new(
+            key,
+            crate::AdtUri::parse("/sap/bc/adt/custom/objects/42").unwrap(),
+        );
+
+        let request = object.activation().encode(client.discovery()).unwrap();
+        let body = std::str::from_utf8(request.body()).unwrap();
+        assert!(body.contains("adtcore:uri=\"/sap/bc/adt/custom/objects/42\""));
+        assert!(body.contains("adtcore:parentUri=\"/sap/bc/adt/functions/groups/z_test_group\""));
+    }
+
+    #[test]
+    fn located_child_activation_requires_parent_metadata_without_trimming_its_uri() {
+        let client = discovered_client();
+        let object = ObjectRef::new(
+            ObjectKey::<FunctionModule>::from_parts(
+                "ZZZZFUNC".to_owned(),
+                FunctionModule::WORKBENCH_TYPE,
+                None,
+            ),
+            crate::AdtUri::parse("/sap/bc/adt/custom/objects/42").unwrap(),
+        );
+        for run in [object.activation(), object.erase().activation()] {
+            assert!(matches!(
+                run.encode(client.discovery()),
+                Err(EncodeError::Object(ObjectError::ParentObjectRequired { object_type }))
+                    if object_type == FunctionModule::WORKBENCH_TYPE
+            ));
+        }
+
+        let object =
+            object.with_parent_uri(crate::AdtUri::parse("/sap/bc/adt/custom/owners/17").unwrap());
+        for run in [object.activation(), object.erase().activation()] {
+            let request = run.encode(client.discovery()).unwrap();
+            let body = std::str::from_utf8(request.body()).unwrap();
+            assert!(body.contains("adtcore:uri=\"/sap/bc/adt/custom/objects/42\""));
+            assert!(body.contains("adtcore:parentUri=\"/sap/bc/adt/custom/owners/17\""));
+        }
+    }
+
+    #[test]
+    fn located_primary_activation_does_not_resolve_a_parent() {
+        let client = discovered_client();
+        let object = ObjectRef::new(
+            ObjectKey::<Class>::from_parts(
+                "Z_TEST".to_owned(),
+                Class::WORKBENCH_TYPE,
+                Some(Box::new(ObjectKey::from_parts(
+                    "UNKNOWN".to_owned(),
+                    "UNKNOWN/X".parse().unwrap(),
+                    None,
+                ))),
+            ),
+            crate::AdtUri::parse("/sap/bc/adt/custom/classes/42").unwrap(),
+        );
+        let request = object.activation().encode(client.discovery()).unwrap();
+        let body = std::str::from_utf8(request.body()).unwrap();
+        assert!(body.contains("adtcore:uri=\"/sap/bc/adt/custom/classes/42\""));
+        assert!(!body.contains("parentUri"));
     }
 
     #[test]

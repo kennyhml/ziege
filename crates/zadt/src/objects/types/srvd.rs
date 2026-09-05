@@ -150,7 +150,7 @@ impl ToXml for ServiceDefinitionProperties {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, AssignObjectIdentity, ObjectRef, ObjectType};
+    use crate::{AdtUri, AssignObjectIdentity, ObjectKey, ObjectType};
 
     const SERVICE_DEFINITION_XML: &str =
         include_str!("../../../tests/fixtures/service-definition-managedistributions.xml");
@@ -175,7 +175,7 @@ mod tests {
         assert_eq!(properties.source_type, "S");
         assert!(properties.abap_language_version.is_none());
 
-        let reference = ObjectRef::<ServiceDefinition>::new("Z_SERVICE_DEFINITION");
+        let reference = ObjectKey::<ServiceDefinition>::new("Z_SERVICE_DEFINITION");
         properties.assign_identity(&reference);
         let body = properties.to_xml().unwrap();
         let body = std::str::from_utf8(&body).unwrap();
@@ -212,8 +212,10 @@ mod tests {
     fn relative_source_uri_resolves_against_the_object() {
         let properties = properties();
         let object = crate::ObjectSnapshot::new(
-            ObjectRef::<ServiceDefinition>::new(properties.name.clone()),
-            AdtUri::parse("/sap/bc/adt/ddic/srvd/sources/managedistributions").unwrap(),
+            crate::ObjectRef::new(
+                ObjectKey::<ServiceDefinition>::new(properties.name.clone()),
+                AdtUri::parse("/sap/bc/adt/ddic/srvd/sources/managedistributions").unwrap(),
+            ),
             crate::WorkbenchVersion::Active,
             ServiceDefinitionProperties::MEDIA_TYPES[0],
             None,

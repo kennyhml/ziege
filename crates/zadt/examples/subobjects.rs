@@ -2,7 +2,7 @@ mod common;
 
 use std::{env, error::Error, io};
 
-use zadt::{Client, FunctionGroup, FunctionModule, ObjectRef, ObjectType, Operation};
+use zadt::{Client, FunctionGroup, FunctionModule, ObjectKey, ObjectType, Operation};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -27,7 +27,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     match mode.as_str() {
         "typed" => {
             // get the typed primary object
-            let group = ObjectRef::<FunctionGroup>::new(&group_name);
+            let group = ObjectKey::<FunctionGroup>::new(&group_name);
             // get the sub-object through the primary object with static checks
             let module = group.subobject::<FunctionModule>(&module_name);
             // the sub-object can now be treated like a regular object
@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         "erased" => {
             // get the erased primary object
             let group =
-                ObjectRef::from_workbench_type(&FunctionGroup::WORKBENCH_TYPE, &group_name)?;
+                ObjectKey::from_workbench_type(&FunctionGroup::WORKBENCH_TYPE, &group_name)?;
 
             // get the erased sub-object, no static guarantees can be made, this is a runtime check
             let module = group.subobject(&FunctionModule::WORKBENCH_TYPE, &module_name)?;

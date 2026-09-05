@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize, Serializer};
 
 use crate::{
     AdtUri, AdvertisedLink, CategoryId, Discovery, EncodeError, EncodedOperation, ObjectError,
-    ObjectRef, Operation, OperationResponse, RequiresDiscovery, ResponseError, Stateless,
-    WorkbenchVersion,
+    ObjectKey, ObjectRef, Operation, OperationResponse, RequiresDiscovery, ResponseError,
+    Stateless, WorkbenchVersion, objects::ObjectTarget,
 };
 
 /// Retrieves the check-run reporters advertised by the backend.
@@ -203,7 +203,7 @@ impl CheckObjectList {
             .iter()
             .map(|object| -> Result<EncodedCheckRunObject<'_>, EncodeError> {
                 Ok(EncodedCheckRunObject {
-                    uri: resolver.resolve_object_uri(&object.object)?,
+                    uri: object.object.resolve_uri(resolver)?,
                     version: object.version,
                     artifacts: (!object.artifacts.is_empty()).then_some(&object.artifacts),
                 })
@@ -221,15 +221,24 @@ impl CheckObjectList {
 /// One repository object included in a check run.
 #[derive(Debug)]
 pub struct CheckRunObject {
-    object: ObjectRef<()>,
+    object: ObjectTarget<()>,
     version: WorkbenchVersion,
     artifacts: CheckRunArtifacts,
 }
 
 impl CheckRunObject {
-    pub fn new<T>(object: &ObjectRef<T>, version: WorkbenchVersion) -> Self {
+    pub fn new<T>(object: &ObjectKey<T>, version: WorkbenchVersion) -> Self {
         Self {
-            object: object.erase(),
+            object: object.erase().into(),
+            version,
+            artifacts: CheckRunArtifacts::default(),
+        }
+    }
+
+    /// Creates a check entry preserving the advertised object URI.
+    pub fn from_ref<T>(object: &ObjectRef<T>, version: WorkbenchVersion) -> Self {
+        Self {
+            object: object.erase().into(),
             version,
             artifacts: CheckRunArtifacts::default(),
         }
@@ -492,7 +501,7 @@ mod tests {
     #[test]
     fn serializes_persisted_and_dirty_check_objects() {
         let client = discovered_client();
-        let object = ObjectRef::<Program>::new("Z_TEST");
+        let object = ObjectKey::<Program>::new("Z_TEST");
         let source_uri = AdtUri::parse("/sap/bc/adt/programs/programs/z_test/source/main").unwrap();
         let mut run = ObjectCheckRun::new();
         run.push_object(CheckRunObject::new(&object, WorkbenchVersion::Active))
@@ -514,9 +523,36 @@ mod tests {
     }
 
     #[test]
+    fn check_run_preserves_a_parentless_childs_advertised_uri() {
+        let client = discovered_client();
+        let object = ObjectRef::new(
+            ObjectKey::<crate::FunctionModule>::from_parts(
+                "Z_MODULE".to_owned(),
+                "FUGR/FF".parse().unwrap(),
+                None,
+            ),
+            AdtUri::parse("/sap/bc/adt/custom/checkable/42").unwrap(),
+        );
+        let mut run = ObjectCheckRun::new();
+        run.push_object(CheckRunObject::from_ref(&object, WorkbenchVersion::Active));
+        run.push_object(CheckRunObject::from_ref(
+            &object.erase(),
+            WorkbenchVersion::Active,
+        ));
+
+        let request = run.encode(client.discovery()).unwrap();
+        let body = std::str::from_utf8(request.body()).unwrap();
+        assert_eq!(
+            body.matches("adtcore:uri=\"/sap/bc/adt/custom/checkable/42\"")
+                .count(),
+            2
+        );
+    }
+
+    #[test]
     fn check_run_uses_the_discovered_contract() {
         let client = discovered_client();
-        let object = ObjectRef::<Program>::new("Z_TEST");
+        let object = ObjectKey::<Program>::new("Z_TEST");
         let mut run = ObjectCheckRun::new();
         run.push_object(CheckRunObject::new(&object, WorkbenchVersion::Active))
             .push_reporter(CheckRunReporter::SYNTAX_CHECK_RUNNER);

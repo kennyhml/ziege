@@ -3,8 +3,8 @@ use crate::AdtUri;
 use super::{AdtLink, AdtLinkError, AdvertisedLink};
 
 /// Maps relations of an object reference and enables lazy evaluation
-/// of possible references. While the underlying [`crate::ObjectRef`] could
-/// be a statically known [`crate::ObjectRef<T>`], as the relations can only
+/// of possible references. While the underlying [`crate::ObjectKey`] could
+/// be a statically known [`crate::ObjectKey<T>`], as the relations can only
 /// be found by having a reference to such, it should always be used
 /// as an implementation detail, only to be called on directly in
 /// exceptional cases, such as when access to a relation is not yet

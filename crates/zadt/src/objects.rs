@@ -12,7 +12,8 @@ mod workbench;
 pub use capabilities::{Create, Source, SourceComponents, Structure};
 pub(crate) use capabilities::{ImmediateRun, RunCapability};
 pub use descriptors::SubObjectDescriptor;
-pub use reference::{AdvertisedObjectReference, ObjectRef, ObjectReferences, ResolvedObjectRef};
+pub(crate) use reference::ObjectTarget;
+pub use reference::{AdvertisedObjectReference, ObjectKey, ObjectRef, ObjectReferences};
 pub(crate) use snapshot::ErasedProperties;
 pub use snapshot::ObjectSnapshot;
 pub use types::*;
@@ -119,7 +120,7 @@ pub trait ObjectIdentity {
 pub trait AssignObjectIdentity: ObjectIdentity {
     fn assign_identity(&mut self, identity: &impl ObjectIdentity);
 
-    fn assign_reference<T>(&mut self, reference: &ResolvedObjectRef<T>) {
+    fn assign_reference<T>(&mut self, reference: &ObjectRef<T>) {
         self.assign_identity(reference);
     }
 }

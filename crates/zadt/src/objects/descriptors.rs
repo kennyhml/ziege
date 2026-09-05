@@ -2,7 +2,7 @@ use super::{
     AccessControl, AnnotationDefinition, AssignObjectIdentity, Class, Create, DataDefinition,
     DataElement, Domain, ErasedProperties, FunctionGroup, FunctionGroupInclude, FunctionModule,
     GlobalWorkbenchType, Include, Interface, MediaTyped, MetadataExtension, ObjectIdentity,
-    ObjectRef, ObjectSnapshot, ObjectType, Package, Program, ResolvedObjectRef, RunCapability,
+    ObjectKey, ObjectRef, ObjectSnapshot, ObjectType, Package, Program, RunCapability,
     ServiceDefinition, Source, SourceComponents, Structure, ToXml, XmlConversion,
 };
 use crate::{
@@ -29,7 +29,7 @@ use crate::{
 ///
 /// ```ignore
 /// type DecodeXmlFn =
-///     fn(&ObjectRef<()>, &[u8]) -> Result<ErasedProperties, ObjectError>;
+///     fn(&ObjectKey<()>, &[u8]) -> Result<ErasedProperties, ObjectError>;
 /// ```
 ///
 /// For `T = Class`, the stored function pointer targets the `Class`
@@ -86,14 +86,13 @@ impl ObjectTypeDescriptor {
 
     pub(crate) fn creation_payload_to_xml(
         &self,
-        reference: &ResolvedObjectRef<()>,
+        reference: &ObjectRef<()>,
         payload: serde_json::Value,
     ) -> Result<Vec<u8>, ObjectError> {
-        let create = self.capabilities.create.ok_or_else(|| {
-            reference
-                .reference()
-                .unsupported_capability("object creation")
-        })?;
+        let create = self
+            .capabilities
+            .create
+            .ok_or_else(|| reference.key().unsupported_capability("object creation"))?;
         (create.encode)(reference, payload)
     }
 
@@ -136,7 +135,7 @@ impl ObjectTypeDescriptor {
 
     pub(crate) fn properties_from_xml(
         &self,
-        object: &ObjectRef<()>,
+        object: &ObjectKey<()>,
         body: &[u8],
     ) -> Result<ErasedProperties, ObjectError> {
         (self.properties.decode_xml)(object, body)
@@ -144,7 +143,7 @@ impl ObjectTypeDescriptor {
 
     pub(crate) fn properties_to_xml(
         &self,
-        object: &ObjectRef<()>,
+        object: &ObjectKey<()>,
         properties: &ErasedProperties,
     ) -> Result<Vec<u8>, ObjectError> {
         (self.properties.encode_xml)(object, properties)
@@ -152,7 +151,7 @@ impl ObjectTypeDescriptor {
 
     pub(crate) fn properties_from_json(
         &self,
-        object: &ObjectRef<()>,
+        object: &ObjectKey<()>,
         properties: serde_json::Value,
     ) -> Result<ErasedProperties, ObjectError> {
         (self.properties.decode_json)(object, properties)
@@ -160,7 +159,7 @@ impl ObjectTypeDescriptor {
 
     pub(crate) fn properties_to_json(
         &self,
-        object: &ObjectRef<()>,
+        object: &ObjectKey<()>,
         properties: &ErasedProperties,
     ) -> Result<serde_json::Value, ObjectError> {
         (self.properties.encode_json)(object, properties)
@@ -171,11 +170,11 @@ impl ObjectTypeDescriptor {
     }
 }
 
-type DecodeXmlFn = fn(&ObjectRef, &[u8]) -> Result<ErasedProperties, ObjectError>;
-type DecodeJsonFn = fn(&ObjectRef, serde_json::Value) -> Result<ErasedProperties, ObjectError>;
-type EncodeXmlFn = fn(&ObjectRef, &ErasedProperties) -> Result<Vec<u8>, ObjectError>;
-type EncodeJsonFn = fn(&ObjectRef, &ErasedProperties) -> Result<serde_json::Value, ObjectError>;
-type EncodeCreationFn = fn(&ResolvedObjectRef, serde_json::Value) -> Result<Vec<u8>, ObjectError>;
+type DecodeXmlFn = fn(&ObjectKey, &[u8]) -> Result<ErasedProperties, ObjectError>;
+type DecodeJsonFn = fn(&ObjectKey, serde_json::Value) -> Result<ErasedProperties, ObjectError>;
+type EncodeXmlFn = fn(&ObjectKey, &ErasedProperties) -> Result<Vec<u8>, ObjectError>;
+type EncodeJsonFn = fn(&ObjectKey, &ErasedProperties) -> Result<serde_json::Value, ObjectError>;
+type EncodeCreationFn = fn(&ObjectRef, serde_json::Value) -> Result<Vec<u8>, ObjectError>;
 type SourceFn = fn(&ObjectSnapshot<()>) -> Result<SourceRef, ObjectError>;
 type SourceComponentFn = fn(&ObjectSnapshot<()>, &str) -> Result<Option<SourceRef>, ObjectError>;
 type ObjectStructureFn = fn(&ObjectSnapshot<()>) -> Result<ObjectStructureQuery, ObjectError>;
@@ -202,7 +201,7 @@ impl PropertiesCodec {
     }
 
     fn decode_xml<T: ObjectType>(
-        object: &ObjectRef,
+        object: &ObjectKey,
         body: &[u8],
     ) -> Result<ErasedProperties, ObjectError> {
         validate_object_type::<T>(object)?;
@@ -212,7 +211,7 @@ impl PropertiesCodec {
     }
 
     fn decode_json<T: ObjectType>(
-        object: &ObjectRef,
+        object: &ObjectKey,
         properties: serde_json::Value,
     ) -> Result<ErasedProperties, ObjectError> {
         validate_object_type::<T>(object)?;
@@ -223,7 +222,7 @@ impl PropertiesCodec {
     }
 
     fn encode_xml<T: ObjectType>(
-        object: &ObjectRef,
+        object: &ObjectKey,
         properties: &ErasedProperties,
     ) -> Result<Vec<u8>, ObjectError> {
         validate_object_type::<T>(object)?;
@@ -232,7 +231,7 @@ impl PropertiesCodec {
     }
 
     fn encode_json<T: ObjectType>(
-        object: &ObjectRef,
+        object: &ObjectKey,
         properties: &ErasedProperties,
     ) -> Result<serde_json::Value, ObjectError> {
         validate_object_type::<T>(object)?;
@@ -267,15 +266,12 @@ impl CreateCodec {
         }
     }
 
-    fn encode<T>(
-        reference: &ResolvedObjectRef,
-        payload: serde_json::Value,
-    ) -> Result<Vec<u8>, ObjectError>
+    fn encode<T>(reference: &ObjectRef, payload: serde_json::Value) -> Result<Vec<u8>, ObjectError>
     where
         T: Create,
         T::Payload: serde::de::DeserializeOwned,
     {
-        validate_object_type::<T>(reference.reference())?;
+        validate_object_type::<T>(reference.key())?;
         let mut payload: T::Payload =
             serde_json::from_value(payload).map_err(ObjectError::InvalidPropertiesJson)?;
         payload.assign_reference(reference);
@@ -353,7 +349,7 @@ impl RuntimeCapabilities {
     }
 }
 
-fn validate_object_type<T: ObjectType>(object: &ObjectRef<()>) -> Result<(), ObjectError> {
+fn validate_object_type<T: ObjectType>(object: &ObjectKey<()>) -> Result<(), ObjectError> {
     if object.object_type() == &T::WORKBENCH_TYPE {
         return Ok(());
     }
@@ -498,8 +494,10 @@ mod tests {
         ))
         .unwrap();
         let object = crate::ObjectSnapshot::new(
-            ObjectRef::<Class>::new("CL_ADT_URI_MAPPER"),
-            AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
+            ObjectRef::new(
+                ObjectKey::<Class>::new("CL_ADT_URI_MAPPER"),
+                AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
+            ),
             crate::WorkbenchVersion::Active,
             "application/vnd.sap.adt.oo.classes.v4+xml",
             None,

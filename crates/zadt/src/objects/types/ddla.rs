@@ -122,7 +122,7 @@ impl ToXml for AnnotationDefinitionProperties {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, AssignObjectIdentity, ObjectRef, ObjectType};
+    use crate::{AdtUri, AssignObjectIdentity, ObjectKey, ObjectType};
 
     const ANNOTATION_DEFINITION_XML: &str =
         include_str!("../../../tests/fixtures/annotation-definition-ui.xml");
@@ -145,7 +145,7 @@ mod tests {
         assert_eq!(properties.name, "");
         assert_eq!(properties.object_type, AnnotationDefinition::WORKBENCH_TYPE);
 
-        let reference = ObjectRef::<AnnotationDefinition>::new("Z_ANNOTATION_DEFINITION");
+        let reference = ObjectKey::<AnnotationDefinition>::new("Z_ANNOTATION_DEFINITION");
         properties.assign_identity(&reference);
         let body = properties.to_xml().unwrap();
         let body = std::str::from_utf8(&body).unwrap();
@@ -179,8 +179,10 @@ mod tests {
     fn relative_source_uri_resolves_against_the_object() {
         let properties = properties();
         let object = crate::ObjectSnapshot::new(
-            ObjectRef::<AnnotationDefinition>::new(properties.name.clone()),
-            AdtUri::parse("/sap/bc/adt/ddic/ddla/sources/ui").unwrap(),
+            crate::ObjectRef::new(
+                ObjectKey::<AnnotationDefinition>::new(properties.name.clone()),
+                AdtUri::parse("/sap/bc/adt/ddic/ddla/sources/ui").unwrap(),
+            ),
             crate::WorkbenchVersion::Active,
             AnnotationDefinitionProperties::MEDIA_TYPES[0],
             None,

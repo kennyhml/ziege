@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use http::{HeaderMap, HeaderValue, StatusCode, header};
 use tokio::sync::Notify;
 use zadt::{
-    AdtRequest, AdtResponse, Client, ObjectRef, Package, RepositoryFacet, RepositoryPreselection,
+    AdtRequest, AdtResponse, Client, ObjectKey, Package, RepositoryFacet, RepositoryPreselection,
     Transport, TransportError,
 };
 use zvfs::{FacetLevel, FacetPolicy, Mount, NodeId, NodeKind, VfsError, VirtualRepositoryTree};
@@ -628,7 +628,7 @@ async fn validates_facet_policies_while_building() {
 #[tokio::test]
 async fn traverses_packages_groups_types_and_objects() {
     let (client, state) = client(Behavior::Tree).await;
-    let package = ObjectRef::<Package>::new("/ROOT");
+    let package = ObjectKey::<Package>::new("/ROOT");
     let expected_mount_uri = client.discovery().resolve_object_uri(&package).unwrap();
     let vfs = VirtualRepositoryTree::builder(client)
         .mount(Mount::package("/ROOT"))
@@ -692,6 +692,14 @@ async fn traverses_packages_groups_types_and_objects() {
     );
 
     let json = serde_json::to_string(&objects[0]).unwrap();
+    let serialized: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(serialized["object"]["objectType"], "CLAS/OC");
+    assert_eq!(
+        serialized["object"]["uri"],
+        "/sap/bc/adt/oo/classes/zcl_demo"
+    );
+    assert!(serialized["object"].get("reference").is_none());
+    assert!(serialized["object"].get("key").is_none());
     let decoded: zvfs::Node = serde_json::from_str(&json).unwrap();
     assert_eq!(decoded, objects[0]);
     let id_json = serde_json::to_string(&objects[0].id).unwrap();

@@ -255,7 +255,7 @@ impl ToXml for FunctionGroupIncludeProperties {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, AssignObjectIdentity, ObjectRef, ResolvedObjectRef};
+    use crate::{AdtUri, AssignObjectIdentity, ObjectKey, ObjectRef};
 
     const GROUP_XML: &str = include_str!("../../../tests/fixtures/function-group-z-test-group.xml");
     const GROUP_V2_XML: &str =
@@ -285,8 +285,8 @@ mod tests {
             .abap_language_version(AbapLanguageVersion::CloudDevelopment)
             .build()
             .unwrap();
-        let reference = ObjectRef::<FunctionGroup>::new("Z_TEST_GROUP");
-        properties.assign_reference(&ResolvedObjectRef::for_test(
+        let reference = ObjectKey::<FunctionGroup>::new("Z_TEST_GROUP");
+        properties.assign_reference(&ObjectRef::for_test(
             reference,
             AdtUri::parse("/sap/bc/adt/functions/groups/z_test_group").unwrap(),
             None,
@@ -337,9 +337,9 @@ mod tests {
 
     #[test]
     fn assigns_the_parent_to_function_group_include_creation_properties() {
-        let group = ObjectRef::<FunctionGroup>::new("ZGROUP123");
+        let group = ObjectKey::<FunctionGroup>::new("ZGROUP123");
         let include = group.subobject::<FunctionGroupInclude>("LZGROUP123RRR");
-        let resolved_parent = ResolvedObjectRef::for_test(
+        let resolved_parent = ObjectRef::for_test(
             group.erase(),
             AdtUri::parse("/sap/bc/adt/functions/groups/zgroup123").unwrap(),
             None,
@@ -348,7 +348,7 @@ mod tests {
             .description("zttfart")
             .build()
             .unwrap();
-        properties.assign_reference(&ResolvedObjectRef::for_test(
+        properties.assign_reference(&ObjectRef::for_test(
             include,
             AdtUri::parse("/sap/bc/adt/functions/groups/zgroup123/includes/lzgroup123rrr").unwrap(),
             Some(resolved_parent),

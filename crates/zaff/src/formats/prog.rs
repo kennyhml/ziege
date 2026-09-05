@@ -114,7 +114,7 @@ impl FileDescriptor for ProgramMetadata {
 
 impl PropertiesCodec for ProgramMetadata {
     fn render(&self, properties: &ObjectSnapshot<()>) -> Result<String, ProjectionError> {
-        if ProgramProperties::MEDIA_TYPES.contains(&properties.media_type()) {
+        if ProgramProperties::MEDIA_TYPES.contains(properties.media_type()) {
             return render_program_properties(&decode_properties::<ProgramProperties>(
                 properties, "PROG",
             )?);
@@ -127,7 +127,7 @@ impl PropertiesCodec for ProgramMetadata {
         original: &ObjectSnapshot<()>,
         edited: &str,
     ) -> Result<serde_json::Value, ProjectionError> {
-        if ProgramProperties::MEDIA_TYPES.contains(&original.media_type()) {
+        if ProgramProperties::MEDIA_TYPES.contains(original.media_type()) {
             let properties = decode_properties::<ProgramProperties>(original, "PROG")?;
             return encode_properties(merge_program_properties(&properties, edited)?, "PROG");
         }

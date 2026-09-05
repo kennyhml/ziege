@@ -255,8 +255,8 @@ mod tests {
     use http::{HeaderMap, HeaderValue, StatusCode, header};
 
     use crate::{
-        AccessMode, AdtRequest, AdtResponse, AdtUri, Class, Client, ObjectRef, OperationError,
-        Program, Transport,
+        AccessMode, AdtRequest, AdtResponse, AdtUri, Class, Client, ObjectKey, ObjectRef,
+        OperationError, Program, Transport,
     };
 
     struct UnusedTransport;
@@ -269,7 +269,10 @@ mod tests {
     }
 
     fn program() -> ObjectRef<Program> {
-        ObjectRef::<Program>::new("ZPROGRAM")
+        ObjectRef::new(
+            ObjectKey::<Program>::new("ZPROGRAM"),
+            AdtUri::parse("/sap/bc/adt/programs/programs/zprogram").unwrap(),
+        )
     }
 
     fn source_ref<T>(object: &ObjectRef<T>, uri: &str) -> SourceRef {
@@ -326,7 +329,10 @@ mod tests {
 
     #[test]
     fn one_class_lock_can_update_multiple_source_components() {
-        let class = ObjectRef::<Class>::new("ZCL_EXAMPLE");
+        let class = ObjectRef::new(
+            ObjectKey::<Class>::new("ZCL_EXAMPLE"),
+            AdtUri::parse("/sap/bc/adt/oo/classes/zcl_example").unwrap(),
+        );
         let object_lock = ObjectLock::for_test(class.erase(), AccessMode::Modify);
         for uri in [
             "/sap/bc/adt/oo/classes/zcl_example/includes/definitions",
@@ -346,8 +352,14 @@ mod tests {
 
     #[test]
     fn source_update_rejects_a_lock_for_another_object() {
-        let first = ObjectRef::<Program>::new("ZFIRST");
-        let second = ObjectRef::<Program>::new("ZSECOND");
+        let first = ObjectRef::new(
+            ObjectKey::<Program>::new("ZFIRST"),
+            AdtUri::parse("/sap/bc/adt/programs/programs/zfirst").unwrap(),
+        );
+        let second = ObjectRef::new(
+            ObjectKey::<Program>::new("ZSECOND"),
+            AdtUri::parse("/sap/bc/adt/programs/programs/zsecond").unwrap(),
+        );
         let object_lock = ObjectLock::for_test(first.erase(), AccessMode::Modify);
 
         let error = source_ref(&second, "/sap/bc/adt/programs/programs/zsecond/source/main")
@@ -367,6 +379,48 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, ObjectError::ObjectLockNotModifiable));
+    }
+
+    #[test]
+    fn source_update_rejects_the_same_owner_key_at_another_uri() {
+        let owner = program();
+        let other = ObjectRef::new(owner.key().clone(), AdtUri::parse("other/program").unwrap());
+        let lock = ObjectLock::for_test(other.erase(), AccessMode::Modify);
+
+        assert!(matches!(
+            program_source().update(&lock, "REPORT zprogram."),
+            Err(ObjectError::ObjectLockMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn source_helpers_preserve_located_owner_and_ignore_parent_metadata_for_locks() {
+        let owner = ObjectRef::new(
+            ObjectKey::<crate::FunctionGroup>::new("ZFIRST")
+                .subobject::<crate::FunctionModule>("ZMODULE"),
+            AdtUri::parse("advertised/module").unwrap(),
+        )
+        .with_parent_uri(AdtUri::parse("advertised/parent").unwrap());
+        let source =
+            source_from_href(owner.erase(), owner.uri(), "source/main?version=inactive").unwrap();
+        assert_eq!(source.object, owner.erase());
+        assert_eq!(source.object.parent_uri(), owner.parent_uri());
+        assert_eq!(
+            source.uri.as_str(),
+            "/sap/bc/adt/advertised/module/source/main"
+        );
+        assert_eq!(
+            source.query,
+            [("version".to_owned(), "inactive".to_owned())]
+        );
+
+        let lock_owner = ObjectRef::new(
+            ObjectKey::<crate::FunctionGroup>::new("ZSECOND")
+                .subobject::<crate::FunctionModule>("ZMODULE"),
+            owner.uri().clone(),
+        );
+        let lock = ObjectLock::for_test(lock_owner.erase(), AccessMode::Modify);
+        assert!(source.update(&lock, "source").is_ok());
     }
 
     #[test]

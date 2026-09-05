@@ -130,7 +130,7 @@ impl ToXml for MetadataExtensionProperties {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, AssignObjectIdentity, ObjectRef, ObjectType};
+    use crate::{AdtUri, AssignObjectIdentity, ObjectKey, ObjectType};
 
     const METADATA_EXTENSION_XML: &str =
         include_str!("../../../tests/fixtures/metadata-extension-c-mdoapplicationscope.xml");
@@ -154,7 +154,7 @@ mod tests {
         assert_eq!(properties.object_type, MetadataExtension::WORKBENCH_TYPE);
         assert!(properties.abap_language_version.is_none());
 
-        let reference = ObjectRef::<MetadataExtension>::new("Z_METADATA_EXTENSION");
+        let reference = ObjectKey::<MetadataExtension>::new("Z_METADATA_EXTENSION");
         properties.assign_identity(&reference);
         let body = properties.to_xml().unwrap();
         let body = std::str::from_utf8(&body).unwrap();
@@ -188,8 +188,10 @@ mod tests {
     fn relative_source_uri_resolves_against_the_object() {
         let properties = properties();
         let object = crate::ObjectSnapshot::new(
-            ObjectRef::<MetadataExtension>::new(properties.name.clone()),
-            AdtUri::parse("/sap/bc/adt/ddic/ddlx/sources/c_mdoapplicationscope").unwrap(),
+            crate::ObjectRef::new(
+                ObjectKey::<MetadataExtension>::new(properties.name.clone()),
+                AdtUri::parse("/sap/bc/adt/ddic/ddlx/sources/c_mdoapplicationscope").unwrap(),
+            ),
             crate::WorkbenchVersion::Active,
             MetadataExtensionProperties::MEDIA_TYPES[0],
             None,

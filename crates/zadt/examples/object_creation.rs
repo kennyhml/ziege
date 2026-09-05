@@ -3,7 +3,7 @@ mod common;
 use std::{env, error::Error, io};
 
 use serde_json::json;
-use zadt::{Class, ClassCreateProperties, Client, ObjectRef, ObjectType, Operation};
+use zadt::{Class, ClassCreateProperties, Client, ObjectKey, ObjectType, Operation};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -35,8 +35,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .is_final(true)
                 .build()?;
 
-            // get a typed object reference and pass the creation payload
-            let mut request = ObjectRef::<Class>::new(&name).create(properties);
+            // get a typed object key and pass the creation payload
+            let mut request = ObjectKey::<Class>::new(&name).create(properties);
 
             // optionally add a transport
             if let Some(transport) = transport.as_deref() {
@@ -55,8 +55,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             });
 
-            // get an erased object reference and pass the creation payload
-            let mut request = ObjectRef::from_workbench_type(&Class::WORKBENCH_TYPE, &name)?
+            // get an erased object key and pass the creation payload
+            let mut request = ObjectKey::from_workbench_type(&Class::WORKBENCH_TYPE, &name)?
                 .create(properties)?;
 
             // optionally add a transport

@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use super::common::{RepositoryFacet, RepositoryPreselection};
 use crate::{
     AdtUri, CategoryId, Discovery, EncodeError, EncodedOperation, GlobalWorkbenchType, ObjectError,
-    ObjectRef, ObjectType, Operation, OperationResponse, RepositoryError, RequiresDiscovery,
-    ResponseError, Stateless,
+    ObjectKey, ObjectRef, ObjectType, Operation, OperationResponse, RepositoryError,
+    RequiresDiscovery, ResponseError, Stateless,
     resource::{AdvertisedLink, Relations},
 };
 
@@ -271,7 +271,6 @@ pub struct RepositoryObjectEntry {
     pub package: String,
     /// A validated, type-erased reference to the ADT object resource.
     pub reference: ObjectRef<()>,
-    uri: AdtUri,
     /// The corresponding virtual Workbench URI, when supplied by SAP.
     pub virtual_workbench_uri: Option<String>,
     pub expandable: bool,
@@ -283,7 +282,7 @@ pub struct RepositoryObjectEntry {
 impl RepositoryObjectEntry {
     /// Returns the authoritative object URI advertised by RIS.
     pub fn uri(&self) -> &AdtUri {
-        &self.uri
+        self.reference.uri()
     }
 
     /// Returns links advertised for this repository object.
@@ -295,18 +294,21 @@ impl RepositoryObjectEntry {
     ///
     /// The conversion verifies the exact Workbench type.
     pub fn typed_reference<T: ObjectType>(&self) -> Result<ObjectRef<T>, ObjectError> {
-        if self.reference.object_type() != &T::WORKBENCH_TYPE {
-            return Err(ObjectError::UnexpectedRepositoryObjectType {
+        self.reference
+            .typed()
+            .ok_or_else(|| ObjectError::UnexpectedRepositoryObjectType {
                 expected: T::WORKBENCH_TYPE,
                 actual: self.reference.object_type().clone(),
-            });
-        }
-
-        Ok(self.reference.retag())
+            })
     }
 
     /// Returns the runtime-typed object reference advertised by RIS.
     pub fn repository_object(&self) -> ObjectRef<()> {
+        self.reference.clone()
+    }
+
+    /// Returns the runtime-typed object at the location advertised by RIS.
+    pub fn object(&self) -> ObjectRef<()> {
         self.reference.clone()
     }
 }
@@ -328,7 +330,10 @@ impl TryFrom<RawRepositoryObjectEntry> for RepositoryObjectEntry {
             uri: raw.uri,
             source,
         })?;
-        let reference = ObjectRef::from_parts(raw.name.to_ascii_uppercase(), raw.object_type, None);
+        let reference = ObjectRef::new(
+            ObjectKey::from_parts(raw.name.to_ascii_uppercase(), raw.object_type, None),
+            uri.clone(),
+        );
         Ok(Self {
             name: raw.name,
             version: raw.version,
@@ -338,7 +343,6 @@ impl TryFrom<RawRepositoryObjectEntry> for RepositoryObjectEntry {
             description: raw.description,
             relations: Relations::for_base(uri.clone(), raw.links),
             reference,
-            uri,
         })
     }
 }

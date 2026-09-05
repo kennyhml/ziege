@@ -4,7 +4,7 @@ use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
     AnnotationDefinition, AnnotationDefinitionCreateProperties, AnnotationDefinitionProperties,
-    Client, Discovery, EntityTag, Logon, MediaTyped, ObjectRef, Operation, ReqwestTransport,
+    Client, Discovery, EntityTag, Logon, MediaTyped, ObjectKey, Operation, ReqwestTransport,
     WorkbenchVersion,
 };
 
@@ -94,7 +94,7 @@ async fn annotation_definition_properties_advertise_the_primary_source() {
         .await;
 
     let client = discovered_client(&server).await;
-    let reference = ObjectRef::<AnnotationDefinition>::new("UI");
+    let reference = ObjectKey::<AnnotationDefinition>::new("UI");
     let object = reference
         .query()
         .workbench_version(WorkbenchVersion::Active)
@@ -158,7 +158,7 @@ async fn annotation_definition_creation_posts_only_the_sparse_properties_payload
         .await;
 
     let client = discovered_client(&server).await;
-    let reference = ObjectRef::<AnnotationDefinition>::new("Z_ANNOTATION_DEFINITION");
+    let reference = ObjectKey::<AnnotationDefinition>::new("Z_ANNOTATION_DEFINITION");
     let properties = AnnotationDefinitionCreateProperties::builder()
         .description("Created Annotation Definition")
         .package("$TMP")

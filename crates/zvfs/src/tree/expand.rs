@@ -5,7 +5,7 @@ use std::{cmp::Ordering, sync::Arc};
 use async_lock::MutexGuardArc;
 use futures_util::future::try_join_all;
 use zadt::{
-    BatchKey, Batched, Client, CompatibilityError, Discovery, EncodeError, ObjectRef, Operation,
+    BatchKey, Batched, Client, CompatibilityError, Discovery, EncodeError, ObjectKey, Operation,
     OperationError, Package, RepositoryContent, RepositoryContentOperation, RepositoryContentQuery,
     RepositoryFacet, RepositoryObjectEntry, RepositoryPreselection, RepositoryVirtualFolder,
     ResolveError,
@@ -425,7 +425,7 @@ impl PreparedNode {
                 object: None,
             },
             MountTarget::Package(package) => {
-                let reference = ObjectRef::<Package>::new(&package);
+                let reference = ObjectKey::<Package>::new(&package);
                 Self {
                     label,
                     kind: NodeKind::Package {
@@ -463,7 +463,7 @@ impl From<RepositoryObjectEntry> for PreparedNode {
         let object = ObjectNode {
             name: entry.name.clone(),
             package: entry.package.clone(),
-            object_type: entry.reference.object_type().clone(),
+            object_type: entry.object().object_type().clone(),
             uri: entry.uri().clone(),
             virtual_workbench_uri: entry.virtual_workbench_uri.clone(),
             version: entry.version.clone(),

@@ -3,7 +3,7 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Client, Discovery, EntityTag, Logon, MediaTyped, ObjectRef, Operation, ReqwestTransport,
+    Client, Discovery, EntityTag, Logon, MediaTyped, ObjectKey, Operation, ReqwestTransport,
     ServiceDefinition, ServiceDefinitionCreateProperties, ServiceDefinitionProperties,
     WorkbenchVersion,
 };
@@ -95,7 +95,7 @@ async fn service_definition_properties_advertise_the_primary_source() {
         .await;
 
     let client = discovered_client(&server).await;
-    let reference = ObjectRef::<ServiceDefinition>::new("MANAGEDISTRIBUTIONS");
+    let reference = ObjectKey::<ServiceDefinition>::new("MANAGEDISTRIBUTIONS");
     let object = reference
         .query()
         .workbench_version(WorkbenchVersion::Active)
@@ -163,7 +163,7 @@ async fn service_definition_creation_posts_only_the_sparse_properties_payload() 
         .await;
 
     let client = discovered_client(&server).await;
-    let reference = ObjectRef::<ServiceDefinition>::new("Z_SERVICE_DEFINITION");
+    let reference = ObjectKey::<ServiceDefinition>::new("Z_SERVICE_DEFINITION");
     let properties = ServiceDefinitionCreateProperties::builder()
         .description("Created Service Definition")
         .package("$TMP")

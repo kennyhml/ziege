@@ -6,7 +6,7 @@ use serde::Deserialize;
 use crate::{
     Discovery, PostAction, RequiresDiscovery, User, UserSessionId,
     error::{EncodeError, ObjectError, ResponseError},
-    objects::{ObjectRef, ObjectSnapshot, ObjectType},
+    objects::{ObjectKey, ObjectRef, ObjectSnapshot, ObjectTarget, ObjectType},
     operation::{EncodedOperation, Operation, OperationResponse, Stateful},
 };
 
@@ -217,13 +217,31 @@ impl fmt::Debug for ObjectLock {
     }
 }
 
-impl<T> ObjectRef<T> {
+impl<T> ObjectKey<T> {
     /// Creates an object-lock operation.
     pub fn lock(&self, access_mode: AccessMode) -> LockRequest {
         LockRequest::new(self.erase(), access_mode)
     }
 
     /// Creates an operation that releases this object's lock.
+    pub fn unlock(&self, object_lock: ObjectLock) -> Result<UnlockRequest, ObjectError> {
+        if !self.same_identity(object_lock.object().key()) {
+            return Err(ObjectError::ObjectLockMismatch {
+                expected: self.to_string(),
+                actual: object_lock.object().to_string(),
+            });
+        }
+        Ok(UnlockRequest::new(object_lock))
+    }
+}
+
+impl<T> ObjectRef<T> {
+    /// Creates an object-lock operation at this reference's URI.
+    pub fn lock(&self, access_mode: AccessMode) -> LockRequest {
+        LockRequest::new(self.erase(), access_mode)
+    }
+
+    /// Releases a lock for this object's identity and URI.
     pub fn unlock(&self, object_lock: ObjectLock) -> Result<UnlockRequest, ObjectError> {
         if !self.same_identity(object_lock.object()) {
             return Err(ObjectError::ObjectLockMismatch {
@@ -238,18 +256,12 @@ impl<T> ObjectRef<T> {
 impl<T: ObjectType> ObjectSnapshot<T> {
     /// Creates an object-lock operation.
     pub fn lock(&self, access_mode: AccessMode) -> LockRequest {
-        LockRequest::new(self.reference().erase(), access_mode)
+        self.reference().lock(access_mode)
     }
 
     /// Creates an operation that releases this object's lock.
     pub fn unlock(&self, object_lock: ObjectLock) -> Result<UnlockRequest, ObjectError> {
-        if !self.reference().same_identity(object_lock.object()) {
-            return Err(ObjectError::ObjectLockMismatch {
-                expected: self.reference().to_string(),
-                actual: object_lock.object().to_string(),
-            });
-        }
-        Ok(UnlockRequest::new(object_lock))
+        self.reference().unlock(object_lock)
     }
 }
 
@@ -273,7 +285,7 @@ impl ObjectSnapshot<()> {
 #[derive(Debug)]
 pub struct LockRequest {
     /// The repository object to lock.
-    pub object: ObjectRef,
+    target: ObjectTarget,
 
     /// Whether the object is locked for display or modification.
     pub access_mode: AccessMode,
@@ -282,9 +294,9 @@ pub struct LockRequest {
 impl LockRequest {
     const ACCESS_MODE_QUERY: &str = "accessMode";
 
-    pub(crate) fn new(object: ObjectRef, access_mode: AccessMode) -> Self {
+    pub(crate) fn new(target: impl Into<ObjectTarget>, access_mode: AccessMode) -> Self {
         Self {
-            object,
+            target: target.into(),
             access_mode,
         }
     }
@@ -296,7 +308,7 @@ impl Operation for LockRequest {
     type ResolutionRequirement = RequiresDiscovery;
 
     fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
-        let target = resolver.resolve_object_uri(&self.object)?;
+        let target = self.target.resolve_uri(resolver)?;
         let mut request = EncodedOperation::new(Method::POST, target);
         request.push_query(PostAction::QUERY_PARAMETER, PostAction::Lock.as_str());
         request.push_query(Self::ACCESS_MODE_QUERY, self.access_mode.as_str());
@@ -307,7 +319,7 @@ impl Operation for LockRequest {
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         response.require_status(StatusCode::OK)?;
         Ok(ObjectLock::parse(
-            self.object.clone(),
+            self.target.at(response.request_target().clone()),
             self.access_mode,
             response.user_session(),
             response.body(),
@@ -333,8 +345,8 @@ impl Operation for UnlockRequest {
     type Kind = Stateful;
     type ResolutionRequirement = RequiresDiscovery;
 
-    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
-        let target = resolver.resolve_object_uri(self.object_lock.object())?;
+    fn encode(&self, _: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        let target = self.object_lock.object().uri().clone();
         let mut request = EncodedOperation::new(Method::POST, target);
         request.push_query(PostAction::QUERY_PARAMETER, PostAction::Unlock.as_str());
         request.push_query(LOCK_HANDLE_QUERY, self.object_lock.handle());
@@ -508,6 +520,35 @@ mod tests {
 
     const LOCK_XML: &[u8] = include_bytes!("../../tests/fixtures/object-lock.xml");
 
+    fn program() -> ObjectRef<Program> {
+        ObjectRef::new(
+            ObjectKey::<Program>::new("ZTEST"),
+            AdtUri::parse("/sap/bc/adt/programs/programs/ztest").unwrap(),
+        )
+    }
+
+    fn discovery(xml: &[u8]) -> Discovery {
+        struct UnusedTransport;
+
+        #[async_trait::async_trait]
+        impl crate::Transport for UnusedTransport {
+            async fn send(
+                &self,
+                _: crate::AdtRequest,
+            ) -> Result<AdtResponse, crate::TransportError> {
+                unreachable!("locking tests never send requests")
+            }
+        }
+
+        crate::Client::new(UnusedTransport)
+            .with_capabilities(
+                crate::api::discovery::parse_capabilities(xml).unwrap(),
+                crate::api::discovery::parse_capabilities(xml).unwrap(),
+            )
+            .discovery()
+            .clone()
+    }
+
     // Synthetic values using the container nesting and fields read by the local
     // Eclipse AdtLockResult parsers, not a captured populated backend response.
     const LOCK_CONTENTS: &str = r#"
@@ -558,13 +599,7 @@ mod tests {
         let message = &data._scope_messages._messages[0];
         assert_eq!(message._scope, "ARS");
         assert_eq!(message._message._severity, "W");
-        ObjectLock::parse(
-            ObjectRef::<Program>::new("ZTEST").erase(),
-            AccessMode::Modify,
-            None,
-            xml.as_bytes(),
-        )
-        .unwrap();
+        ObjectLock::parse(program().erase(), AccessMode::Modify, None, xml.as_bytes()).unwrap();
     }
 
     #[test]
@@ -594,7 +629,7 @@ mod tests {
                 assert!(xml.contains(&closing));
                 let changed = xml.replacen(&closing, &format!("{addition}{closing}"), 1);
                 let error = ObjectLock::parse(
-                    ObjectRef::<Program>::new("ZTEST").erase(),
+                    program().erase(),
                     AccessMode::Modify,
                     None,
                     changed.as_bytes(),
@@ -614,7 +649,7 @@ mod tests {
         }
         let changed = xml.replacen("<asx:abap ", "<asx:abap unexpected=\"value\" ", 1);
         let error = ObjectLock::parse(
-            ObjectRef::<Program>::new("ZTEST").erase(),
+            program().erase(),
             AccessMode::Modify,
             None,
             changed.as_bytes(),
@@ -628,7 +663,7 @@ mod tests {
 
     #[test]
     fn parses_object_lock_and_transport_metadata() {
-        let object = ObjectRef::<Program>::new("ZTEST").erase();
+        let object = program().erase();
         let lock = ObjectLock::parse(
             object,
             AccessMode::Modify,
@@ -659,7 +694,11 @@ mod tests {
                 "<LINK_UP_MODE />",
                 "<LINK_UP_MODE>MultipleRequests</LINK_UP_MODE>",
             );
-        let object = ObjectRef::<crate::Class>::new("ZCL_TEST").erase();
+        let object = ObjectRef::new(
+            ObjectKey::<crate::Class>::new("ZCL_TEST"),
+            AdtUri::parse("/sap/bc/adt/oo/classes/zcl_test").unwrap(),
+        )
+        .erase();
         let lock = ObjectLock::parse(
             object,
             AccessMode::Modify,
@@ -691,24 +730,28 @@ mod tests {
     }
 
     #[test]
-    fn lock_decode_preserves_logical_object_identity() {
-        let object = ObjectRef::<Program>::new("ZTEST").erase();
+    fn lock_decode_preserves_logical_object_identity_and_actual_request_uri() {
+        let object = ObjectKey::<Program>::new("ZTEST").erase();
         let request = LockRequest::new(object.clone(), AccessMode::Modify);
         let target = AdtUri::parse("/sap/bc/adt/programs/programs/ztest").unwrap();
         let response = OperationResponse::new(
             AdtResponse::new(StatusCode::OK, HeaderMap::new(), LOCK_XML.to_vec()),
-            target,
+            target.clone(),
         );
 
         let object_lock = request.decode(response).unwrap();
 
-        assert_eq!(object_lock.object(), &object);
+        assert_eq!(object_lock.object().key(), &object);
+        assert_eq!(object_lock.object().uri(), &target);
     }
 
     #[test]
     fn object_rejects_another_objects_lock_for_unlock() {
-        let first = ObjectRef::<Program>::new("ZFIRST");
-        let second = ObjectRef::<Program>::new("ZSECOND");
+        let first = ObjectRef::new(
+            ObjectKey::<Program>::new("ZFIRST"),
+            AdtUri::parse("/sap/bc/adt/programs/programs/zfirst").unwrap(),
+        );
+        let second = ObjectKey::<Program>::new("ZSECOND");
         let object_lock = ObjectLock::for_test(first.erase(), AccessMode::Modify);
 
         let error = second.unlock(object_lock).unwrap_err();
@@ -718,10 +761,115 @@ mod tests {
 
     #[test]
     fn object_accepts_the_same_normalized_logical_identity_for_unlock() {
-        let first = ObjectRef::<Program>::new("ztest");
-        let second = ObjectRef::<Program>::new("ZTEST");
+        let first = ObjectRef::new(
+            ObjectKey::<Program>::new("ztest"),
+            AdtUri::parse("/sap/bc/adt/programs/programs/ztest").unwrap(),
+        );
+        let second = ObjectKey::<Program>::new("ZTEST");
         let object_lock = ObjectLock::for_test(first.erase(), AccessMode::Modify);
 
         assert!(second.unlock(object_lock).is_ok());
+    }
+
+    #[test]
+    fn lock_and_unlock_preserve_the_request_uri_across_discovery_drift() {
+        let xml = include_str!("../../tests/fixtures/discovery.xml");
+        let original = discovery(xml.as_bytes());
+        let changed = discovery(
+            xml.replace("programs/programs", "relocated/programs")
+                .as_bytes(),
+        );
+        let empty = discovery(br#"<app:service xmlns:app="http://www.w3.org/2007/app" />"#);
+        let key = program().key().clone();
+        let request = key.lock(AccessMode::Modify);
+        let target = request.encode(&original).unwrap().target().clone();
+        assert_ne!(request.encode(&changed).unwrap().target(), &target);
+        let lock = request
+            .decode(OperationResponse::new(
+                AdtResponse::new(StatusCode::OK, HeaderMap::new(), LOCK_XML.to_vec()),
+                target.clone(),
+            ))
+            .unwrap();
+        assert_eq!(lock.object().key(), &key.erase());
+        assert_eq!(lock.object().uri(), &target);
+        for resolver in [&changed, &empty] {
+            let unlock = key.unlock(lock.clone()).unwrap().encode(resolver).unwrap();
+            assert_eq!(unlock.target(), &target);
+            assert_eq!(
+                unlock.query(),
+                &[
+                    ("_action".to_owned(), "UNLOCK".to_owned()),
+                    ("lockHandle".to_owned(), "LOCK-HANDLE-1".to_owned()),
+                ]
+            );
+            assert_eq!(
+                lock.clone().remove().encode(resolver).unwrap().target(),
+                &target
+            );
+            assert_eq!(
+                lock.object()
+                    .lock(AccessMode::Modify)
+                    .encode(resolver)
+                    .unwrap()
+                    .target(),
+                &target
+            );
+            assert_eq!(
+                lock.object()
+                    .unlock(lock.clone())
+                    .unwrap()
+                    .encode(resolver)
+                    .unwrap()
+                    .target(),
+                &target
+            );
+        }
+
+        let located = program().with_parent_uri(AdtUri::parse("advertised/parent").unwrap());
+        let actual = AdtUri::parse("actual/lock/target").unwrap();
+        let lock = located
+            .lock(AccessMode::Modify)
+            .decode(OperationResponse::new(
+                AdtResponse::new(StatusCode::OK, HeaderMap::new(), LOCK_XML.to_vec()),
+                actual.clone(),
+            ))
+            .unwrap();
+        assert_eq!(lock.object().uri(), &actual);
+        assert_eq!(lock.object().parent_uri(), located.parent_uri());
+        assert_eq!(lock.remove().encode(&empty).unwrap().target(), &actual);
+    }
+
+    #[test]
+    fn located_unlock_and_modification_reject_the_same_key_at_another_uri() {
+        let first = program();
+        let second = ObjectRef::new(first.key().clone(), AdtUri::parse("other/program").unwrap());
+        let lock = ObjectLock::for_test(first.erase(), AccessMode::Modify);
+        assert!(matches!(
+            second.unlock(lock.clone()),
+            Err(ObjectError::ObjectLockMismatch { .. })
+        ));
+        assert!(matches!(
+            lock.validate_modification_for(&second),
+            Err(ObjectError::ObjectLockMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn located_unlock_and_modification_ignore_parent_metadata() {
+        let first = ObjectRef::new(
+            ObjectKey::<crate::FunctionGroup>::new("ZFIRST")
+                .subobject::<crate::FunctionModule>("ZMODULE"),
+            AdtUri::parse("advertised/module").unwrap(),
+        );
+        let second = ObjectRef::new(
+            ObjectKey::<crate::FunctionGroup>::new("ZSECOND")
+                .subobject::<crate::FunctionModule>("ZMODULE"),
+            first.uri().clone(),
+        )
+        .with_parent_uri(AdtUri::parse("advertised/parent").unwrap());
+        assert_ne!(first.key(), second.key());
+        let lock = ObjectLock::for_test(first.erase(), AccessMode::Modify);
+        assert!(second.unlock(lock.clone()).is_ok());
+        assert!(lock.validate_modification_for(&second).is_ok());
     }
 }

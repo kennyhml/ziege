@@ -813,7 +813,7 @@ fn expand_create_properties(input: DeriveInput) -> Result<TokenStream2> {
         quote! {
             fn assign_reference<T>(
                 &mut self,
-                reference: &crate::objects::ResolvedObjectRef<T>,
+                reference: &crate::objects::ObjectRef<T>,
             ) {
                 self.assign_identity(reference);
                 if let Some(parent) = reference.parent_reference() {
@@ -1404,6 +1404,7 @@ mod tests {
         );
         assert!(expanded.contains("fn assign_identity"));
         assert!(expanded.contains("fn assign_reference"));
+        assert!(expanded.contains("reference : & crate :: objects :: ObjectRef < T >"));
         assert!(expanded.contains("reference . parent_reference ()"));
         assert!(expanded.contains("self . container = parent"));
         assert!(!expanded.contains("impl crate :: objects :: PropertyModel"));

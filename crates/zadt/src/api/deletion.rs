@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AdtUri, AdvertisedLink, CategoryId, Discovery, EncodeError, EncodedOperation,
-    GlobalWorkbenchType, ObjectError, ObjectRef, ObjectSnapshot, Operation, OperationResponse,
-    RequiresDiscovery, ResolveError, ResponseError, SnapshotKind, Stateless, TransportNumber, User,
+    GlobalWorkbenchType, ObjectError, ObjectKey, ObjectRef, ObjectSnapshot, Operation,
+    OperationResponse, RequiresDiscovery, ResolveError, ResponseError, SnapshotKind, Stateless,
+    ToXml, TransportNumber, User, objects::ObjectTarget,
 };
 
 /// Checks whether one or more repository objects can be deleted.
@@ -23,7 +24,7 @@ use crate::{
 /// Backend handler: `CL_ADT_DELETION_CHECK_RES`
 #[derive(Debug, Default)]
 pub struct DeletionCheck {
-    payload: DeletionCheckRequest,
+    objects: Vec<DeletionCheckObject>,
 }
 
 impl DeletionCheck {
@@ -39,7 +40,7 @@ impl DeletionCheck {
 
     /// Adds an object to the deletion check.
     pub fn push_object(&mut self, object: impl Into<DeletionCheckObject>) -> &mut Self {
-        self.payload.objects.push(object.into());
+        self.objects.push(object.into());
         self
     }
 }
@@ -51,8 +52,18 @@ impl Operation for DeletionCheck {
 
     fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
         let target = resolver.require_collection_target(Self::CATEGORY)?;
+
+        // Resolve the objects
+        let payload = DeletionCheckRequest {
+            objects: self
+                .objects
+                .iter()
+                .map(|object| object.resolve(resolver))
+                .collect::<Result<Vec<_>, _>>()?,
+        };
+
         let mut request = EncodedOperation::new(Method::POST, target);
-        request.set_body(self.payload.serialize(resolver)?);
+        request.set_body(payload.to_xml()?);
         request.set_content_type(DeletionCheckRequest::MEDIA_TYPE);
         request.set_accept(DeletionCheckResponse::MEDIA_TYPE);
         Ok(request)
@@ -61,16 +72,26 @@ impl Operation for DeletionCheck {
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         response.require_status(StatusCode::OK)?;
         response.require_content_type(&[DeletionCheckResponse::MEDIA_TYPE])?;
+
         serde_xml_rs::from_reader(response.body())
             .map_err(ObjectError::InvalidResponse)
             .map_err(Into::into)
     }
 }
 
-impl<T> ObjectRef<T> {
+impl<T> ObjectKey<T> {
     /// Constructs a [`DeletionCheck`] containing this object.
     ///
     /// Other objects may be added to the check.
+    pub fn deletion_check(&self) -> DeletionCheck {
+        let mut check = DeletionCheck::new();
+        check.push_object(self);
+        check
+    }
+}
+
+impl<T> ObjectRef<T> {
+    /// Constructs a deletion check at this object's advertised location.
     pub fn deletion_check(&self) -> DeletionCheck {
         let mut check = DeletionCheck::new();
         check.push_object(self);
@@ -101,7 +122,7 @@ impl<T: SnapshotKind> ObjectSnapshot<T> {
 /// Backend handler: `CL_ADT_DELETION_RESOURCE`
 #[derive(Debug, Default)]
 pub struct ObjectDeletion {
-    payload: DeletionRequest,
+    objects: Vec<DeletionObject>,
 }
 
 impl ObjectDeletion {
@@ -117,7 +138,7 @@ impl ObjectDeletion {
 
     /// Adds an object to the deletion request.
     pub fn push_object(&mut self, object: impl Into<DeletionObject>) -> &mut Self {
-        self.payload.objects.push(object.into());
+        self.objects.push(object.into());
         self
     }
 }
@@ -129,8 +150,18 @@ impl Operation for ObjectDeletion {
 
     fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
         let target = resolver.require_collection_target(Self::CATEGORY)?;
+
+        // Resolve the object keys
+        let payload = DeletionRequest {
+            objects: self
+                .objects
+                .iter()
+                .map(|object| object.resolve(resolver))
+                .collect::<Result<Vec<_>, _>>()?,
+        };
+
         let mut request = EncodedOperation::new(Method::POST, target);
-        request.set_body(self.payload.serialize(resolver)?);
+        request.set_body(payload.to_xml()?);
         request.set_content_type(DeletionRequest::MEDIA_TYPE);
         request.set_accept(DeletionResult::MEDIA_TYPE);
         Ok(request)
@@ -142,9 +173,26 @@ impl Operation for ObjectDeletion {
         if response.body().is_empty() {
             return Ok(DeletionResult::default());
         }
+
         serde_xml_rs::from_reader(response.body())
             .map_err(ObjectError::InvalidResponse)
             .map_err(Into::into)
+    }
+}
+
+impl<T> ObjectKey<T> {
+    /// Constructs a deletion request containing this local object.
+    pub fn deletion(&self) -> ObjectDeletion {
+        let mut deletion = ObjectDeletion::new();
+        deletion.push_object(self);
+        deletion
+    }
+
+    /// Constructs a deletion request recorded in the supplied transport.
+    pub fn deletion_with_transport(&self, transport: impl Into<TransportNumber>) -> ObjectDeletion {
+        let mut deletion = ObjectDeletion::new();
+        deletion.push_object(DeletionObject::new(self).transport(transport));
+        deletion
     }
 }
 
@@ -176,11 +224,6 @@ impl<T: SnapshotKind> ObjectSnapshot<T> {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct DeletionCheckRequest {
-    pub objects: Vec<DeletionCheckObject>,
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename = "del:checkResponse", deny_unknown_fields)]
 pub struct DeletionCheckResponse {
@@ -189,77 +232,50 @@ pub struct DeletionCheckResponse {
     pub objects: Vec<DeletionCheckObjectResult>,
 }
 
-impl DeletionCheckRequest {
-    const MEDIA_TYPE: &str = "application/vnd.sap.adt.deletion.check.request.v1+xml";
-    const DELETION_NAMESPACE: &str = "http://www.sap.com/adt/deletion";
-    const ADT_CORE_NAMESPACE: &str = "http://www.sap.com/adt/core";
+impl DeletionCheckRequest<'_> {
+    const MEDIA_TYPE: &'static str = "application/vnd.sap.adt.deletion.check.request.v1+xml";
+}
 
-    /// Serializes the deletion-check request using the ADT XML namespaces.
-    pub fn serialize(&self, resolver: &Discovery) -> Result<String, EncodeError> {
-        let objects = self
-            .objects
-            .iter()
-            .map(|object| object.resolve(resolver))
-            .collect::<Result<Vec<_>, _>>()?;
-        serde_xml_rs::SerdeXml::new()
-            .namespace("del", Self::DELETION_NAMESPACE)
-            .namespace("adtcore", Self::ADT_CORE_NAMESPACE)
-            .to_string(&ResolvedDeletionCheckRequest { objects })
-            .map_err(ObjectError::InvalidRequest)
-            .map_err(Into::into)
-    }
+impl ToXml for DeletionCheckRequest<'_> {
+    const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
+        ("del", "http://www.sap.com/adt/deletion"),
+        ("adtcore", "http://www.sap.com/adt/core"),
+    ];
 }
 
 impl DeletionCheckResponse {
     const MEDIA_TYPE: &str = "application/vnd.sap.adt.deletion.check.response.v1+xml";
 }
 
-/// Wire payload sent to the ADT deletion endpoint.
-#[derive(Debug, Default)]
-pub struct DeletionRequest {
-    /// Objects to delete.
-    pub objects: Vec<DeletionObject>,
+impl DeletionRequest<'_> {
+    const MEDIA_TYPE: &'static str = "application/vnd.sap.adt.deletion.request.v1+xml";
 }
 
-impl DeletionRequest {
-    const MEDIA_TYPE: &str = "application/vnd.sap.adt.deletion.request.v1+xml";
-    const DELETION_NAMESPACE: &str = "http://www.sap.com/adt/deletion";
-    const ADT_CORE_NAMESPACE: &str = "http://www.sap.com/adt/core";
-
-    /// Serializes the deletion request using the ADT XML namespaces.
-    pub fn serialize(&self, resolver: &Discovery) -> Result<String, EncodeError> {
-        let objects = self
-            .objects
-            .iter()
-            .map(|object| object.resolve(resolver))
-            .collect::<Result<Vec<_>, _>>()?;
-        serde_xml_rs::SerdeXml::new()
-            .namespace("del", Self::DELETION_NAMESPACE)
-            .namespace("adtcore", Self::ADT_CORE_NAMESPACE)
-            .to_string(&ResolvedDeletionRequest { objects })
-            .map_err(ObjectError::InvalidRequest)
-            .map_err(Into::into)
-    }
+impl ToXml for DeletionRequest<'_> {
+    const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
+        ("del", "http://www.sap.com/adt/deletion"),
+        ("adtcore", "http://www.sap.com/adt/core"),
+    ];
 }
 
 #[derive(Clone, Debug)]
 enum PendingObjectReference {
     Uri(AdtUri),
-    Object(ObjectRef<()>),
+    Object(ObjectTarget<()>),
 }
 
 impl PendingObjectReference {
     fn resolve(&self, resolver: &Discovery) -> Result<AdtUri, ResolveError> {
         match self {
             Self::Uri(uri) => Ok(uri.clone()),
-            Self::Object(object) => resolver.resolve_object_uri(object),
+            Self::Object(object) => object.resolve_uri(resolver),
         }
     }
 }
 
 #[derive(Serialize)]
 #[serde(rename = "del:checkRequest")]
-struct ResolvedDeletionCheckRequest<'a> {
+struct DeletionCheckRequest<'a> {
     #[serde(rename = "del:object")]
     objects: Vec<ResolvedDeletionCheckObject<'a>>,
 }
@@ -275,7 +291,7 @@ struct ResolvedDeletionCheckObject<'a> {
 
 #[derive(Serialize)]
 #[serde(rename = "del:deletionRequest")]
-struct ResolvedDeletionRequest<'a> {
+struct DeletionRequest<'a> {
     #[serde(rename = "del:object")]
     objects: Vec<ResolvedDeletionObject<'a>>,
 }
@@ -301,7 +317,7 @@ pub struct DeletionCheckObject {
 
 impl DeletionCheckObject {
     /// Creates a deletion-check entry for an object reference.
-    pub fn new<T>(object: &ObjectRef<T>) -> Self {
+    pub fn new(object: impl Into<Self>) -> Self {
         object.into()
     }
 
@@ -331,10 +347,10 @@ impl DeletionCheckObject {
     }
 }
 
-impl<T> From<&ObjectRef<T>> for DeletionCheckObject {
-    fn from(value: &ObjectRef<T>) -> Self {
+impl<T> From<&ObjectKey<T>> for DeletionCheckObject {
+    fn from(value: &ObjectKey<T>) -> Self {
         Self {
-            reference: PendingObjectReference::Object(value.erase()),
+            reference: PendingObjectReference::Object(value.erase().into()),
             lock_handle: None,
         }
     }
@@ -343,6 +359,15 @@ impl<T> From<&ObjectRef<T>> for DeletionCheckObject {
 impl From<AdtUri> for DeletionCheckObject {
     fn from(value: AdtUri) -> Self {
         Self::from_uri(value)
+    }
+}
+
+impl<T> From<&ObjectRef<T>> for DeletionCheckObject {
+    fn from(value: &ObjectRef<T>) -> Self {
+        Self {
+            reference: PendingObjectReference::Object(value.erase().into()),
+            lock_handle: None,
+        }
     }
 }
 
@@ -359,7 +384,7 @@ pub struct DeletionObject {
 
 impl DeletionObject {
     /// Creates a deletion entry for an object reference.
-    pub fn new<T>(object: &ObjectRef<T>) -> Self {
+    pub fn new(object: impl Into<Self>) -> Self {
         object.into()
     }
 
@@ -386,10 +411,10 @@ impl DeletionObject {
     }
 }
 
-impl<T> From<&ObjectRef<T>> for DeletionObject {
-    fn from(value: &ObjectRef<T>) -> Self {
+impl<T> From<&ObjectKey<T>> for DeletionObject {
+    fn from(value: &ObjectKey<T>) -> Self {
         Self {
-            reference: PendingObjectReference::Object(value.erase()),
+            reference: PendingObjectReference::Object(value.erase().into()),
             transport_number: String::new(),
         }
     }
@@ -398,6 +423,15 @@ impl<T> From<&ObjectRef<T>> for DeletionObject {
 impl From<AdtUri> for DeletionObject {
     fn from(value: AdtUri) -> Self {
         Self::from_uri(value)
+    }
+}
+
+impl<T> From<&ObjectRef<T>> for DeletionObject {
+    fn from(value: &ObjectRef<T>) -> Self {
+        Self {
+            reference: PendingObjectReference::Object(value.erase().into()),
+            transport_number: String::new(),
+        }
     }
 }
 
@@ -747,8 +781,8 @@ mod tests {
 
     const DELETE_FAILURE_RESPONSE: &str = r#"<?xml version="1.0" encoding="utf-8"?><del:deletionResult xmlns:del="http://www.sap.com/adt/deletion"><del:object del:isDeleted="false" adtcore:uri="/sap/bc/adt/oo/classes/zmissing" adtcore:type="CLAS/OC" adtcore:name="ZMISSING" xmlns:adtcore="http://www.sap.com/adt/core"><del:message del:priority="0" del:type="E"><del:text>Object does not exist</del:text></del:message></del:object></del:deletionResult>"#;
 
-    fn class_reference(name: &str) -> ObjectRef<Class> {
-        ObjectRef::new(name)
+    fn class_reference(name: &str) -> ObjectKey<Class> {
+        ObjectKey::new(name)
     }
 
     fn operation_response(content_type: &'static str, body: &str) -> OperationResponse {
@@ -785,6 +819,106 @@ mod tests {
         assert_eq!(body.matches("<del:object ").count(), 2);
         assert!(body.contains("adtcore:uri=\"/sap/bc/adt/oo/classes/zmyclass\""));
         assert!(body.contains("<del:lockHandle>DELETION-LOCK</del:lockHandle>"));
+    }
+
+    #[test]
+    fn encoding_resolves_pending_entries_without_changing_the_operation() {
+        let client = discovered_client();
+        let changed_xml = std::str::from_utf8(DISCOVERY_XML)
+            .unwrap()
+            .replace("/sap/bc/adt/oo/classes", "/sap/bc/adt/custom/classes");
+        let changed_client = Client::new(UnusedTransport).with_capabilities(
+            crate::api::discovery::parse_capabilities(changed_xml.as_bytes()).unwrap(),
+            crate::api::discovery::parse_capabilities(changed_xml.as_bytes()).unwrap(),
+        );
+        let key = class_reference("ZPENDING");
+        let located = ObjectRef::new(
+            class_reference("ZLOCATED"),
+            AdtUri::parse("/sap/bc/adt/advertised/located").unwrap(),
+        );
+        let uri = AdtUri::parse("/sap/bc/adt/advertised/uri-only").unwrap();
+        let mut check = key.deletion_check();
+        check.push_object(&located).push_object(uri.clone());
+        let mut deletion = key.deletion();
+        deletion.push_object(&located).push_object(uri);
+
+        for (first, changed, repeated) in [
+            (
+                check.encode(client.discovery()).unwrap(),
+                check.encode(changed_client.discovery()).unwrap(),
+                check.encode(client.discovery()).unwrap(),
+            ),
+            (
+                deletion.encode(client.discovery()).unwrap(),
+                deletion.encode(changed_client.discovery()).unwrap(),
+                deletion.encode(client.discovery()).unwrap(),
+            ),
+        ] {
+            assert_eq!(first.body(), repeated.body());
+            assert!(
+                std::str::from_utf8(first.body())
+                    .unwrap()
+                    .contains("/sap/bc/adt/oo/classes/zpending")
+            );
+            let body = std::str::from_utf8(changed.body()).unwrap();
+            let logical = body.find("/sap/bc/adt/custom/classes/zpending").unwrap();
+            let located = body.find("/sap/bc/adt/advertised/located").unwrap();
+            let uri = body.find("/sap/bc/adt/advertised/uri-only").unwrap();
+            assert!(logical < located && located < uri);
+            assert_eq!(body.matches("<del:object ").count(), 3);
+        }
+    }
+
+    #[test]
+    fn deletion_preserves_a_parentless_childs_advertised_uri() {
+        let client = discovered_client();
+        let object = ObjectRef::new(
+            ObjectKey::<crate::FunctionModule>::from_parts(
+                "Z_MODULE".to_owned(),
+                "FUGR/FF".parse().unwrap(),
+                None,
+            ),
+            AdtUri::parse("/sap/bc/adt/custom/deletable/42").unwrap(),
+        );
+        let mut check = object.deletion_check();
+        check.push_object(DeletionCheckObject::new(&object).lock_handle("LOCK-42"));
+        let check = check.encode(client.discovery()).unwrap();
+        let local = object.deletion().encode(client.discovery()).unwrap();
+        let transported = object
+            .deletion_with_transport("DEVK900001")
+            .encode(client.discovery())
+            .unwrap();
+        let erased = object.erase();
+        let erased_check = erased.deletion_check().encode(client.discovery()).unwrap();
+        let erased_local = erased.deletion().encode(client.discovery()).unwrap();
+        let erased_transported = erased
+            .deletion_with_transport("DEVK900001")
+            .encode(client.discovery())
+            .unwrap();
+
+        for request in [
+            &check,
+            &local,
+            &transported,
+            &erased_check,
+            &erased_local,
+            &erased_transported,
+        ] {
+            let body = std::str::from_utf8(request.body()).unwrap();
+            assert!(body.contains("adtcore:uri=\"/sap/bc/adt/custom/deletable/42\""));
+        }
+        assert_eq!(local.body(), erased_local.body());
+        assert_eq!(transported.body(), erased_transported.body());
+        assert!(
+            std::str::from_utf8(check.body())
+                .unwrap()
+                .contains("LOCK-42")
+        );
+        assert!(
+            std::str::from_utf8(transported.body())
+                .unwrap()
+                .contains("DEVK900001")
+        );
     }
 
     #[test]

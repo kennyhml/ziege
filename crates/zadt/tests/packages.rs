@@ -3,7 +3,7 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    AccessMode, Client, Discovery, MediaTyped, ObjectRef, Operation, Package, PackageProperties,
+    AccessMode, Client, Discovery, MediaTyped, ObjectKey, Operation, Package, PackageProperties,
     ReqwestTransport,
 };
 
@@ -87,7 +87,7 @@ async fn package_properties_advertise_all_supported_contracts() {
         .await;
 
     let client = discovered_client(&server).await;
-    let reference = ObjectRef::<Package>::new("sadt_tools_core");
+    let reference = ObjectKey::<Package>::new("sadt_tools_core");
     let response = reference.query().execute(&client).await.unwrap();
     assert_eq!(response.media_type(), PackageProperties::MEDIA_TYPES[0]);
     let package = response.properties();
@@ -196,7 +196,7 @@ async fn package_properties_update_returns_none_for_an_empty_response() {
         .await;
 
     let client = discovered_client(&server).await;
-    let reference = ObjectRef::<Package>::new("SADT_TOOLS_CORE");
+    let reference = ObjectKey::<Package>::new("SADT_TOOLS_CORE");
     let package = reference.query().execute(&client).await.unwrap();
     let original_description = package.properties().description.clone();
     let mut updated_properties = package.properties().clone();
@@ -271,7 +271,7 @@ async fn package_tree_queries_expand_the_discovered_template() {
         .await;
 
     let client = discovered_client(&server).await;
-    let package = ObjectRef::<Package>::new("SADT_TOOLS_CORE");
+    let package = ObjectKey::<Package>::new("SADT_TOOLS_CORE");
     let ancestors = package.super_tree().execute(&client).await.unwrap();
     let children = package.sub_tree().execute(&client).await.unwrap();
 

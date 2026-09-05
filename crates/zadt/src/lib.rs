@@ -24,10 +24,10 @@ pub use api::activation::{
 };
 pub use api::classes::{ClassRun, ClassRunResult};
 pub use api::deletion::{
-    DeletionCheck, DeletionCheckObject, DeletionCheckObjectResult, DeletionCheckRequest,
-    DeletionCheckResponse, DeletionIncludedObject, DeletionLockingTransport,
-    DeletionLockingTransportProperties, DeletionMessage, DeletionObject, DeletionObjectResult,
-    DeletionRequest, DeletionResult, DeletionTransportMessage, DeletionUsage, ObjectDeletion,
+    DeletionCheck, DeletionCheckObject, DeletionCheckObjectResult, DeletionCheckResponse,
+    DeletionIncludedObject, DeletionLockingTransport, DeletionLockingTransportProperties,
+    DeletionMessage, DeletionObject, DeletionObjectResult, DeletionResult,
+    DeletionTransportMessage, DeletionUsage, ObjectDeletion,
 };
 pub use api::discovery::{
     Capabilities, Category, CategoryId, Collection, CoreDiscoveryQuery, DiscoveryQuery,
@@ -98,9 +98,9 @@ pub use objects::{
     InterfaceCreatePropertiesBuilder, InterfaceCreatePropertiesBuilderError, InterfaceProperties,
     InvalidWorkbenchType, Links, MediaTyped, MetadataExtension, MetadataExtensionCreateProperties,
     MetadataExtensionCreatePropertiesBuilder, MetadataExtensionCreatePropertiesBuilderError,
-    MetadataExtensionProperties, ObjectIdentity, ObjectRef, ObjectReferences, ObjectSnapshot,
-    ObjectType, Package, PackageAssignment, PackageAttributes, PackageProperties, PackageTransport,
-    PackageUseAccess, PrimaryObjectType, Program, ProgramProperties, ResolvedObjectRef,
+    MetadataExtensionProperties, ObjectIdentity, ObjectKey, ObjectRef, ObjectReferences,
+    ObjectSnapshot, ObjectType, Package, PackageAssignment, PackageAttributes, PackageProperties,
+    PackageTransport, PackageUseAccess, PrimaryObjectType, Program, ProgramProperties,
     ServiceDefinition, ServiceDefinitionCreateProperties, ServiceDefinitionCreatePropertiesBuilder,
     ServiceDefinitionCreatePropertiesBuilderError, ServiceDefinitionProperties, SnapshotKind,
     Source, SourceComponents, Structure, SubObject, SubObjectDescriptor, SyntaxConfiguration,

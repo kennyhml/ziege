@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use zadt_macros::object_type;
 
 use super::super::{
-    AbapLanguageVersion, GlobalWorkbenchType, MediaTyped, ObjectRef, ToXml, WorkbenchVersion,
+    AbapLanguageVersion, GlobalWorkbenchType, MediaTyped, ObjectKey, ToXml, WorkbenchVersion,
 };
 use crate::{AdvertisedLink, AdvertisedObjectReference, MediaTypes};
 
@@ -30,14 +30,14 @@ pub struct Program;
 /// The standalone ABAP include object type.
 pub struct Include;
 
-impl ObjectRef<Program> {
+impl ObjectKey<Program> {
     #[cfg(test)]
     pub(crate) fn for_test(name: &str) -> Self {
         Self::new(name)
     }
 }
 
-impl ObjectRef<Include> {
+impl ObjectKey<Include> {
     #[cfg(test)]
     pub(crate) fn for_test(name: &str) -> Self {
         Self::new(name)
@@ -272,7 +272,7 @@ impl ToXml for IncludeProperties {
 
 #[cfg(test)]
 mod tests {
-    use super::ObjectRef;
+    use super::ObjectKey;
     use super::*;
     use crate::ObjectType;
 
@@ -345,7 +345,7 @@ mod tests {
     #[test]
     fn serializes_program_properties_as_a_complete_update_payload() {
         let program = parse_program(PROGRAM_XML).unwrap();
-        let reference = ObjectRef::<Program>::for_test(&program.name).erase();
+        let reference = ObjectKey::<Program>::for_test(&program.name).erase();
         let properties = Program::DESCRIPTOR
             .properties_from_json(&reference, serde_json::to_value(&program).unwrap())
             .unwrap();
@@ -370,7 +370,7 @@ mod tests {
     #[test]
     fn serializes_include_properties_as_a_complete_update_payload() {
         let include = parse_include(INCLUDE_XML).unwrap();
-        let reference = ObjectRef::<Include>::for_test(&include.name).erase();
+        let reference = ObjectKey::<Include>::for_test(&include.name).erase();
         let properties = Include::DESCRIPTOR
             .properties_from_json(&reference, serde_json::to_value(&include).unwrap())
             .unwrap();

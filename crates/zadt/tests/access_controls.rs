@@ -4,7 +4,7 @@ use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
     AccessControl, AccessControlCreateProperties, AccessControlProperties, Client, Discovery,
-    EntityTag, Logon, MediaTyped, ObjectRef, Operation, ReqwestTransport, WorkbenchVersion,
+    EntityTag, Logon, MediaTyped, ObjectKey, Operation, ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -95,7 +95,7 @@ async fn access_control_properties_advertise_the_primary_source() {
         .await;
 
     let client = discovered_client(&server).await;
-    let reference = ObjectRef::<AccessControl>::new("SDSH_CDS_DOMAIN_VAL_DCL");
+    let reference = ObjectKey::<AccessControl>::new("SDSH_CDS_DOMAIN_VAL_DCL");
     let object = reference
         .query()
         .workbench_version(WorkbenchVersion::Active)
@@ -156,7 +156,7 @@ async fn access_control_creation_posts_only_the_sparse_properties_payload() {
         .await;
 
     let client = discovered_client(&server).await;
-    let reference = ObjectRef::<AccessControl>::new("Z_ACCESS_CONTROL");
+    let reference = ObjectKey::<AccessControl>::new("Z_ACCESS_CONTROL");
     let properties = AccessControlCreateProperties::builder()
         .description("Created Access Control")
         .package("$TMP")
