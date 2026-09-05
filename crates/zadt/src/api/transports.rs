@@ -517,6 +517,7 @@ impl<'de> Deserialize<'de> for TransportStatus {
 
 /// One CTS transport request header returned by ADT.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct TransportRequest {
     /// The transport request number (`TRKORR`).
     #[serde(rename = "TRKORR")]
@@ -1036,20 +1037,24 @@ struct RawTransportCreateData<'a> {
 }
 
 #[derive(Deserialize)]
-#[serde(rename = "asx:abap")]
+#[serde(rename = "asx:abap", deny_unknown_fields)]
 struct RawTransportCheckResponse {
+    #[serde(rename = "@version", default)]
+    _version: Option<String>,
+
     #[serde(rename = "asx:values")]
     values: RawTransportCheckValues,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTransportCheckValues {
     #[serde(rename = "DATA")]
     data: RawTransportCheckData,
 }
 
 #[derive(Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 struct RawTransportCheckData {
     #[serde(rename = "PGMID")]
     program_id: String,
@@ -1071,6 +1076,15 @@ struct RawTransportCheckData {
 
     #[serde(rename = "KORRFLAG")]
     package_recording_active: String,
+
+    #[serde(rename = "AS4USER")]
+    _owner: String,
+
+    #[serde(rename = "NAMESPACE")]
+    _namespace: String,
+
+    #[serde(rename = "URI")]
+    _uri: String,
 
     #[serde(rename = "PDEVCLASS")]
     transport_layer: String,
@@ -1110,13 +1124,14 @@ struct RawTransportCheckData {
 }
 
 #[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTransportCheckMessages {
     #[serde(rename = "CTS_MESSAGE", default)]
     messages: Vec<RawTransportCheckMessage>,
 }
 
 #[derive(Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 struct RawTransportCheckMessage {
     #[serde(rename = "SEVERITY")]
     severity: String,
@@ -1138,12 +1153,14 @@ struct RawTransportCheckMessage {
 }
 
 #[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTransportCheckVariables {
     #[serde(rename = "CTS_VARIABLE", default)]
     variables: Vec<RawTransportCheckVariable>,
 }
 
 #[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTransportCheckVariable {
     #[serde(rename = "VARIABLE", default)]
     value: String,
@@ -1168,24 +1185,40 @@ impl From<RawTransportCheckMessage> for TransportCheckMessage {
 }
 
 #[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTransportCheckRequests {
     #[serde(rename = "CTS_REQUEST", default)]
     requests: Vec<RawTransportCheckRequestEntry>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTransportCheckRequestEntry {
     #[serde(rename = "REQ_HEADER")]
     header: TransportRequest,
+
+    #[serde(rename = "REQ_ATTRS", default)]
+    _attributes: RawTransportRequestAttributes,
+
+    #[serde(rename = "TASK_HEADERS", default)]
+    _tasks: RawTransportTasks,
 }
 
+// Fixtures contain only empty REQ_ATTRS, and local research does not establish
+// its entry schema. Fail closed on populated containers until that is known.
 #[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawTransportRequestAttributes {}
+
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTransportCheckLocks {
     #[serde(rename = "CTS_OBJECT_LOCK", default)]
     locks: Vec<RawTransportObjectLock>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTransportObjectLock {
     #[serde(rename = "OBJECT_KEY")]
     object: RawTransportObjectKey,
@@ -1195,6 +1228,7 @@ struct RawTransportObjectLock {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTransportObjectKey {
     #[serde(rename = "PGMID")]
     program_id: String,
@@ -1207,22 +1241,27 @@ struct RawTransportObjectKey {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTransportLockHolder {
     #[serde(rename = "REQ_HEADER")]
     request: TransportRequest,
+
+    #[serde(rename = "REQ_ATTRS", default)]
+    _attributes: RawTransportRequestAttributes,
 
     #[serde(rename = "TASK_HEADERS", default)]
     tasks: RawTransportTasks,
 }
 
 #[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTransportTasks {
     #[serde(rename = "CTS_TASK_HEADER", default)]
     tasks: Vec<RawTransportTask>,
 }
 
 #[derive(Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 struct RawTransportTask {
     #[serde(rename = "TRKORR")]
     number: String,
@@ -1281,13 +1320,14 @@ impl From<RawTransportTask> for TransportTask {
 }
 
 #[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTransportProjects {
     #[serde(rename = "SADT_CTS_PROJECT", default)]
     projects: Vec<RawTransportProject>,
 }
 
 #[derive(Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 struct RawTransportProject {
     #[serde(rename = "TRKORR")]
     request_number: String,
@@ -1310,51 +1350,65 @@ impl From<RawTransportProject> for TransportProject {
 }
 
 #[derive(Deserialize)]
-#[serde(rename = "asx:abap")]
+#[serde(rename = "asx:abap", deny_unknown_fields)]
 struct RawTransportRequests {
+    #[serde(rename = "@version", default)]
+    _version: Option<String>,
+
     #[serde(rename = "asx:values")]
     values: RawTransportValues,
 }
 
 #[derive(Deserialize)]
-#[serde(rename = "asx:abap")]
+#[serde(rename = "asx:abap", deny_unknown_fields)]
 struct RawTransportRequestResponse {
+    #[serde(rename = "@version", default)]
+    _version: Option<String>,
+
     #[serde(rename = "asx:values")]
     values: RawTransportRequestValue,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTransportRequestValue {
     #[serde(rename = "DATA")]
     data: TransportRequest,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTransportValues {
     #[serde(rename = "DATA")]
     data: RawTransportData,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTransportData {
     #[serde(rename = "CTS_REQ_HEADER", default)]
     requests: Vec<TransportRequest>,
 }
 
 #[derive(Deserialize)]
-#[serde(rename = "asx:abap")]
+#[serde(rename = "asx:abap", deny_unknown_fields)]
 struct RawTransportCreation {
+    #[serde(rename = "@version", default)]
+    _version: Option<String>,
+
     #[serde(rename = "asx:values")]
     values: RawTransportCreationValues,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTransportCreationValues {
     #[serde(rename = "DATA")]
     data: RawTransportCreationData,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTransportCreationData {
     #[serde(rename = "TRKORR")]
     transport_number: String,
@@ -1364,6 +1418,7 @@ struct RawTransportCreationData {
 }
 
 #[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTransportCreationMessage {
     #[serde(rename = "SEVERITY", default)]
     severity: String,
@@ -1439,6 +1494,128 @@ mod tests {
     const TRANSPORTS_XML: &[u8] = include_bytes!("../../tests/fixtures/transport-requests.xml");
     const TRANSPORT_XML: &[u8] = include_bytes!("../../tests/fixtures/transport-request.xml");
     const TRANSPORT_CHECK_XML: &[u8] = include_bytes!("../../tests/fixtures/transport-check.xml");
+
+    fn assert_rejects_unknown_fields(
+        xml: &[u8],
+        parse: fn(&[u8]) -> Result<(), CtsError>,
+        containers: &[&str],
+    ) {
+        let xml = std::str::from_utf8(xml)
+            .unwrap()
+            .replace("<REQ_ATTRS />", "<REQ_ATTRS></REQ_ATTRS>")
+            .replace("<TASK_HEADERS />", "<TASK_HEADERS></TASK_HEADERS>");
+        parse(xml.as_bytes()).unwrap();
+        for container in containers {
+            let closing = format!("</{container}>");
+            assert!(xml.contains(&closing), "missing test container {container}");
+            for (offset, _) in xml.match_indices(&closing) {
+                let mut changed = xml.clone();
+                changed.insert_str(offset, "<UNEXPECTED />");
+                let error = parse(changed.as_bytes()).unwrap_err();
+                assert!(
+                    matches!(error, CtsError::InvalidTransportResponse(_))
+                        && error.to_string().contains("unknown field `UNEXPECTED`"),
+                    "{container}: {error}"
+                );
+            }
+        }
+        let changed = xml.replacen("<asx:abap ", "<asx:abap unexpected=\"value\" ", 1);
+        assert_ne!(xml, changed);
+        let error = parse(changed.as_bytes()).unwrap_err();
+        assert!(
+            error.to_string().contains("unknown field `@unexpected`"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn transport_responses_reject_unknown_fields_at_every_level() {
+        assert_rejects_unknown_fields(
+            TRANSPORTS_XML,
+            |body| TransportRequests::parse(body).map(|_| ()),
+            &["asx:abap", "asx:values", "DATA", "CTS_REQ_HEADER"],
+        );
+        assert_rejects_unknown_fields(
+            TRANSPORT_XML,
+            |body| TransportRequest::parse(body).map(|_| ()),
+            &["asx:abap", "asx:values", "DATA"],
+        );
+        assert_rejects_unknown_fields(
+            TRANSPORT_CHECK_XML,
+            |body| TransportCheckResult::parse(body).map(|_| ()),
+            &[
+                "asx:abap",
+                "asx:values",
+                "DATA",
+                "MESSAGES",
+                "CTS_MESSAGE",
+                "VARIABLES",
+                "CTS_VARIABLE",
+                "REQUESTS",
+                "CTS_REQUEST",
+                "REQ_HEADER",
+                "REQ_ATTRS",
+                "TASK_HEADERS",
+                "CTS_TASK_HEADER",
+                "LOCKS",
+                "CTS_OBJECT_LOCK",
+                "OBJECT_KEY",
+                "LOCK_HOLDER",
+                "CTS_PROJECTS",
+                "SADT_CTS_PROJECT",
+            ],
+        );
+        assert_rejects_unknown_fields(
+            br#"<asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+                <asx:values><DATA><TRKORR>DEVK900003</TRKORR>
+                <MESSAGE></MESSAGE></DATA></asx:values></asx:abap>"#,
+            |body| TransportCreation::parse(body).map(|_| ()),
+            &["asx:abap", "asx:values", "DATA", "MESSAGE"],
+        );
+    }
+
+    #[test]
+    fn request_attributes_fail_closed_on_attributes_and_text_too() {
+        for contents in [
+            "<REQ_ATTRS unexpected=\"value\"/>",
+            "<REQ_ATTRS>value</REQ_ATTRS>",
+        ] {
+            let xml = std::str::from_utf8(TRANSPORT_CHECK_XML).unwrap();
+            for (offset, original) in xml.match_indices("<REQ_ATTRS />") {
+                let mut changed = xml.to_owned();
+                changed.replace_range(offset..offset + original.len(), contents);
+                assert!(matches!(
+                    TransportCheckResult::parse(changed.as_bytes()),
+                    Err(CtsError::InvalidTransportResponse(_))
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn models_check_context_and_populated_request_tasks() {
+        let xml = std::str::from_utf8(TRANSPORT_CHECK_XML).unwrap();
+        let task_headers = &xml[xml.find("<TASK_HEADERS>").unwrap()
+            ..xml.find("</TASK_HEADERS>").unwrap() + "</TASK_HEADERS>".len()];
+        let xml = xml
+            .replace("<AS4USER />", "<AS4USER>DEVELOPER</AS4USER>")
+            .replace("<NAMESPACE />", "<NAMESPACE>/EXAMPLE/</NAMESPACE>")
+            .replace("<TASK_HEADERS />", task_headers);
+        let raw: RawTransportCheckResponse = serde_xml_rs::from_str(&xml).unwrap();
+        assert_eq!(raw._version.as_deref(), Some("1.0"));
+        let data = raw.values.data;
+        assert_eq!(data._owner, "DEVELOPER");
+        assert_eq!(data._namespace, "/EXAMPLE/");
+        assert_eq!(
+            data._uri,
+            "/sap/bc/adt/oo/classes/zcl_example/includes/testclasses"
+        );
+        assert_eq!(
+            data.requests.requests[0]._tasks.tasks[0].number,
+            "DEVK900002"
+        );
+        TransportCheckResult::parse(xml.as_bytes()).unwrap();
+    }
 
     #[test]
     fn transport_numbers_preserve_backend_specific_values() {

@@ -1356,7 +1356,7 @@ mod tests {
         let expanded = expand_derive(quote! {
             #[doc = "Properties."]
             #[create_properties(name = ClassCreateProperties, doc = "Creation properties.")]
-            #[serde(rename = "class:abapClass")]
+            #[serde(rename = "class:abapClass", deny_unknown_fields)]
             pub struct ClassProperties {
                 #[for_create(identity, default)]
                 #[serde(rename = "@adtcore:name")]
@@ -1381,6 +1381,7 @@ mod tests {
         .unwrap();
 
         assert!(expanded.contains("pub struct ClassCreateProperties"));
+        assert!(expanded.contains("deny_unknown_fields"));
         assert!(expanded.contains("doc = \"Creation properties.\""));
         assert!(expanded.contains("doc = \"Creation language.\""));
         assert!(expanded.contains("serde (default)"));

@@ -129,7 +129,7 @@ pub(crate) fn parse_capabilities(body: &[u8]) -> Result<Capabilities, DiscoveryE
 /// containing related [`Collection`] values. Use [`Capabilities::collection`]
 /// with a category scheme and term when selecting a protocol capability.
 #[derive(Debug, Deserialize)]
-#[serde(rename = "app:service")]
+#[serde(rename = "app:service", deny_unknown_fields)]
 pub struct Capabilities {
     #[serde(rename = "app:workspace", default)]
     workspaces: Vec<Workspace>,
@@ -214,6 +214,7 @@ impl CapabilityIndex {
 
 /// A named group of related ADT collections.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Workspace {
     #[serde(rename = "atom:title")]
     title: String,
@@ -237,6 +238,7 @@ impl Workspace {
 
 /// An ADT resource collection advertised by a discovery document.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Collection {
     #[serde(rename = "@href")]
     href: String,
@@ -298,6 +300,7 @@ impl Collection {
 /// ADT identifies a category by the combination of its [`scheme`](Self::scheme)
 /// and [`term`](Self::term).
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Category {
     #[serde(rename = "@term")]
     term: String,
@@ -319,6 +322,7 @@ impl Category {
 
 /// A parameterized link from a collection to a related ADT resource.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TemplateLink {
     #[serde(rename = "@title")]
     title: Option<String>,
@@ -363,6 +367,7 @@ impl TemplateLink {
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TemplateLinks {
     #[serde(rename = "adtcomp:templateLink", default)]
     links: Vec<TemplateLink>,
@@ -396,6 +401,27 @@ mod tests {
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
     const INVALID_DISCOVERY_XML: &[u8] =
         include_bytes!("../../tests/fixtures/invalid-discovery.xml");
+
+    #[test]
+    fn rejects_unknown_discovery_fields_including_template_wrappers() {
+        let xml = std::str::from_utf8(DISCOVERY_XML).unwrap();
+        for tag in [
+            "app:service",
+            "app:workspace",
+            "app:collection",
+            "adtcomp:templateLinks",
+        ] {
+            for (from, to) in [
+                (format!("<{tag}"), format!("<{tag} unexpected=\"true\"")),
+                (format!("</{tag}>"), format!("<unexpected/></{tag}>")),
+            ] {
+                let body = xml.replacen(&from, &to, 1);
+                let error = parse_capabilities(body.as_bytes()).unwrap_err().to_string();
+                assert!(error.contains("unknown field"), "{tag}: {error}");
+                assert!(error.contains("unexpected"), "{tag}: {error}");
+            }
+        }
+    }
 
     #[test]
     fn parses_discovery_capabilities() {

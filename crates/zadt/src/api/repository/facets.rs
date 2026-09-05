@@ -104,13 +104,14 @@ impl RepositoryFacets {
 }
 
 #[derive(Deserialize)]
-#[serde(rename = "vf:facets")]
+#[serde(rename = "vf:facets", deny_unknown_fields)]
 struct RawRepositoryFacets {
     #[serde(rename = "vf:facet", default)]
     facets: Vec<RawRepositoryFacetDefinition>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawRepositoryFacetDefinition {
     #[serde(rename = "@key")]
     key: String,
@@ -129,6 +130,7 @@ struct RawRepositoryFacetDefinition {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTemplateLink {
     #[serde(rename = "@title")]
     title: Option<String>,

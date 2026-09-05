@@ -321,7 +321,7 @@ impl RepositoryObjectProperties {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
-#[serde(rename = "tpr:transportProperties")]
+#[serde(rename = "tpr:transportProperties", deny_unknown_fields)]
 pub struct AssignedTransportRequests {
     #[serde(rename = "tpr:transport", default)]
     pub requests: Vec<AssignedTransport>,
@@ -341,7 +341,7 @@ impl AssignedTransportRequests {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-#[serde(rename = "tpr:transport")]
+#[serde(rename = "tpr:transport", deny_unknown_fields)]
 pub struct AssignedTransport {
     #[serde(rename = "@number")]
     pub number: TransportNumber,
@@ -357,7 +357,7 @@ pub struct AssignedTransport {
 }
 
 #[derive(Deserialize)]
-#[serde(rename = "opr:objectProperties")]
+#[serde(rename = "opr:objectProperties", deny_unknown_fields)]
 struct RawRepositoryObjectProperties {
     #[serde(rename = "opr:object")]
     object: RawRepositoryObjectSummary,
@@ -366,6 +366,7 @@ struct RawRepositoryObjectProperties {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawRepositoryObjectSummary {
     #[serde(rename = "@name")]
     name: String,
@@ -382,6 +383,7 @@ struct RawRepositoryObjectSummary {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawRepositoryProperty {
     #[serde(rename = "@facet")]
     facet: RepositoryFacet,

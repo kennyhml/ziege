@@ -223,6 +223,7 @@ fn required<T>(value: Option<T>, field: &'static str) -> Result<T, ObjectError> 
 }
 
 #[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawPackageInterfaces {
     #[serde(rename = "@pak:isVisible", default)]
     _visible: bool,
@@ -231,7 +232,7 @@ struct RawPackageInterfaces {
 }
 
 #[derive(Deserialize)]
-#[serde(rename = "pak:packageTree")]
+#[serde(rename = "pak:packageTree", deny_unknown_fields)]
 struct RawPackageTree {
     #[serde(rename = "@pak:isSuperTree")]
     is_super_tree: bool,
@@ -240,6 +241,7 @@ struct RawPackageTree {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawPackageTreeNode {
     #[serde(rename = "@adtcore:uri")]
     uri: String,
@@ -262,7 +264,7 @@ struct RawPackageTreeNode {
 }
 
 #[derive(Deserialize)]
-#[serde(rename = "pkcs:settings")]
+#[serde(rename = "pkcs:settings", deny_unknown_fields)]
 struct RawPackageSettings {
     #[serde(rename = "@pkcs:showPackageCheckErrors")]
     show_package_check_errors: bool,
@@ -453,6 +455,25 @@ mod tests {
 
         assert_eq!(properties.object_type.as_str(), "PROG/P");
         assert_eq!(properties.name, "OTHER_PACKAGE");
+    }
+
+    #[test]
+    fn rejects_unknown_package_tree_fields_including_interface_wrappers() {
+        let xml = std::str::from_utf8(SUPER_TREE_XML).unwrap();
+        let base = AdtUri::parse("/sap/bc/adt/packages/$tree").unwrap();
+        for tag in ["pak:packageTree", "pak:treeNode", "pak:packageInterfaces"] {
+            for (from, to) in [
+                (format!("<{tag}"), format!("<{tag} unexpected=\"true\"")),
+                (format!("</{tag}>"), format!("<unexpected/></{tag}>")),
+            ] {
+                let body = xml.replacen(&from, &to, 1);
+                let error = PackageTree::parse(body.as_bytes(), &base)
+                    .unwrap_err()
+                    .to_string();
+                assert!(error.contains("unknown field"), "{tag}: {error}");
+                assert!(error.contains("unexpected"), "{tag}: {error}");
+            }
+        }
     }
 
     #[test]

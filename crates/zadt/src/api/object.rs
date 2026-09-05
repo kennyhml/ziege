@@ -503,9 +503,9 @@ impl<T: ObjectType> ObjectSnapshot<T> {
         let supported = T::Properties::MEDIA_TYPES;
         let media_type = response.require_supported_media_type(supported)?;
 
-        let extract = WorkbenchVersionExtractor::from_xml(response.body())?;
         let properties = T::Properties::from_xml(response.body())?;
         properties.validate_for(resource)?;
+        let extract = WorkbenchVersionExtractor::from_xml(response.body())?;
 
         Ok(Self::new(
             resource.clone(),
@@ -530,8 +530,8 @@ impl ObjectSnapshot<()> {
         let supported = descriptor.properties_media_types();
         let media_type = response.require_supported_media_type(supported)?;
 
-        let extract = WorkbenchVersionExtractor::from_xml(response.body())?;
         let properties = descriptor.properties_from_xml(resource, response.body())?;
+        let extract = WorkbenchVersionExtractor::from_xml(response.body())?;
 
         Ok(Self::new_erased(
             resource.clone(),
@@ -544,8 +544,9 @@ impl ObjectSnapshot<()> {
     }
 }
 
-/// Internal helper to extract only a workbench version from
-/// the response such that it is available for object creation.
+/// Version-only projection, used after the complete properties model has been
+/// decoded strictly. Intentionally accepts the other already-validated fields;
+/// this is not a standalone response model.
 #[derive(serde::Deserialize)]
 struct WorkbenchVersionExtractor {
     #[serde(rename = "@adtcore:version")]
@@ -821,6 +822,75 @@ mod tests {
         assert!(body.contains("adtcore:uri=\"/sap/bc/adt/functions/groups/zgroup123\""));
         assert!(!body.contains("fmodule:processingType"));
         assert!(!body.contains("fmodule:releaseState"));
+    }
+
+    #[test]
+    fn typed_and_erased_queries_reject_unknown_property_fields() {
+        let reference = reference("CL_ADT_URI_MAPPER");
+        let original = std::str::from_utf8(CLASS_XML).unwrap();
+        for element in ["class:abapClass", "adtcore:packageRef", "atom:link"] {
+            let marker = format!("<{element}");
+            let xml = original.replacen(&marker, &format!("{marker} unexpected=\"value\""), 1);
+            assert_ne!(xml, original);
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static(ClassProperties::MEDIA_TYPES[0]),
+            );
+            let response = || {
+                OperationResponse::new(
+                    AdtResponse::new(StatusCode::OK, headers.clone(), xml.as_bytes().to_vec()),
+                    AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
+                )
+            };
+            let typed = reference.query().decode(response()).unwrap_err();
+            let erased = reference.erase().query().decode(response()).unwrap_err();
+            for error in [typed, erased] {
+                assert!(
+                    error.to_string().contains("unknown field `@unexpected`"),
+                    "{error}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn runtime_writes_reject_unknown_root_and_nested_fields() {
+        let client = discovered_client(DISCOVERY_XML);
+        let reference = reference("CL_ADT_URI_MAPPER");
+        let properties: ClassProperties = serde_xml_rs::from_reader(CLASS_XML).unwrap();
+        let snapshot = ObjectSnapshot::new(
+            reference.clone(),
+            AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
+            WorkbenchVersion::Active,
+            ClassProperties::MEDIA_TYPES[0],
+            Some(EntityTag::from_static("class-etag")),
+            properties,
+        )
+        .into_erased();
+        for pointer in ["", "/adtcore:packageRef"] {
+            let mut create = serde_json::to_value(create_properties()).unwrap();
+            create.pointer_mut(pointer).unwrap()["unexpected"] = true.into();
+            let error = reference
+                .erase()
+                .create(create)
+                .unwrap()
+                .encode(client.discovery())
+                .err()
+                .unwrap();
+            assert!(
+                error.to_string().contains("unknown field `unexpected`"),
+                "{error}"
+            );
+
+            let mut update = snapshot.properties().unwrap();
+            update.pointer_mut(pointer).unwrap()["unexpected"] = true.into();
+            let error = snapshot.update_if_match(update).unwrap_err();
+            assert!(
+                error.to_string().contains("unknown field `unexpected`"),
+                "{error}"
+            );
+        }
     }
 
     #[test]

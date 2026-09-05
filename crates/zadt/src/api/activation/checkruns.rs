@@ -154,7 +154,7 @@ impl CheckRunReporter {
 pub type SupportedCheckReporters = Vec<SupportedCheckReporter>;
 
 #[derive(Debug, Deserialize)]
-#[serde(rename = "chkrun:checkReporters")]
+#[serde(rename = "chkrun:checkReporters", deny_unknown_fields)]
 struct SupportedCheckReporterList {
     #[serde(rename = "chkrun:reporter", default)]
     entries: SupportedCheckReporters,
@@ -166,6 +166,7 @@ impl SupportedCheckReporterList {
 
 /// One advertised check-run reporter and its supported object types.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct SupportedCheckReporter {
     #[serde(rename = "@chkrun:name")]
     pub name: CheckRunReporter,
@@ -296,7 +297,7 @@ impl CheckRunArtifact {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
-#[serde(rename = "chkrun:checkRunReports")]
+#[serde(rename = "chkrun:checkRunReports", deny_unknown_fields)]
 pub struct CheckRunReports {
     #[serde(rename = "chkrun:checkReport", default)]
     pub reports: Vec<CheckRunReport>,
@@ -307,6 +308,7 @@ impl CheckRunReports {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct CheckRunReport {
     #[serde(rename = "@chkrun:reporter")]
     pub reporter: CheckRunReporter,
@@ -325,12 +327,14 @@ pub struct CheckRunReport {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct CheckRunMessageList {
     #[serde(rename = "chkrun:checkMessage", default)]
     pub messages: Vec<CheckRunMessage>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct CheckRunMessage {
     #[serde(rename = "@chkrun:uri")]
     pub uri: String,
@@ -361,6 +365,7 @@ pub struct CheckRunMessage {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct CheckRunT100Key {
     #[serde(rename = "@chkrun:msgid")]
     pub message_class: String,
@@ -443,6 +448,28 @@ mod tests {
     "#;
 
     struct UnusedTransport;
+
+    #[test]
+    fn rejects_unknown_check_report_fields_including_message_wrappers() {
+        let xml = std::str::from_utf8(CHECK_REPORTS_XML).unwrap();
+        for tag in [
+            "chkrun:checkRunReports",
+            "chkrun:checkReport",
+            "chkrun:checkMessageList",
+        ] {
+            for (from, to) in [
+                (format!("<{tag}"), format!("<{tag} unexpected=\"true\"")),
+                (format!("</{tag}>"), format!("<unexpected/></{tag}>")),
+            ] {
+                let body = xml.replacen(&from, &to, 1);
+                let error = serde_xml_rs::from_str::<CheckRunReports>(&body)
+                    .unwrap_err()
+                    .to_string();
+                assert!(error.contains("unknown field"), "{tag}: {error}");
+                assert!(error.contains("unexpected"), "{tag}: {error}");
+            }
+        }
+    }
 
     #[async_trait]
     impl crate::Transport for UnusedTransport {

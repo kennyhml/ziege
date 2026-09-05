@@ -10,7 +10,7 @@ use crate::{
     operation::{EncodedOperation, Operation, OperationResponse, Stateful},
 };
 
-use super::transports::TransportNumber;
+use super::transports::{TransportNumber, TransportRequest};
 
 pub(crate) const LOCK_HANDLE_QUERY: &str = "lockHandle";
 
@@ -77,6 +77,7 @@ impl ObjectLock {
             is_link_up,
             modification_support,
             link_up_mode,
+            ..
         } = raw.values.data;
         let handle = non_empty(lock_handle).ok_or(ObjectError::MissingLockHandle)?;
 
@@ -353,19 +354,24 @@ fn non_empty(value: String) -> Option<String> {
 }
 
 #[derive(Deserialize)]
-#[serde(rename = "asx:abap")]
+#[serde(rename = "asx:abap", deny_unknown_fields)]
 struct RawLock {
+    #[serde(rename = "@version", default)]
+    _version: Option<String>,
+
     #[serde(rename = "asx:values")]
     values: RawLockValues,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawLockValues {
     #[serde(rename = "DATA")]
     data: RawLockData,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawLockData {
     #[serde(rename = "LOCK_HANDLE", default)]
     lock_handle: String,
@@ -383,6 +389,115 @@ struct RawLockData {
     modification_support: String,
     #[serde(rename = "LINK_UP_MODE", default)]
     link_up_mode: String,
+    #[serde(rename = "CORR_LOCKS", default)]
+    _transport_locks: RawLockTransports,
+    #[serde(rename = "CORR_CONTENTS", default)]
+    _transport_contents: RawLockTransportContents,
+    #[serde(rename = "SCOPE_MESSAGES", default)]
+    _scope_messages: RawLockScopeMessages,
+}
+
+// Container and field names are evidenced by Eclipse ADT 3.52's AdtLockResult
+// and its ObjectEntry, TransportObject, ObjectEntryAsAdtReference, LockMessage,
+// and LockMessageResult parsers. CTS_REQ_HEADER also has a repository fixture.
+// These are the evidenced fields, not a complete DDIC E071/MSG schema: additional
+// backend fields must be researched before accepting them, not silently skipped.
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawLockTransports {
+    #[serde(rename = "CTS_REQ_HEADER", default)]
+    _requests: Vec<TransportRequest>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawLockTransportContents {
+    #[serde(rename = "SADT_TRANSPORT_REQ_CONTENTS", default)]
+    _entries: Vec<RawLockTransportContent>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct RawLockTransportContent {
+    #[serde(rename = "REQ_HEADER")]
+    _request: String,
+    #[serde(rename = "REQ_TASK")]
+    _task: String,
+    #[serde(rename = "OWNER")]
+    _owner: String,
+    #[serde(rename = "OBJ_LIST")]
+    _objects: RawLockTransportObjects,
+    #[serde(rename = "OBJ_REF_LIST")]
+    _references: RawLockObjectReferences,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawLockTransportObjects {
+    #[serde(rename = "E071", default)]
+    _objects: Vec<RawLockTransportObject>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct RawLockTransportObject {
+    #[serde(rename = "PGMID")]
+    _program_id: String,
+    #[serde(rename = "OBJECT")]
+    _object_type: String,
+    #[serde(rename = "OBJ_NAME")]
+    _object_name: String,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawLockObjectReferences {
+    #[serde(rename = "SADT_OBJECT_REFERENCE", default)]
+    _references: Vec<RawLockObjectReference>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct RawLockObjectReference {
+    #[serde(rename = "URI")]
+    _uri: String,
+    #[serde(rename = "TYPE")]
+    _object_type: String,
+    #[serde(rename = "NAME")]
+    _name: String,
+    #[serde(rename = "PARENT_URI")]
+    _parent_uri: String,
+    #[serde(rename = "PACKAGE_NAME")]
+    _package: String,
+    #[serde(rename = "DESCRIPTION")]
+    _description: String,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawLockScopeMessages {
+    #[serde(rename = "SADT_SCOPE_LOCK_MESSAGE", default)]
+    _messages: Vec<RawLockScopeMessage>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct RawLockScopeMessage {
+    #[serde(rename = "SCOPE")]
+    _scope: String,
+    #[serde(rename = "TEXT")]
+    _text: String,
+    #[serde(rename = "LONGTEXT")]
+    _long_text: String,
+    #[serde(rename = "MSG")]
+    _message: RawLockMessage,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct RawLockMessage {
+    #[serde(rename = "MSGTY")]
+    _severity: String,
 }
 
 #[cfg(test)]
@@ -392,6 +507,124 @@ mod tests {
     use http::HeaderMap;
 
     const LOCK_XML: &[u8] = include_bytes!("../../tests/fixtures/object-lock.xml");
+
+    // Synthetic values using the container nesting and fields read by the local
+    // Eclipse AdtLockResult parsers, not a captured populated backend response.
+    const LOCK_CONTENTS: &str = r#"
+        <CORR_CONTENTS><SADT_TRANSPORT_REQ_CONTENTS>
+            <REQ_HEADER>DEVK900001</REQ_HEADER><REQ_TASK>DEVK900002</REQ_TASK>
+            <OWNER>DEVELOPER</OWNER>
+            <OBJ_LIST><E071><PGMID>LIMU</PGMID><OBJECT>CINC</OBJECT>
+                <OBJ_NAME>ZCL_EXAMPLE==============CCAU</OBJ_NAME></E071></OBJ_LIST>
+            <OBJ_REF_LIST><SADT_OBJECT_REFERENCE>
+                <URI>/sap/bc/adt/oo/classes/zcl_example/includes/testclasses</URI>
+                <TYPE>CLAS/OC</TYPE><NAME>ZCL_EXAMPLE</NAME>
+                <PARENT_URI>/sap/bc/adt/oo/classes/zcl_example</PARENT_URI>
+                <PACKAGE_NAME>ZPACKAGE</PACKAGE_NAME><DESCRIPTION>Test classes</DESCRIPTION>
+            </SADT_OBJECT_REFERENCE></OBJ_REF_LIST>
+        </SADT_TRANSPORT_REQ_CONTENTS></CORR_CONTENTS>
+        <SCOPE_MESSAGES><SADT_SCOPE_LOCK_MESSAGE>
+            <SCOPE>ARS</SCOPE><TEXT>Example warning</TEXT><LONGTEXT>Details</LONGTEXT>
+            <MSG><MSGTY>W</MSGTY></MSG>
+        </SADT_SCOPE_LOCK_MESSAGE></SCOPE_MESSAGES>"#;
+
+    #[test]
+    fn models_populated_lock_collections() {
+        let requests = include_str!("../../tests/fixtures/transport-requests.xml");
+        let headers = &requests[requests.find("<CTS_REQ_HEADER>").unwrap()
+            ..requests.rfind("</CTS_REQ_HEADER>").unwrap() + "</CTS_REQ_HEADER>".len()];
+        let xml = std::str::from_utf8(LOCK_XML)
+            .unwrap()
+            .replace(
+                "<CORR_LOCKS />",
+                &format!("<CORR_LOCKS>{headers}</CORR_LOCKS>"),
+            )
+            .replace("<CORR_CONTENTS />", LOCK_CONTENTS)
+            .replace("<SCOPE_MESSAGES />", "");
+        let raw: RawLock = serde_xml_rs::from_str(&xml).unwrap();
+        assert_eq!(raw._version.as_deref(), Some("1.0"));
+        let data = raw.values.data;
+        assert_eq!(data._transport_locks._requests.len(), 2);
+        assert_eq!(
+            data._transport_locks._requests[0].number.as_str(),
+            "DEVK900001"
+        );
+        let content = &data._transport_contents._entries[0];
+        assert_eq!(content._request, "DEVK900001");
+        assert_eq!(content._task, "DEVK900002");
+        assert_eq!(content._owner, "DEVELOPER");
+        assert_eq!(content._objects._objects[0]._program_id, "LIMU");
+        assert_eq!(content._references._references[0]._package, "ZPACKAGE");
+        let message = &data._scope_messages._messages[0];
+        assert_eq!(message._scope, "ARS");
+        assert_eq!(message._message._severity, "W");
+        ObjectLock::parse(
+            ObjectRef::<Program>::new("ZTEST").erase(),
+            AccessMode::Modify,
+            None,
+            xml.as_bytes(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn lock_responses_reject_unknown_fields_in_wrappers_and_containers() {
+        let xml = std::str::from_utf8(LOCK_XML)
+            .unwrap()
+            .replace("<CORR_LOCKS />", "<CORR_LOCKS></CORR_LOCKS>")
+            .replace("<CORR_CONTENTS />", LOCK_CONTENTS)
+            .replace("<SCOPE_MESSAGES />", "");
+        for container in [
+            "asx:abap",
+            "asx:values",
+            "DATA",
+            "CORR_LOCKS",
+            "CORR_CONTENTS",
+            "SADT_TRANSPORT_REQ_CONTENTS",
+            "OBJ_LIST",
+            "E071",
+            "OBJ_REF_LIST",
+            "SADT_OBJECT_REFERENCE",
+            "SCOPE_MESSAGES",
+            "SADT_SCOPE_LOCK_MESSAGE",
+            "MSG",
+        ] {
+            for addition in ["<UNEXPECTED />", "unexpected text"] {
+                let closing = format!("</{container}>");
+                assert!(xml.contains(&closing));
+                let changed = xml.replacen(&closing, &format!("{addition}{closing}"), 1);
+                let error = ObjectLock::parse(
+                    ObjectRef::<Program>::new("ZTEST").erase(),
+                    AccessMode::Modify,
+                    None,
+                    changed.as_bytes(),
+                )
+                .unwrap_err();
+                assert!(
+                    matches!(error, ObjectError::InvalidLockResponse(_)),
+                    "{container}: {error}"
+                );
+                if addition == "<UNEXPECTED />" {
+                    assert!(
+                        error.to_string().contains("unknown field `UNEXPECTED`"),
+                        "{container}: {error}"
+                    );
+                }
+            }
+        }
+        let changed = xml.replacen("<asx:abap ", "<asx:abap unexpected=\"value\" ", 1);
+        let error = ObjectLock::parse(
+            ObjectRef::<Program>::new("ZTEST").erase(),
+            AccessMode::Modify,
+            None,
+            changed.as_bytes(),
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("unknown field `@unexpected`"),
+            "{error}"
+        );
+    }
 
     #[test]
     fn parses_object_lock_and_transport_metadata() {

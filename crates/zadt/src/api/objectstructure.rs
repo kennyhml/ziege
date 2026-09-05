@@ -261,7 +261,7 @@ impl ObjectStructureElement {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename = "abapsource:objectStructureElement")]
+#[serde(rename = "abapsource:objectStructureElement", deny_unknown_fields)]
 struct RawObjectStructureElement {
     #[serde(rename = "@xml:base")]
     base_uri: Option<String>,
@@ -439,6 +439,32 @@ mod tests {
             request.query(),
             [("withShortDescriptions".to_owned(), "true".to_owned())]
         );
+    }
+
+    #[test]
+    fn rejects_unknown_fields_in_recursive_structure_elements() {
+        let xml = std::str::from_utf8(STRUCTURE_XML).unwrap();
+        for (from, to) in [
+            (
+                "<abapsource:objectStructureElement",
+                "<abapsource:objectStructureElement unexpected=\"true\"",
+            ),
+            (
+                "adtcore:type=\"CLAS/OR\"",
+                "adtcore:type=\"CLAS/OR\" unexpected=\"true\"",
+            ),
+            (
+                "</abapsource:objectStructureElement>",
+                "<unexpected/></abapsource:objectStructureElement>",
+            ),
+        ] {
+            let body = xml.replacen(from, to, 1);
+            let error = serde_xml_rs::from_str::<RawObjectStructureElement>(&body)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("unknown field"), "{from}: {error}");
+            assert!(error.contains("unexpected"), "{from}: {error}");
+        }
     }
 
     #[test]

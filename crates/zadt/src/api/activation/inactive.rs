@@ -163,7 +163,7 @@ impl Operation for InactiveCtsObjectsQuery {
 
 /// Detailed inactive objects and transport associations returned by ADT.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
-#[serde(rename = "ioc:inactiveObjects")]
+#[serde(rename = "ioc:inactiveObjects", deny_unknown_fields)]
 pub struct InactiveCtsObjects {
     /// Inactive object/transport slots in response order.
     #[serde(rename = "ioc:entry", default)]
@@ -172,7 +172,7 @@ pub struct InactiveCtsObjects {
 
 /// One pair of inactive object and transport slots.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-#[serde(rename = "ioc:entry")]
+#[serde(rename = "ioc:entry", deny_unknown_fields)]
 pub struct InactiveCtsObjectEntry {
     /// Inactive repository object information, or an empty slot.
     #[serde(rename = "ioc:object")]
@@ -184,6 +184,7 @@ pub struct InactiveCtsObjectEntry {
 
 /// An inactive object slot, which may be empty in the wire representation.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct InactiveCtsObject {
     /// User owning the inactive object, when this slot is populated.
     #[serde(rename = "@ioc:user", default)]
@@ -198,6 +199,7 @@ pub struct InactiveCtsObject {
 
 /// A CTS assignment slot, which may be empty in the wire representation.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct InactiveCtsObjectTransport {
     /// User owning the transport assignment, when populated.
     #[serde(rename = "@ioc:user", default)]
@@ -276,6 +278,36 @@ mod tests {
             references.objects[4].uri.as_deref(),
             Some("/sap/bc/adt/oo/classes/%2fdmo%2fcl_travel_auxiliary")
         );
+    }
+
+    #[test]
+    fn rejects_unknown_inactive_object_fields_including_empty_slots() {
+        let xml = std::str::from_utf8(CTS_OBJECTS_XML).unwrap();
+        for (from, to) in [
+            (
+                "<ioc:inactiveObjects",
+                "<ioc:inactiveObjects unexpected=\"true\"",
+            ),
+            (
+                "</ioc:inactiveObjects>",
+                "<unexpected/></ioc:inactiveObjects>",
+            ),
+            ("<ioc:entry>", "<ioc:entry unexpected=\"true\">"),
+            ("</ioc:entry>", "<unexpected/></ioc:entry>"),
+            ("<ioc:object/>", "<ioc:object unexpected=\"true\"/>"),
+            (
+                "<ioc:transport/>",
+                "<ioc:transport><unexpected/></ioc:transport>",
+            ),
+        ] {
+            let body = xml.replacen(from, to, 1);
+            assert_ne!(body, xml, "fixture must contain {from}");
+            let error = serde_xml_rs::from_str::<InactiveCtsObjects>(&body)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("unknown field"), "{from}: {error}");
+            assert!(error.contains("unexpected"), "{from}: {error}");
+        }
     }
 
     #[test]

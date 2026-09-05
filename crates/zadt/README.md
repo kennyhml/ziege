@@ -82,6 +82,21 @@ that are not always valid (such as updating or creating an object) are turned in
 error that can only be caught at runtime. Internally, they all still use the underlying static capabilities
 erased through a common set of type monomorphized function pointers - similar to a vtable.
 
+### Wire Model Strictness
+
+Complete deserialized models reject unknown fields, including nested references,
+links, response wrappers, and generated creation payloads. The same policy applies
+to XML and wire-shaped runtime JSON so unmodeled fields are not silently dropped
+when editing and serializing properties. New backend fields require an explicit
+model update; intentionally open scalar vocabularies such as `Other(String)` remain
+open.
+
+This is a Serde field policy, not full XML schema validation: root names, namespace
+URIs, and attributes on scalar-valued XML elements are not validated by this policy.
+The internal version-only projection runs only after strict full-property decoding.
+Transport request attributes (`REQ_ATTRS`) currently have only an evidenced empty
+representation; populated contents fail closed until their schema is modeled.
+
 ### Transport
 
 ZADT uses a transport trait around ADT requests and responses. Custom transports are

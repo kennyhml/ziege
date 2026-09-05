@@ -345,7 +345,7 @@ pub struct AdtExceptionProperty {
 }
 
 #[derive(Deserialize)]
-#[serde(rename = "exception")]
+#[serde(rename = "exception", deny_unknown_fields)]
 struct RawAdtException {
     namespace: RawExceptionId,
     #[serde(rename = "type")]
@@ -358,18 +358,21 @@ struct RawAdtException {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawExceptionId {
     #[serde(rename = "@id")]
     id: String,
 }
 
 #[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawExceptionProperties {
     #[serde(rename = "entry", default)]
     entries: Vec<RawExceptionProperty>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawExceptionProperty {
     #[serde(rename = "@key")]
     key: String,
@@ -535,6 +538,21 @@ mod tests {
                 <entry key="LONGTEXT">&lt;HTML&gt;&lt;BODY&gt;Release the request.&lt;/BODY&gt;&lt;/HTML&gt;</entry>
             </properties>
         </exc:exception>"#;
+
+    #[test]
+    fn exceptions_reject_unknown_root_and_nested_fields() {
+        let xml = std::str::from_utf8(LOCK_CONFLICT).unwrap();
+        for element in ["exc:exception", "namespace", "type", "properties", "entry"] {
+            let marker = format!("<{element}");
+            let changed = xml.replacen(&marker, &format!("{marker} unexpected=\"value\""), 1);
+            assert_ne!(changed, xml, "{element}");
+            let error = AdtException::parse(changed.as_bytes()).unwrap_err();
+            assert!(
+                error.to_string().contains("unknown field `@unexpected`"),
+                "{element}: {error}"
+            );
+        }
+    }
 
     #[test]
     fn parses_structured_adt_exceptions_and_decodes_properties() {

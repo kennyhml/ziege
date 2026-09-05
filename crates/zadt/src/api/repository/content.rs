@@ -393,7 +393,7 @@ struct RawFacetOrder<'a> {
 }
 
 #[derive(Deserialize)]
-#[serde(rename = "vfs:virtualFoldersResult")]
+#[serde(rename = "vfs:virtualFoldersResult", deny_unknown_fields)]
 struct RawRepositoryContent {
     #[serde(rename = "@objectCount")]
     object_count: u32,
@@ -408,6 +408,7 @@ struct RawRepositoryContent {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawPreselectionInfo {
     #[serde(rename = "@facet")]
     facet: RepositoryFacet,
@@ -416,6 +417,7 @@ struct RawPreselectionInfo {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawVirtualFolder {
     #[serde(rename = "@name")]
     name: String,
@@ -436,6 +438,7 @@ struct RawVirtualFolder {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawRepositoryObjectEntry {
     #[serde(rename = "@name")]
     name: String,

@@ -264,6 +264,7 @@ impl<T> fmt::Display for ObjectRef<T> {
 /// For typed references, the Workbench type is checked before the reference is
 /// constructed.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawObjectRef {
     name: String,
     object_type: GlobalWorkbenchType,
@@ -333,6 +334,7 @@ fn validate_parent_identity(reference: &RawObjectRef) -> Result<(), ObjectError>
 
 /// An unresolved object reference exactly as advertised in an ADT payload.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdvertisedObjectReference {
     /// The referenced object's URI, when advertised.
     #[serde(rename = "@adtcore:uri", skip_serializing_if = "Option::is_none")]
@@ -404,7 +406,7 @@ impl From<&str> for AdvertisedObjectReference {
 
 /// A collection of unresolved object references exactly as advertised by ADT.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename = "adtcore:objectReferences")]
+#[serde(rename = "adtcore:objectReferences", deny_unknown_fields)]
 pub struct ObjectReferences {
     /// Object references in response order.
     #[serde(rename = "adtcore:objectReference", default)]
@@ -603,6 +605,26 @@ mod tests {
         assert!(serialized.get("uri").is_none());
         assert!(serde_json::from_value::<ObjectRef<Program>>(serialized.clone()).is_ok());
         assert!(serde_json::from_value::<ObjectRef<crate::Class>>(serialized).is_err());
+    }
+
+    #[test]
+    fn reference_deserialization_rejects_unknown_fields_including_parents() {
+        let module =
+            ObjectRef::<FunctionGroup>::new("Z_GROUP").subobject::<FunctionModule>("Z_MODULE");
+        let original = serde_json::to_value(module).unwrap();
+        for pointer in ["", "/parent"] {
+            let mut json = original.clone();
+            json.pointer_mut(pointer).unwrap()["unexpected"] = true.into();
+            let typed =
+                serde_json::from_value::<ObjectRef<FunctionModule>>(json.clone()).unwrap_err();
+            let erased = serde_json::from_value::<ObjectRef<()>>(json).unwrap_err();
+            for error in [typed, erased] {
+                assert!(
+                    error.to_string().contains("unknown field `unexpected`"),
+                    "{error}"
+                );
+            }
+        }
     }
 
     #[test]

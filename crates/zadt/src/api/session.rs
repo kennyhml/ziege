@@ -160,7 +160,7 @@ fn find_link<'a>(links: &'a [WireLink], relation: &str) -> Option<&'a WireLink> 
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename = "http:session")]
+#[serde(rename = "http:session", deny_unknown_fields)]
 struct WireSession {
     #[serde(rename = "atom:link", default)]
     links: Vec<WireLink>,
@@ -170,6 +170,7 @@ struct WireSession {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WireLink {
     #[serde(rename = "@href")]
     href: String,
@@ -182,12 +183,14 @@ struct WireLink {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WireProperties {
     #[serde(rename = "http:property", default)]
     values: Vec<WireProperty>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WireProperty {
     #[serde(rename = "@name")]
     name: String,
@@ -298,6 +301,24 @@ mod tests {
     use super::*;
 
     const SESSION_XML: &[u8] = include_bytes!("../../tests/fixtures/http-session-v3.xml");
+
+    #[test]
+    fn rejects_unknown_session_fields_including_property_wrappers() {
+        let xml = std::str::from_utf8(SESSION_XML).unwrap();
+        for tag in ["http:session", "http:properties", "http:property"] {
+            for (from, to) in [
+                (format!("<{tag}"), format!("<{tag} unexpected=\"true\"")),
+                (format!("</{tag}>"), format!("<unexpected/></{tag}>")),
+            ] {
+                let body = xml.replacen(&from, &to, 1);
+                let error = SessionInformation::from_xml(body.as_bytes())
+                    .unwrap_err()
+                    .to_string();
+                assert!(error.contains("unknown field"), "{tag}: {error}");
+                assert!(error.contains("unexpected"), "{tag}: {error}");
+            }
+        }
+    }
 
     #[test]
     fn parses_v3_session_information() {

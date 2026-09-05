@@ -177,13 +177,16 @@ impl Users {
 }
 
 #[derive(Deserialize)]
-#[serde(rename = "atom:feed")]
+#[serde(rename = "atom:feed", deny_unknown_fields)]
 struct RawUsersFeed {
+    #[serde(rename = "atom:title")]
+    _title: Option<String>,
     #[serde(rename = "atom:entry", default)]
     entries: Vec<RawUserEntry>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawUserEntry {
     #[serde(rename = "atom:id")]
     name: String,
@@ -269,6 +272,22 @@ mod tests {
             request.headers().get(header::ACCEPT).unwrap(),
             Users::MEDIA_TYPE
         );
+    }
+
+    #[test]
+    fn rejects_unknown_user_feed_and_entry_fields() {
+        let xml = std::str::from_utf8(USERS_XML).unwrap();
+        for tag in ["atom:feed", "atom:entry"] {
+            for (from, to) in [
+                (format!("<{tag}"), format!("<{tag} unexpected=\"true\"")),
+                (format!("</{tag}>"), format!("<unexpected/></{tag}>")),
+            ] {
+                let body = xml.replacen(&from, &to, 1);
+                let error = Users::parse(body.as_bytes()).unwrap_err().to_string();
+                assert!(error.contains("unknown field"), "{tag}: {error}");
+                assert!(error.contains("unexpected"), "{tag}: {error}");
+            }
+        }
     }
 
     #[test]

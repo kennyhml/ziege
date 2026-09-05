@@ -203,7 +203,7 @@ impl FavoriteOperation {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename = "vf:favorites")]
+#[serde(rename = "vf:favorites", deny_unknown_fields)]
 pub struct FavoriteObjectList {
     #[serde(rename = "vf:favorite", default)]
     pub objects: Vec<FavoriteObject>,
@@ -225,7 +225,7 @@ impl FavoriteObjectList {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename = "vf:favorite")]
+#[serde(rename = "vf:favorite", deny_unknown_fields)]
 pub struct FavoriteObject {
     #[serde(rename = "@adtcore:uri")]
     pub uri: String,

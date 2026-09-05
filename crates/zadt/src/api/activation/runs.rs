@@ -197,7 +197,7 @@ impl ObjectSnapshot<()> {
 
 /// Messages about the result of an activation run. Mainly errors that blocked it.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
-#[serde(rename = "chkl:messages")]
+#[serde(rename = "chkl:messages", deny_unknown_fields)]
 pub struct ActivationRunMessages {
     /// Execution phases reached by the backend.
     #[serde(rename = "chkl:properties")]
@@ -209,7 +209,7 @@ pub struct ActivationRunMessages {
 
 /// Execution phases reached by an activation run.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
-#[serde(rename = "chkl:properties")]
+#[serde(rename = "chkl:properties", deny_unknown_fields)]
 pub struct ActivationRunProperties {
     /// Whether the object check phase ran.
     #[serde(rename = "@checkExecuted")]
@@ -224,7 +224,7 @@ pub struct ActivationRunProperties {
 
 /// One diagnostic emitted by an activation run.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-#[serde(rename = "msg")]
+#[serde(rename = "msg", deny_unknown_fields)]
 pub struct ActivationRunMessage {
     /// Backend-formatted description of the affected object or component.
     #[serde(rename = "@objDescr")]
@@ -254,6 +254,7 @@ pub struct ActivationRunMessage {
 
 /// A string table used for short and extended checklist text.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ActivationRunMessageText {
     /// Human-readable text lines in backend order.
     #[serde(rename = "txt", default)]
@@ -398,6 +399,24 @@ mod tests {
                 ObjectError::IncompleteObjectReference { field: "uri" }
             ))
         ));
+    }
+
+    #[test]
+    fn rejects_unknown_activation_fields_including_text_wrappers() {
+        let xml = std::str::from_utf8(ACTIVATION_MESSAGES_XML).unwrap();
+        for tag in ["chkl:messages", "msg", "shortText"] {
+            for (from, to) in [
+                (format!("<{tag}"), format!("<{tag} unexpected=\"true\"")),
+                (format!("</{tag}>"), format!("<unexpected/></{tag}>")),
+            ] {
+                let body = xml.replacen(&from, &to, 1);
+                let error = serde_xml_rs::from_str::<ActivationRunMessages>(&body)
+                    .unwrap_err()
+                    .to_string();
+                assert!(error.contains("unknown field"), "{tag}: {error}");
+                assert!(error.contains("unexpected"), "{tag}: {error}");
+            }
+        }
     }
 
     #[test]

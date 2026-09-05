@@ -17,7 +17,7 @@ pub struct Package;
 
 /// The currently modeled package-properties payload.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename = "pak:package")]
+#[serde(rename = "pak:package", deny_unknown_fields)]
 pub struct PackageProperties {
     /// The package name supplied by SAP.
     #[serde(rename = "@adtcore:name")]
@@ -101,6 +101,7 @@ impl ToXml for PackageProperties {
 
 /// Package behavior and editor capability flags.
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackageAttributes {
     /// The semantic package type, such as `development`.
     #[serde(rename = "@pak:packageType")]
@@ -149,6 +150,7 @@ fn empty_language_version() -> AbapLanguageVersion {
 
 /// A named package assignment with editor visibility and mutability flags.
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackageAssignment {
     /// The assigned value.
     #[serde(rename = "@pak:name", default)]
@@ -166,6 +168,7 @@ pub struct PackageAssignment {
 
 /// Software-component and transport-layer assignments.
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackageTransport {
     /// The package's software component.
     #[serde(rename = "pak:softwareComponent")]
@@ -177,6 +180,7 @@ pub struct PackageTransport {
 
 /// Use-access visibility and entries in a package-properties payload.
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackageUseAccesses {
     #[serde(rename = "@pak:isVisible", default)]
     pub visible: bool,
@@ -186,6 +190,7 @@ pub struct PackageUseAccesses {
 
 /// A package-interface use access exactly as represented in package XML.
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackageUseAccess {
     #[serde(rename = "@pak:severity")]
     pub severity: String,
@@ -197,6 +202,7 @@ pub struct PackageUseAccess {
 
 /// Package-interface visibility and references in a package-properties payload.
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackageInterfaces {
     #[serde(rename = "@pak:isVisible", default)]
     pub visible: bool,
@@ -206,6 +212,7 @@ pub struct PackageInterfaces {
 
 /// Direct subpackage references in a package-properties payload.
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackageSubpackages {
     #[serde(rename = "pak:packageRef", default)]
     pub package_ref: Vec<AdvertisedObjectReference>,
@@ -264,6 +271,59 @@ mod property_tests {
         assert!(json.get("objectType").is_none());
         let roundtrip: PackageProperties = serde_json::from_value(json.clone()).unwrap();
         assert_eq!(serde_json::to_value(roundtrip).unwrap(), json);
+    }
+
+    #[test]
+    fn rejects_unknown_xml_fields_in_root_and_nested_models() {
+        let original = std::str::from_utf8(PACKAGE_XML).unwrap();
+        for element in [
+            "pak:package",
+            "atom:link",
+            "pak:attributes",
+            "pak:superPackage",
+            "pak:applicationComponent",
+            "pak:transport",
+            "pak:softwareComponent",
+            "pak:useAccesses",
+            "pak:useAccess",
+            "pak:packageInterfaceRef",
+            "pak:packageInterfaces",
+            "pak:subPackages",
+            "pak:packageRef",
+        ] {
+            let marker = format!("<{element}");
+            let (offset, _) = original
+                .match_indices(&marker)
+                .find(|(offset, _)| {
+                    let next = original.as_bytes()[offset + marker.len()];
+                    next.is_ascii_whitespace() || next == b'>' || next == b'/'
+                })
+                .unwrap();
+            let mut xml = original.to_owned();
+            xml.insert_str(offset + marker.len(), " unexpected=\"value\"");
+            let error = serde_xml_rs::from_str::<PackageProperties>(&xml).unwrap_err();
+            assert!(
+                error.to_string().contains("unknown field `@unexpected`"),
+                "{element}: {error}"
+            );
+        }
+        for element in [
+            "pak:package",
+            "pak:transport",
+            "pak:useAccesses",
+            "pak:useAccess",
+            "pak:packageInterfaces",
+            "pak:subPackages",
+        ] {
+            let marker = format!("</{element}>");
+            let xml = original.replacen(&marker, &format!("<unexpected/>{marker}"), 1);
+            assert_ne!(xml, original, "{element}");
+            let error = serde_xml_rs::from_str::<PackageProperties>(&xml).unwrap_err();
+            assert!(
+                error.to_string().contains("unknown field `unexpected`"),
+                "{element}: {error}"
+            );
+        }
     }
 
     #[test]

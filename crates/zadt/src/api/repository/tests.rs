@@ -97,6 +97,29 @@ fn repository_content_request_matches_the_ris_contract() {
 }
 
 #[test]
+fn rejects_unknown_repository_content_fields() {
+    let xml = std::str::from_utf8(CONTENT_XML).unwrap();
+    let base = AdtUri::parse("/sap/bc/adt/repository/informationsystem/virtualfolders").unwrap();
+    for tag in [
+        "vfs:virtualFoldersResult",
+        "vfs:virtualFolder",
+        "vfs:object",
+    ] {
+        for (from, to) in [
+            (format!("<{tag} "), format!("<{tag} unexpected=\"true\" ")),
+            (format!("</{tag}>"), format!("<unexpected/></{tag}>")),
+        ] {
+            let body = xml.replacen(&from, &to, 1);
+            let error = RepositoryContent::parse(body.as_bytes(), &base)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("unknown field"), "{tag}: {error}");
+            assert!(error.contains("unexpected"), "{tag}: {error}");
+        }
+    }
+}
+
+#[test]
 fn repository_content_response_decodes_one_layer() {
     let query = RepositoryContentQuery::new();
     let response = AdtResponse::new(StatusCode::OK, HeaderMap::new(), CONTENT_XML.to_vec());

@@ -57,6 +57,7 @@ impl fmt::Display for AdtLink {
 
 /// A raw, unverified `atom:link` exactly as advertised by ADT.
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdvertisedLink {
     /// The target exactly as advertised by ADT.
     #[serde(rename = "@href")]

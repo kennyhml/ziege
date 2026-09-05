@@ -182,7 +182,7 @@ pub struct DeletionCheckRequest {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename = "del:checkResponse")]
+#[serde(rename = "del:checkResponse", deny_unknown_fields)]
 pub struct DeletionCheckResponse {
     /// Results in request order.
     #[serde(rename = "del:object", default)]
@@ -403,6 +403,7 @@ impl From<AdtUri> for DeletionObject {
 
 /// The result for one checked object.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeletionCheckObjectResult {
     /// Strong references from objects outside the proposed deletion set.
     #[serde(rename = "@del:externalStrongReferences")]
@@ -454,6 +455,7 @@ pub struct DeletionCheckObjectResult {
 
 /// A repository usage between objects in the proposed deletion set.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeletionUsage {
     /// Backend-defined relationship degree, such as `strong` or `weak`.
     #[serde(rename = "@del:degree")]
@@ -484,6 +486,7 @@ pub struct DeletionUsage {
 
 /// An object included by the backend when checking a deletion candidate.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeletionIncludedObject {
     /// Whether this object may be deleted independently from its parent.
     #[serde(rename = "@del:canBeDeletedWithoutParent")]
@@ -527,7 +530,7 @@ pub struct DeletionIncludedObject {
 
 /// Result returned by the ADT deletion endpoint.
 #[derive(Debug, Default, Deserialize)]
-#[serde(rename = "del:deletionResult")]
+#[serde(rename = "del:deletionResult", deny_unknown_fields)]
 pub struct DeletionResult {
     /// Per-object deletion results in request order.
     #[serde(rename = "del:object", default)]
@@ -540,6 +543,7 @@ impl DeletionResult {
 
 /// The result of deleting one repository object.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeletionObjectResult {
     /// Whether the backend deleted the object.
     #[serde(rename = "@del:isDeleted")]
@@ -568,6 +572,7 @@ pub struct DeletionObjectResult {
 
 /// Transport locking a checked object
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeletionLockingTransport {
     #[serde(rename = "del:recording")]
     pub recording: bool,
@@ -588,6 +593,7 @@ pub struct DeletionLockingTransport {
 /// bugged. The status and type is encoded into the owner while the
 /// rest of the properties are part of the description.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeletionLockingTransportProperties {
     #[serde(rename = "del:trkorr")]
     pub transport_number: TransportNumber,
@@ -599,6 +605,7 @@ pub struct DeletionLockingTransportProperties {
 
 /// A message returned by the CTS transport check.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeletionTransportMessage {
     #[serde(rename = "del:severity")]
     pub severity: String,
@@ -609,6 +616,7 @@ pub struct DeletionTransportMessage {
 
 /// Transport locking a checked object
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeletionMessage {
     #[serde(rename = "@del:priority")]
     pub priority: i32,
@@ -804,6 +812,28 @@ mod tests {
         assert!(body.contains("adtcore:uri=\"/sap/bc/adt/oo/classes/ztransported\""));
         assert!(body.contains("<del:transportNumber></del:transportNumber>"));
         assert!(body.contains("<del:transportNumber>A4HK900148</del:transportNumber>"));
+    }
+
+    #[test]
+    fn rejects_unknown_deletion_response_and_nested_fields() {
+        for tag in [
+            "del:checkResponse",
+            "del:object",
+            "del:lockingTransport",
+            "del:message",
+        ] {
+            for (from, to) in [
+                (format!("<{tag}"), format!("<{tag} unexpected=\"true\"")),
+                (format!("</{tag}>"), format!("<unexpected/></{tag}>")),
+            ] {
+                let body = CHECK_RESPONSE.replacen(&from, &to, 1);
+                let error = serde_xml_rs::from_str::<DeletionCheckResponse>(&body)
+                    .unwrap_err()
+                    .to_string();
+                assert!(error.contains("unknown field"), "{tag}: {error}");
+                assert!(error.contains("unexpected"), "{tag}: {error}");
+            }
+        }
     }
 
     #[test]
