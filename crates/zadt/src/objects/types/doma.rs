@@ -59,7 +59,7 @@ pub struct DomainProperties {
         doc = "The Domain's global Workbench type."
     )]
     #[serde(rename = "@adtcore:type")]
-    pub(crate) object_type: GlobalWorkbenchType,
+    pub(crate) workbench_type: GlobalWorkbenchType,
 
     /// The timestamp at which the object was last changed.
     #[serde(rename = "@adtcore:changedAt")]
@@ -246,7 +246,7 @@ mod tests {
             .build()
             .unwrap();
         assert_eq!(properties.name, "");
-        assert_eq!(properties.object_type, Domain::WORKBENCH_TYPE);
+        assert_eq!(properties.workbench_type, Domain::WORKBENCH_TYPE);
         assert!(properties.abap_language_version.is_none());
 
         let reference = ObjectRef::new(
@@ -273,7 +273,7 @@ mod tests {
         let values = properties.content.value_information.as_ref().unwrap();
 
         assert_eq!(properties.name, "TRKORR");
-        assert_eq!(properties.object_type, Domain::WORKBENCH_TYPE);
+        assert_eq!(properties.workbench_type, Domain::WORKBENCH_TYPE);
         assert_eq!(properties.version, WorkbenchVersion::Active);
         assert_eq!(properties.created_at, None);
         assert_eq!(properties.content.type_information.datatype, "CHAR");

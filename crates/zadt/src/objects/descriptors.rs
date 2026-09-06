@@ -38,7 +38,7 @@ use crate::{CategoryId, ResourceView, compatibility::MediaTypes, error::ObjectEr
 /// appropriate for one concrete object family.
 #[derive(Clone, Debug)]
 pub(crate) struct ObjectTypeDescriptor {
-    object_type: GlobalWorkbenchType,
+    workbench_type: GlobalWorkbenchType,
     addressing: ObjectAddressing,
     properties: PropertiesCodec,
     capabilities: RuntimeCapabilities,
@@ -46,21 +46,21 @@ pub(crate) struct ObjectTypeDescriptor {
 
 impl ObjectTypeDescriptor {
     pub(crate) const fn new(
-        object_type: GlobalWorkbenchType,
+        workbench_type: GlobalWorkbenchType,
         addressing: ObjectAddressing,
         properties: PropertiesCodec,
         capabilities: RuntimeCapabilities,
     ) -> Self {
         Self {
-            object_type,
+            workbench_type,
             addressing,
             properties,
             capabilities,
         }
     }
 
-    pub(crate) fn object_type(&self) -> &GlobalWorkbenchType {
-        &self.object_type
+    pub(crate) fn workbench_type(&self) -> &GlobalWorkbenchType {
+        &self.workbench_type
     }
 
     pub(crate) const fn category(&self) -> Option<CategoryId> {
@@ -302,12 +302,12 @@ impl RuntimeCapabilities {
 }
 
 fn validate_object_type<T: ObjectType>(object: &ObjectKey<()>) -> Result<(), ObjectError> {
-    if object.object_type() == &T::WORKBENCH_TYPE {
+    if object.workbench_type() == &T::WORKBENCH_TYPE {
         return Ok(());
     }
     Err(ObjectError::UnexpectedObjectType {
         expected: T::WORKBENCH_TYPE,
-        actual: object.object_type().clone(),
+        actual: object.workbench_type().clone(),
     })
 }
 
@@ -330,16 +330,16 @@ static OBJECT_TYPES: &[&ObjectTypeDescriptor] = &[
 ];
 
 pub(crate) fn object_type_descriptor(
-    object_type: &GlobalWorkbenchType,
+    workbench_type: &GlobalWorkbenchType,
 ) -> Option<&'static ObjectTypeDescriptor> {
     OBJECT_TYPES
         .iter()
         .copied()
-        .find(|descriptor| descriptor.object_type() == object_type)
+        .find(|descriptor| descriptor.workbench_type() == workbench_type)
 }
 
-pub(crate) fn requires_parent(object_type: &GlobalWorkbenchType) -> bool {
-    object_type_descriptor(object_type).is_some_and(|descriptor| descriptor.category().is_none())
+pub(crate) fn requires_parent(workbench_type: &GlobalWorkbenchType) -> bool {
+    object_type_descriptor(workbench_type).is_some_and(|descriptor| descriptor.category().is_none())
 }
 
 pub(crate) fn supports_subobject(
@@ -350,7 +350,7 @@ pub(crate) fn supports_subobject(
         descriptor
             .subobjects()
             .iter()
-            .any(|subobject| subobject.object_type() == child_type)
+            .any(|subobject| subobject.workbench_type() == child_type)
     })
 }
 
@@ -358,26 +358,26 @@ pub(crate) fn supports_subobject(
 #[doc(hidden)]
 #[derive(Clone, Debug)]
 pub struct SubObjectDescriptor {
-    object_type: GlobalWorkbenchType,
+    workbench_type: GlobalWorkbenchType,
     relation: &'static str,
     parent_variable: &'static str,
 }
 
 impl SubObjectDescriptor {
     pub(crate) const fn new(
-        object_type: GlobalWorkbenchType,
+        workbench_type: GlobalWorkbenchType,
         relation: &'static str,
         parent_variable: &'static str,
     ) -> Self {
         Self {
-            object_type,
+            workbench_type,
             relation,
             parent_variable,
         }
     }
 
-    pub(crate) fn object_type(&self) -> &GlobalWorkbenchType {
-        &self.object_type
+    pub(crate) fn workbench_type(&self) -> &GlobalWorkbenchType {
+        &self.workbench_type
     }
 
     pub(crate) const fn relation(&self) -> &'static str {
@@ -397,12 +397,12 @@ mod tests {
     #[test]
     fn registered_object_types_are_unique() {
         for (index, descriptor) in OBJECT_TYPES.iter().enumerate() {
-            let object_type = descriptor.object_type();
+            let workbench_type = descriptor.workbench_type();
             assert!(
                 OBJECT_TYPES[index + 1..]
                     .iter()
-                    .all(|other| other.object_type() != object_type),
-                "registered `{object_type}` more than once"
+                    .all(|other| other.workbench_type() != workbench_type),
+                "registered `{workbench_type}` more than once"
             );
         }
     }
@@ -416,13 +416,13 @@ mod tests {
             let parent_count = OBJECT_TYPES
                 .iter()
                 .flat_map(|parent| parent.subobjects())
-                .filter(|subobject| subobject.object_type() == child.object_type())
+                .filter(|subobject| subobject.workbench_type() == child.workbench_type())
                 .count();
             assert_eq!(
                 parent_count,
                 1,
                 "subobject `{}` must have exactly one declared parent",
-                child.object_type()
+                child.workbench_type()
             );
         }
     }
@@ -433,7 +433,7 @@ mod tests {
             .iter()
             .flat_map(|descriptor| descriptor.subobjects())
         {
-            let descriptor = object_type_descriptor(subobject.object_type())
+            let descriptor = object_type_descriptor(subobject.workbench_type())
                 .expect("declared subobject type must be registered");
             assert!(descriptor.category().is_none());
         }

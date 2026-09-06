@@ -28,7 +28,7 @@ pub struct PackageProperties {
     pub(crate) name: String,
     /// The repository object type, normally `DEVC/K`.
     #[serde(rename = "@adtcore:type")]
-    pub(crate) object_type: GlobalWorkbenchType,
+    pub(crate) workbench_type: GlobalWorkbenchType,
     /// The timestamp at which the package was last changed.
     #[serde(rename = "@adtcore:changedAt")]
     pub last_changed: String,
@@ -228,7 +228,7 @@ mod property_tests {
         let properties: PackageProperties = serde_xml_rs::from_reader(PACKAGE_XML).unwrap();
 
         assert_eq!(properties.name, "SADT_TOOLS_CORE");
-        assert_eq!(properties.object_type, Package::WORKBENCH_TYPE);
+        assert_eq!(properties.workbench_type, Package::WORKBENCH_TYPE);
         assert_eq!(properties.version, WorkbenchVersion::Active);
         assert_eq!(properties.attributes.language_version.as_str(), "");
         assert_eq!(properties.links.len(), 1);
@@ -240,7 +240,7 @@ mod property_tests {
         assert_eq!(
             properties.use_accesses.as_ref().unwrap().use_access[0]
                 .package_interface
-                .object_type
+                .workbench_type
                 .as_ref()
                 .map(GlobalWorkbenchType::as_str),
             Some("PINF/KI")
@@ -343,7 +343,7 @@ mod property_tests {
         assert_eq!(
             properties.use_accesses.unwrap().use_access[0]
                 .package_interface
-                .object_type
+                .workbench_type
                 .as_ref()
                 .map(GlobalWorkbenchType::as_str),
             Some("FUTURE/I")

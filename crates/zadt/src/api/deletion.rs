@@ -454,7 +454,7 @@ pub struct DeletionCheckObjectResult {
     pub uri: AdtUri,
 
     #[serde(rename = "@adtcore:type")]
-    pub object_type: GlobalWorkbenchType,
+    pub workbench_type: GlobalWorkbenchType,
 
     #[serde(rename = "@adtcore:name")]
     pub name: String,
@@ -503,7 +503,7 @@ pub struct DeletionUsage {
     pub uri: AdtUri,
 
     #[serde(rename = "@adtcore:type")]
-    pub object_type: GlobalWorkbenchType,
+    pub workbench_type: GlobalWorkbenchType,
 
     #[serde(rename = "@adtcore:name")]
     pub name: String,
@@ -537,7 +537,7 @@ pub struct DeletionIncludedObject {
     pub uri: AdtUri,
 
     #[serde(rename = "@adtcore:type")]
-    pub object_type: GlobalWorkbenchType,
+    pub workbench_type: GlobalWorkbenchType,
 
     #[serde(rename = "@adtcore:name")]
     pub name: String,
@@ -589,7 +589,7 @@ pub struct DeletionObjectResult {
 
     /// Resolved global Workbench type, when available.
     #[serde(rename = "@adtcore:type")]
-    pub object_type: Option<GlobalWorkbenchType>,
+    pub workbench_type: Option<GlobalWorkbenchType>,
 
     /// Resolved object name, when available.
     #[serde(rename = "@adtcore:name")]
@@ -983,7 +983,7 @@ mod tests {
             object.uri.as_str(),
             "/sap/bc/adt/functions/groups/zgroup123/includes/lzgroup123rrr"
         );
-        assert_eq!(object.object_type.as_str(), "FUGR/I");
+        assert_eq!(object.workbench_type.as_str(), "FUGR/I");
         assert_eq!(object.name, "LZGROUP123RRR");
         assert_eq!(object.package_name.as_deref(), Some("$TMP"));
 
@@ -1016,7 +1016,7 @@ mod tests {
         assert_eq!(response.objects.len(), 1);
         let object = &response.objects[0];
         assert_eq!(object.uri.as_str(), "/sap/bc/adt/oo/classes/zmyclass");
-        assert_eq!(object.object_type.as_str(), "CLAS/OC");
+        assert_eq!(object.workbench_type.as_str(), "CLAS/OC");
         assert_eq!(object.name, "ZMYCLASS");
         assert_eq!(object.package_name.as_deref(), Some("ZZZMYPACKAGE"));
 
@@ -1072,13 +1072,13 @@ mod tests {
             serde_xml_rs::from_str(CHECK_RESPONSE_WITH_INCLUDED_OBJECT).unwrap();
 
         let object = &response.objects[0];
-        assert_eq!(object.object_type.as_str(), "FUGR/F");
+        assert_eq!(object.workbench_type.as_str(), "FUGR/F");
         assert_eq!(object.included_objects.len(), 1);
         let included = &object.included_objects[0];
         assert!(included.can_be_deleted_without_parent);
         assert!(included.must_be_deleted_with_parent);
         assert!(included.is_deletable);
-        assert_eq!(included.object_type.as_str(), "FUGR/FF");
+        assert_eq!(included.workbench_type.as_str(), "FUGR/FF");
         assert_eq!(included.name, "ZFTFTR");
         assert_eq!(included.package_name.as_deref(), Some("$TMP"));
         assert_eq!(included.messages.len(), 1);

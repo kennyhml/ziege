@@ -84,7 +84,7 @@ pub struct ProgramProperties {
 
     /// The root repository object type, normally `PROG/P`.
     #[serde(rename = "@adtcore:type")]
-    pub(crate) object_type: GlobalWorkbenchType,
+    pub(crate) workbench_type: GlobalWorkbenchType,
 
     /// The timestamp at which the program was last changed.
     #[serde(rename = "@adtcore:changedAt")]
@@ -188,7 +188,7 @@ pub struct IncludeProperties {
 
     /// The root repository object type, normally `PROG/I`.
     #[serde(rename = "@adtcore:type")]
-    pub(crate) object_type: GlobalWorkbenchType,
+    pub(crate) workbench_type: GlobalWorkbenchType,
 
     /// The timestamp at which the include was last changed.
     #[serde(rename = "@adtcore:changedAt")]
@@ -409,7 +409,10 @@ mod tests {
             context.uri.as_deref(),
             Some("/sap/bc/adt/programs/programs/Z_CONTEXT")
         );
-        assert_eq!(context.object_type.as_ref(), Some(&Program::WORKBENCH_TYPE));
+        assert_eq!(
+            context.workbench_type.as_ref(),
+            Some(&Program::WORKBENCH_TYPE)
+        );
         assert_eq!(context.name.as_deref(), Some("Z_CONTEXT"));
         assert_eq!(context.description.as_deref(), Some("Context program"));
         let value = serde_json::to_value(&include).unwrap();
@@ -437,7 +440,7 @@ mod tests {
 
         assert_eq!(program.version, WorkbenchVersion::Inactive);
         assert_eq!(
-            program.package.object_type.unwrap().as_str(),
+            program.package.workbench_type.unwrap().as_str(),
             "FUTURE/PACKAGE"
         );
         assert_eq!(
@@ -473,7 +476,7 @@ mod tests {
             &PROGRAM_XML.replace("adtcore:type=\"PROG/P\"", "adtcore:type=\"PROG/I\""),
         )
         .unwrap();
-        assert_eq!(program.object_type, Include::WORKBENCH_TYPE);
+        assert_eq!(program.workbench_type, Include::WORKBENCH_TYPE);
 
         let include = parse_include(
             &INCLUDE_XML.replace("adtcore:name=\"ZTEST\"", "adtcore:name=\"ZOTHER\""),

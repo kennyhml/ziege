@@ -74,7 +74,7 @@ pub struct AccessControlProperties {
         doc = "The Access Control's global Workbench type."
     )]
     #[serde(rename = "@adtcore:type")]
-    pub(crate) object_type: GlobalWorkbenchType,
+    pub(crate) workbench_type: GlobalWorkbenchType,
 
     /// The timestamp at which the object was last changed.
     #[serde(rename = "@adtcore:changedAt")]
@@ -148,7 +148,7 @@ mod tests {
             .build()
             .unwrap();
         assert_eq!(properties.name, "");
-        assert_eq!(properties.object_type, AccessControl::WORKBENCH_TYPE);
+        assert_eq!(properties.workbench_type, AccessControl::WORKBENCH_TYPE);
         assert!(properties.abap_language_version.is_none());
 
         let reference = ObjectRef::new(
@@ -174,7 +174,7 @@ mod tests {
         let properties = properties();
 
         assert_eq!(properties.name, "SDSH_CDS_DOMAIN_VAL_DCL");
-        assert_eq!(properties.object_type, AccessControl::WORKBENCH_TYPE);
+        assert_eq!(properties.workbench_type, AccessControl::WORKBENCH_TYPE);
         assert_eq!(properties.version, WorkbenchVersion::Active);
         assert_eq!(properties.source_uri, "source/main");
         assert_eq!(properties.package.name.as_deref(), Some("SDSH"));

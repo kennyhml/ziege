@@ -218,7 +218,7 @@ pub struct RepositoryObjectSummary {
     pub name: String,
     pub description: String,
     pub package: String,
-    pub object_type: GlobalWorkbenchType,
+    pub workbench_type: GlobalWorkbenchType,
     pub expandable: bool,
     pub reference: ObjectRef,
     relations: Relations,
@@ -315,7 +315,7 @@ impl RepositoryObjectProperties {
     fn from_raw(raw: RawRepositoryObjectProperties, object_uri: &AdtUri) -> Self {
         let key = ObjectKey::from_parts(
             raw.object.name.to_ascii_uppercase(),
-            raw.object.object_type.clone(),
+            raw.object.workbench_type.clone(),
             None,
         );
         let reference = ObjectRef::new(key, object_uri.clone());
@@ -335,7 +335,7 @@ impl RepositoryObjectProperties {
             name: raw.object.name,
             description: raw.object.description,
             package: raw.object.package,
-            object_type: raw.object.object_type,
+            workbench_type: raw.object.workbench_type,
             expandable: raw.object.expandable,
             relations: Relations::for_base(object_uri.clone(), raw.object.links),
             reference,
@@ -400,7 +400,7 @@ struct RawRepositoryObjectSummary {
     #[serde(rename = "@package")]
     package: String,
     #[serde(rename = "@type")]
-    object_type: GlobalWorkbenchType,
+    workbench_type: GlobalWorkbenchType,
     #[serde(rename = "@expandable")]
     expandable: bool,
     #[serde(rename = "atom:link", default)]

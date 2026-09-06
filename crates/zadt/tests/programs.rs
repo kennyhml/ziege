@@ -170,7 +170,7 @@ async fn include_properties_query_converts_the_live_ztest_properties() {
         .unwrap();
 
     assert_eq!(response.reference().name(), "ZTEST");
-    assert_eq!(response.reference().object_type().to_string(), "PROG/I");
+    assert_eq!(response.reference().workbench_type().to_string(), "PROG/I");
     assert_eq!(response.workbench_version(), WorkbenchVersion::Active);
     assert_eq!(include.context_ref_count, 0);
     assert_eq!(include.package.name.as_deref(), Some("$TMP"));
@@ -247,14 +247,14 @@ async fn program_properties_query_converts_the_live_z_test_v3_properties() {
         .unwrap();
 
     assert_eq!(response.reference().name(), "Z_TEST");
-    assert_eq!(response.reference().object_type().to_string(), "PROG/P");
+    assert_eq!(response.reference().workbench_type().to_string(), "PROG/P");
     assert_eq!(response.workbench_version(), WorkbenchVersion::Inactive);
     assert_eq!(program.program_type, "executableProgram");
     assert!(program.fix_point_arithmetic);
     assert!(program.unicode_check_active);
     assert_eq!(program.package.name.as_deref(), Some("$TMP"));
     assert_eq!(
-        program.package.object_type.as_ref().unwrap().as_str(),
+        program.package.workbench_type.as_ref().unwrap().as_str(),
         "DEVC/K"
     );
     assert_eq!(

@@ -135,7 +135,7 @@ fn repository_content_response_decodes_one_layer() {
     assert_eq!(content.folders.len(), 1);
     assert_eq!(content.objects.len(), 1);
     assert_eq!(
-        content.objects[0].reference.object_type().as_str(),
+        content.objects[0].reference.workbench_type().as_str(),
         "CLAS/OC"
     );
     assert_eq!(content.objects[0].relations().len(), 1);
@@ -185,7 +185,7 @@ fn favorite_objects_response_decodes_objects() {
         favorites.objects[0].uri,
         "/sap/bc/adt/programs/programs/z_test"
     );
-    assert_eq!(favorites.objects[0].object_type.as_str(), "PROG/P");
+    assert_eq!(favorites.objects[0].workbench_type.as_str(), "PROG/P");
     assert_eq!(favorites.objects[0].name, "Z_TEST");
     assert_eq!(favorites.objects[0].list.as_deref(), Some("$"));
 }
@@ -520,7 +520,7 @@ fn parses_virtual_folders_and_repository_objects() {
     );
     assert_eq!(content.objects[0].name, "ZCL_DEMO");
     assert_eq!(
-        content.objects[0].reference.object_type().as_str(),
+        content.objects[0].reference.workbench_type().as_str(),
         "CLAS/OC"
     );
     assert_eq!(
@@ -548,7 +548,7 @@ fn converts_ris_entries_to_checked_typed_references() {
 
     let class = entry.typed_reference::<Class>().unwrap();
     assert_eq!(class.name(), "ZCL_DEMO");
-    assert_eq!(class.object_type(), entry.reference.object_type());
+    assert_eq!(class.workbench_type(), entry.reference.workbench_type());
 
     let error = ObjectRef::<Program>::try_from(entry).unwrap_err();
     assert!(matches!(
@@ -563,15 +563,15 @@ fn converts_ris_entries_to_runtime_repository_objects() {
     let base =
         AdtUri::parse("/sap/bc/adt/repository/informationsystem/virtualfolders/contents").unwrap();
 
-    for object_type in ["PROG/P", "PROG/I", "CLAS/OC", "DEVC/K", "DTEL/DE"] {
+    for workbench_type in ["PROG/P", "PROG/I", "CLAS/OC", "DEVC/K", "DTEL/DE"] {
         let xml = String::from_utf8(CONTENT_XML.to_vec())
             .unwrap()
-            .replace("type=\"CLAS/OC\"", &format!("type=\"{object_type}\""));
+            .replace("type=\"CLAS/OC\"", &format!("type=\"{workbench_type}\""));
         let content = RepositoryContent::parse(xml.as_bytes(), &base).unwrap();
         let object = content.objects[0].repository_object();
 
-        assert_eq!(object.object_type().as_str(), object_type);
-        assert!(match object_type {
+        assert_eq!(object.workbench_type().as_str(), workbench_type);
+        assert!(match workbench_type {
             "PROG/P" => object.typed::<Program>().is_some(),
             "PROG/I" => object.typed::<Include>().is_some(),
             "CLAS/OC" => object.typed::<Class>().is_some(),
@@ -587,7 +587,7 @@ fn converts_ris_entries_to_runtime_repository_objects() {
     let content = RepositoryContent::parse(unknown_xml.as_bytes(), &base).unwrap();
     let object = content.objects[0].repository_object();
 
-    assert_eq!(object.object_type().as_str(), "DDLS/DF");
+    assert_eq!(object.workbench_type().as_str(), "DDLS/DF");
     assert!(object.typed::<Class>().is_none());
 }
 
@@ -682,7 +682,7 @@ fn preserves_custom_facets_and_repository_types() {
 
     assert_eq!(content.folders[0].facet.as_str(), "FUTURE");
     assert_eq!(
-        content.objects[0].reference.object_type().as_str(),
+        content.objects[0].reference.workbench_type().as_str(),
         "ZZZZ/X"
     );
 }
@@ -692,19 +692,19 @@ fn accepts_unmodeled_global_workbench_type_shapes() {
     let base =
         AdtUri::parse("/sap/bc/adt/repository/informationsystem/virtualfolders/contents").unwrap();
 
-    for object_type in ["AUTH", "CLAS/OCN/definitions", "clas/oc"] {
+    for workbench_type in ["AUTH", "CLAS/OCN/definitions", "clas/oc"] {
         let xml = String::from_utf8(CONTENT_XML.to_vec())
             .unwrap()
-            .replace("type=\"CLAS/OC\"", &format!("type=\"{object_type}\""));
+            .replace("type=\"CLAS/OC\"", &format!("type=\"{workbench_type}\""));
         let content = RepositoryContent::parse(xml.as_bytes(), &base).unwrap();
 
         assert_eq!(
-            content.objects[0].reference.object_type().as_str(),
-            object_type
+            content.objects[0].reference.workbench_type().as_str(),
+            workbench_type
         );
         assert!(content.objects[0].typed_reference::<Class>().is_err());
         let object = content.objects[0].repository_object();
-        assert_eq!(object.object_type().as_str(), object_type);
+        assert_eq!(object.workbench_type().as_str(), workbench_type);
     }
 }
 
@@ -747,7 +747,7 @@ fn parses_uniform_object_properties() {
     let properties = RepositoryObjectProperties::parse(OBJECT_PROPERTIES_XML, &object_uri).unwrap();
 
     assert_eq!(properties.object.name, "CL_ADT_URI_MAPPER");
-    assert_eq!(properties.object.object_type.to_string(), "CLAS/OC");
+    assert_eq!(properties.object.workbench_type.to_string(), "CLAS/OC");
     assert_eq!(properties.object.relations().len(), 1);
     assert_eq!(properties.properties[0].facet, RepositoryFacet::PACKAGE);
     let package_hierarchy = properties.package_hierarchy();

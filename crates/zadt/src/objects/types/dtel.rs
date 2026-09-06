@@ -26,7 +26,7 @@ pub struct DataElementProperties {
 
     /// The repository object type, normally `DTEL/DE`.
     #[serde(rename = "@adtcore:type")]
-    pub(crate) object_type: GlobalWorkbenchType,
+    pub(crate) workbench_type: GlobalWorkbenchType,
 
     /// The user responsible for the Data Element, when advertised.
     #[serde(rename = "@adtcore:responsible")]
@@ -264,7 +264,7 @@ mod tests {
 
         let decoded = parse(xml.as_bytes()).unwrap();
         assert_eq!(decoded, properties);
-        assert_eq!(decoded.object_type, DataElement::WORKBENCH_TYPE);
+        assert_eq!(decoded.workbench_type, DataElement::WORKBENCH_TYPE);
         assert_eq!(decoded.links.len(), 4);
         assert_eq!(
             decoded.package.unwrap().description.as_deref(),
@@ -346,7 +346,7 @@ mod tests {
             .replacen("adtcore:name=\"ZTFRWTFRT\"", "adtcore:name=\"ZOTHER\"", 1);
         let properties = parse(xml.as_bytes()).unwrap();
 
-        assert_eq!(properties.object_type.as_str(), "DOMA/DD");
+        assert_eq!(properties.workbench_type.as_str(), "DOMA/DD");
         assert_eq!(properties.name, "ZOTHER");
         let update = String::from_utf8(properties.to_xml().unwrap()).unwrap();
         assert!(update.contains("adtcore:type=\"DOMA/DD\""));

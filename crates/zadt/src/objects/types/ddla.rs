@@ -66,7 +66,7 @@ pub struct AnnotationDefinitionProperties {
         doc = "The Annotation Definition's global Workbench type."
     )]
     #[serde(rename = "@adtcore:type")]
-    pub(crate) object_type: GlobalWorkbenchType,
+    pub(crate) workbench_type: GlobalWorkbenchType,
 
     /// The timestamp at which the object was last changed.
     #[serde(rename = "@adtcore:changedAt")]
@@ -140,7 +140,10 @@ mod tests {
             .build()
             .unwrap();
         assert_eq!(properties.name, "");
-        assert_eq!(properties.object_type, AnnotationDefinition::WORKBENCH_TYPE);
+        assert_eq!(
+            properties.workbench_type,
+            AnnotationDefinition::WORKBENCH_TYPE
+        );
 
         let reference = ObjectRef::new(
             ObjectKey::<AnnotationDefinition>::new("Z_ANNOTATION_DEFINITION"),
@@ -165,7 +168,10 @@ mod tests {
         let properties = properties();
 
         assert_eq!(properties.name, "UI");
-        assert_eq!(properties.object_type, AnnotationDefinition::WORKBENCH_TYPE);
+        assert_eq!(
+            properties.workbench_type,
+            AnnotationDefinition::WORKBENCH_TYPE
+        );
         assert_eq!(properties.version, WorkbenchVersion::Active);
         assert_eq!(properties.source_uri, "./ui/source/main");
         assert_eq!(

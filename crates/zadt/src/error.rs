@@ -118,9 +118,9 @@ pub enum ObjectError {
     #[error("invalid object properties JSON: {0}")]
     InvalidPropertiesJson(#[source] serde_json::Error),
 
-    #[error("object type `{object_type}` does not support properties media type `{media_type}`")]
+    #[error("object type `{workbench_type}` does not support properties media type `{media_type}`")]
     UnsupportedPropertiesMediaType {
-        object_type: GlobalWorkbenchType,
+        workbench_type: GlobalWorkbenchType,
         media_type: String,
     },
 
@@ -133,21 +133,21 @@ pub enum ObjectError {
     #[error("object response advertised source component `{component}` more than once")]
     DuplicateSourceComponent { component: String },
 
-    #[error("object type `{object_type}` does not support {capability}")]
+    #[error("object type `{workbench_type}` does not support {capability}")]
     UnsupportedCapability {
-        object_type: GlobalWorkbenchType,
+        workbench_type: GlobalWorkbenchType,
         capability: &'static str,
     },
 
-    #[error("object type `{object_type}` is not modeled by ZADT")]
-    UnsupportedObjectType { object_type: GlobalWorkbenchType },
+    #[error("object type `{workbench_type}` is not modeled by ZADT")]
+    UnsupportedObjectType { workbench_type: GlobalWorkbenchType },
 
-    #[error("object type `{object_type}` requires a parent object")]
-    ParentObjectRequired { object_type: GlobalWorkbenchType },
+    #[error("object type `{workbench_type}` requires a parent object")]
+    ParentObjectRequired { workbench_type: GlobalWorkbenchType },
 
-    #[error("invalid parent object for type `{object_type}`: {reason}")]
+    #[error("invalid parent object for type `{workbench_type}`: {reason}")]
     InvalidParentObject {
-        object_type: GlobalWorkbenchType,
+        workbench_type: GlobalWorkbenchType,
         reason: String,
     },
 

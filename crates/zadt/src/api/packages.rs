@@ -107,7 +107,7 @@ impl PackageTreeNode {
         let package = package_reference(
             AdvertisedObjectReference {
                 uri: Some(raw.uri),
-                object_type: Some(raw.object_type),
+                workbench_type: Some(raw.workbench_type),
                 name: Some(raw.name),
                 description: raw.description,
                 ..Default::default()
@@ -160,23 +160,23 @@ fn package_reference(
     base: &AdtUri,
     compact_type: bool,
 ) -> Result<Option<PackageReference>, ObjectError> {
-    if raw.name.is_none() && raw.uri.is_none() && raw.object_type.is_none() {
+    if raw.name.is_none() && raw.uri.is_none() && raw.workbench_type.is_none() {
         return Ok(None);
     }
     let name = required(raw.name, "adtcore:name")?;
     let href = required(raw.uri, "adtcore:uri")?;
-    let object_type = required(raw.object_type, "adtcore:type")?;
+    let workbench_type = required(raw.workbench_type, "adtcore:type")?;
     if compact_type {
-        if object_type.as_str() != PackageTree::COMPACT_OBJECT_TYPE {
+        if workbench_type.as_str() != PackageTree::COMPACT_OBJECT_TYPE {
             return Err(ObjectError::UnexpectedCompactObjectType {
                 expected: PackageTree::COMPACT_OBJECT_TYPE,
-                actual: object_type.to_string(),
+                actual: workbench_type.to_string(),
             });
         }
-    } else if object_type != Package::WORKBENCH_TYPE {
+    } else if workbench_type != Package::WORKBENCH_TYPE {
         return Err(ObjectError::UnexpectedObjectType {
             expected: Package::WORKBENCH_TYPE,
-            actual: object_type,
+            actual: workbench_type,
         });
     }
     let uri = resolve_href(base, &href)
@@ -198,13 +198,13 @@ fn package_interface_reference(
 ) -> Result<PackageInterfaceReference, ObjectError> {
     let name = required(raw.name, "adtcore:name")?;
     let href = required(raw.uri, "adtcore:uri")?;
-    let object_type = required(raw.object_type, "adtcore:type")?;
-    if object_type.as_str() != PackageInterfaceReference::OBJECT_TYPE
-        && object_type.as_str() != PackageInterfaceReference::COMPACT_OBJECT_TYPE
+    let workbench_type = required(raw.workbench_type, "adtcore:type")?;
+    if workbench_type.as_str() != PackageInterfaceReference::OBJECT_TYPE
+        && workbench_type.as_str() != PackageInterfaceReference::COMPACT_OBJECT_TYPE
     {
         return Err(ObjectError::UnexpectedCompactObjectType {
             expected: PackageInterfaceReference::OBJECT_TYPE,
-            actual: object_type.to_string(),
+            actual: workbench_type.to_string(),
         });
     }
     let uri = resolve_href(base, &href)
@@ -216,7 +216,7 @@ fn package_interface_reference(
     Ok(PackageInterfaceReference {
         name,
         uri,
-        object_type: object_type.to_string(),
+        object_type: workbench_type.to_string(),
         description: raw.description,
     })
 }
@@ -249,7 +249,7 @@ struct RawPackageTreeNode {
     #[serde(rename = "@adtcore:uri")]
     uri: String,
     #[serde(rename = "@adtcore:type")]
-    object_type: GlobalWorkbenchType,
+    workbench_type: GlobalWorkbenchType,
     #[serde(rename = "@adtcore:name")]
     name: String,
     #[serde(rename = "@adtcore:description")]
@@ -453,7 +453,7 @@ mod tests {
         let properties: PackageProperties = serde_xml_rs::from_reader(PACKAGE_XML).unwrap();
 
         assert_eq!(properties.name, "SADT_TOOLS_CORE");
-        assert_eq!(properties.object_type, Package::WORKBENCH_TYPE);
+        assert_eq!(properties.workbench_type, Package::WORKBENCH_TYPE);
     }
 
     #[test]
@@ -468,7 +468,7 @@ mod tests {
             );
         let properties: PackageProperties = serde_xml_rs::from_str(&xml).unwrap();
 
-        assert_eq!(properties.object_type.as_str(), "PROG/P");
+        assert_eq!(properties.workbench_type.as_str(), "PROG/P");
         assert_eq!(properties.name, "OTHER_PACKAGE");
     }
 
@@ -497,7 +497,7 @@ mod tests {
         let package = package_reference(
             AdvertisedObjectReference {
                 name: Some("Z_PACKAGE".to_owned()),
-                object_type: Some(Package::WORKBENCH_TYPE),
+                workbench_type: Some(Package::WORKBENCH_TYPE),
                 uri: Some("packages/42".to_owned()),
                 ..Default::default()
             },

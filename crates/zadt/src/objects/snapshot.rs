@@ -122,8 +122,8 @@ impl<T: SnapshotKind> Identity for ObjectSnapshot<T> {
         self.reference().object_name()
     }
 
-    fn object_type(&self) -> &super::GlobalWorkbenchType {
-        self.reference().object_type()
+    fn workbench_type(&self) -> &super::GlobalWorkbenchType {
+        self.reference().workbench_type()
     }
 }
 
@@ -200,7 +200,7 @@ impl ObjectSnapshot<()> {
             .typed::<T>()
             .ok_or_else(|| ObjectError::UnexpectedObjectType {
                 expected: T::WORKBENCH_TYPE,
-                actual: self.reference.object_type().clone(),
+                actual: self.reference.workbench_type().clone(),
             })
     }
 }

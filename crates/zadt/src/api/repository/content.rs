@@ -298,7 +298,7 @@ impl RepositoryObjectEntry {
             .typed()
             .ok_or_else(|| ObjectError::UnexpectedRepositoryObjectType {
                 expected: T::WORKBENCH_TYPE,
-                actual: self.reference.object_type().clone(),
+                actual: self.reference.workbench_type().clone(),
             })
     }
 
@@ -331,7 +331,7 @@ impl TryFrom<RawRepositoryObjectEntry> for RepositoryObjectEntry {
             source,
         })?;
         let reference = ObjectRef::new(
-            ObjectKey::from_parts(raw.name.to_ascii_uppercase(), raw.object_type, None),
+            ObjectKey::from_parts(raw.name.to_ascii_uppercase(), raw.workbench_type, None),
             uri.clone(),
         );
         Ok(Self {
@@ -451,7 +451,7 @@ struct RawRepositoryObjectEntry {
     #[serde(rename = "@package")]
     package: String,
     #[serde(rename = "@type")]
-    object_type: GlobalWorkbenchType,
+    workbench_type: GlobalWorkbenchType,
     #[serde(rename = "@uri")]
     uri: String,
     #[serde(rename = "@vituri")]

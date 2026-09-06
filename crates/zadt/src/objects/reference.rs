@@ -61,8 +61,8 @@ impl<T> ObjectRef<T> {
     }
 
     /// Returns the exact Workbench type retained by this reference.
-    pub fn object_type(&self) -> &GlobalWorkbenchType {
-        self.key.object_type()
+    pub fn workbench_type(&self) -> &GlobalWorkbenchType {
+        self.key.workbench_type()
     }
 
     /// Returns a runtime-typed copy, preserving all location metadata.
@@ -150,7 +150,7 @@ impl ObjectRef<()> {
 impl<T, U> PartialEq<ObjectRef<U>> for ObjectRef<T> {
     fn eq(&self, other: &ObjectRef<U>) -> bool {
         self.name() == other.name()
-            && self.object_type() == other.object_type()
+            && self.workbench_type() == other.workbench_type()
             && self.uri == other.uri
     }
 }
@@ -160,7 +160,7 @@ impl<T> Eq for ObjectRef<T> {}
 impl<T> Hash for ObjectRef<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.name().hash(state);
-        self.object_type().hash(state);
+        self.workbench_type().hash(state);
         self.uri.hash(state);
     }
 }
@@ -176,8 +176,8 @@ impl<T> Identity for ObjectRef<T> {
         self.name()
     }
 
-    fn object_type(&self) -> &GlobalWorkbenchType {
-        self.object_type()
+    fn workbench_type(&self) -> &GlobalWorkbenchType {
+        self.workbench_type()
     }
 }
 
@@ -191,7 +191,7 @@ pub struct AdvertisedObjectReference {
 
     /// The referenced object's global Workbench type, when advertised.
     #[serde(rename = "@adtcore:type", skip_serializing_if = "Option::is_none")]
-    pub object_type: Option<GlobalWorkbenchType>,
+    pub workbench_type: Option<GlobalWorkbenchType>,
 
     /// The referenced object's name, when advertised.
     #[serde(rename = "@adtcore:name", skip_serializing_if = "Option::is_none")]
@@ -219,7 +219,7 @@ pub struct AdvertisedObjectReference {
 impl<T> From<&ObjectKey<T>> for AdvertisedObjectReference {
     fn from(value: &ObjectKey<T>) -> Self {
         Self {
-            object_type: Some(value.object_type().clone()),
+            workbench_type: Some(value.workbench_type().clone()),
             name: Some(value.name().to_owned()),
             ..Default::default()
         }
@@ -230,7 +230,7 @@ impl<T> From<&ObjectRef<T>> for AdvertisedObjectReference {
     fn from(value: &ObjectRef<T>) -> Self {
         Self {
             uri: Some(value.uri().to_string()),
-            object_type: Some(value.object_type().clone()),
+            workbench_type: Some(value.workbench_type().clone()),
             name: Some(value.name().to_owned()),
             parent_uri: value.parent_uri().map(ToString::to_string),
             ..Default::default()
@@ -302,19 +302,19 @@ impl Discovery {
                 parent_descriptor
                     .category()
                     .ok_or_else(|| ObjectError::InvalidParentObject {
-                        object_type: object.object_type().clone(),
+                        workbench_type: object.workbench_type().clone(),
                         reason: format!(
                             "parent type `{}` is not directly addressable",
-                            parent.object_type()
+                            parent.workbench_type()
                         ),
                     })?;
             let relationship = parent_descriptor
                 .subobjects()
                 .iter()
-                .find(|candidate| candidate.object_type() == object.object_type())
+                .find(|candidate| candidate.workbench_type() == object.workbench_type())
                 .ok_or_else(|| ObjectError::UnsupportedSubObjectType {
-                    parent_type: parent.object_type().clone(),
-                    child_type: object.object_type().clone(),
+                    parent_type: parent.workbench_type().clone(),
+                    child_type: object.workbench_type().clone(),
                 })?;
             let link = self.require_template(category, relationship.relation())?;
             let template = AdtUriTemplate::new(link.template());
@@ -345,7 +345,7 @@ impl Discovery {
         let category = descriptor
             .category()
             .ok_or_else(|| ObjectError::ParentObjectRequired {
-                object_type: object.object_type().clone(),
+                workbench_type: object.workbench_type().clone(),
             })?;
         let collection = self.require_collection(category)?;
         Ok(ResolvedObjectCollection {
@@ -504,7 +504,7 @@ mod tests {
         );
         let parent = reference.parent_reference().unwrap();
         assert_eq!(parent.name.as_deref(), Some("Z_GROUP"));
-        assert_eq!(parent.object_type, Some(FunctionGroup::WORKBENCH_TYPE));
+        assert_eq!(parent.workbench_type, Some(FunctionGroup::WORKBENCH_TYPE));
         assert_eq!(parent.uri, advertised.parent_uri);
         assert!(parent.parent_uri.is_none());
 
@@ -529,7 +529,7 @@ mod tests {
         let parent = detached.parent_reference().unwrap();
         assert_eq!(parent.uri, advertised.parent_uri);
         assert!(parent.name.is_none());
-        assert!(parent.object_type.is_none());
+        assert!(parent.workbench_type.is_none());
     }
 
     #[test]
@@ -577,8 +577,8 @@ mod tests {
         .unwrap();
         assert!(matches!(
             discovery.resolve_object_uri(&detached),
-            Err(ResolveError::Object(ObjectError::ParentObjectRequired { object_type }))
-                if object_type == FunctionModule::WORKBENCH_TYPE
+            Err(ResolveError::Object(ObjectError::ParentObjectRequired { workbench_type }))
+                if workbench_type == FunctionModule::WORKBENCH_TYPE
         ));
         assert!(discovery.resolve_object(&detached).is_err());
         let detached = ObjectRef::new(detached, advertised.uri().clone());
@@ -596,7 +596,10 @@ mod tests {
         let xml = r#"<adtcore:objectRef adtcore:type="CLAS/OC" adtcore:name="ZCL_TEST" adtcore:packageName="ZPACKAGE" xmlns:adtcore="http://www.sap.com/adt/core" />"#;
         let reference: AdvertisedObjectReference = serde_xml_rs::from_str(xml).unwrap();
 
-        assert_eq!(reference.object_type.as_ref().unwrap().as_str(), "CLAS/OC");
+        assert_eq!(
+            reference.workbench_type.as_ref().unwrap().as_str(),
+            "CLAS/OC"
+        );
         assert_eq!(reference.name.as_deref(), Some("ZCL_TEST"));
         assert_eq!(reference.package_name.as_deref(), Some("ZPACKAGE"));
         assert!(reference.uri.is_none());
@@ -616,13 +619,13 @@ mod tests {
         let object: ObjectKey<()> =
             ObjectKey::from_parts("Z_UNSUPPORTED".to_owned(), "TEST/X".parse().unwrap(), None);
 
-        assert_eq!(object.object_type().as_str(), "TEST/X");
+        assert_eq!(object.workbench_type().as_str(), "TEST/X");
         assert!(matches!(
             object.run(),
             Err(ObjectError::UnsupportedCapability {
-                object_type,
+                workbench_type,
                 capability: "immediate run",
-            }) if object_type.as_str() == "TEST/X"
+            }) if workbench_type.as_str() == "TEST/X"
         ));
 
         let json = serde_json::json!({

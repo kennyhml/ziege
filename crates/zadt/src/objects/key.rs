@@ -24,7 +24,8 @@ pub struct ObjectKey<T = ()> {
     name: String,
 
     /// The workbench type of the object
-    object_type: GlobalWorkbenchType,
+    #[serde(rename = "object_type")]
+    workbench_type: GlobalWorkbenchType,
 
     /// An optional parent of this object, if it has one
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -67,9 +68,9 @@ impl ObjectKey<()> {
         descriptor
             .subobjects()
             .iter()
-            .find(|subobject| subobject.object_type() == child_type)
+            .find(|subobject| subobject.workbench_type() == child_type)
             .ok_or_else(|| ObjectError::UnsupportedSubObjectType {
-                parent_type: self.object_type().clone(),
+                parent_type: self.workbench_type().clone(),
                 child_type: child_type.clone(),
             })?;
 
@@ -84,12 +85,12 @@ impl ObjectKey<()> {
 impl<T> ObjectKey<T> {
     pub(crate) fn from_parts(
         name: String,
-        object_type: GlobalWorkbenchType,
+        workbench_type: GlobalWorkbenchType,
         parent: Option<Box<ObjectKey<()>>>,
     ) -> Self {
         Self {
             name: name.to_ascii_uppercase(),
-            object_type,
+            workbench_type,
             parent,
             marker: PhantomData,
         }
@@ -101,8 +102,8 @@ impl<T> ObjectKey<T> {
     }
 
     /// Returns the exact Workbench type retained by this key.
-    pub fn object_type(&self) -> &GlobalWorkbenchType {
-        &self.object_type
+    pub fn workbench_type(&self) -> &GlobalWorkbenchType {
+        &self.workbench_type
     }
 
     /// Returns a runtime-typed copy of this object identity.
@@ -113,14 +114,14 @@ impl<T> ObjectKey<T> {
     fn retag<U>(&self) -> ObjectKey<U> {
         ObjectKey {
             name: self.name.clone(),
-            object_type: self.object_type.clone(),
+            workbench_type: self.workbench_type.clone(),
             parent: self.parent.clone(),
             marker: PhantomData,
         }
     }
 
     pub(crate) fn descriptor(&self) -> Option<&'static descriptors::ObjectTypeDescriptor> {
-        descriptors::object_type_descriptor(&self.object_type)
+        descriptors::object_type_descriptor(&self.workbench_type)
     }
 
     pub(crate) fn require_descriptor(
@@ -128,13 +129,13 @@ impl<T> ObjectKey<T> {
     ) -> Result<&'static descriptors::ObjectTypeDescriptor, ObjectError> {
         self.descriptor()
             .ok_or_else(|| ObjectError::UnsupportedObjectType {
-                object_type: self.object_type().clone(),
+                workbench_type: self.workbench_type().clone(),
             })
     }
 
     pub(crate) fn unsupported_capability(&self, capability: &'static str) -> ObjectError {
         ObjectError::UnsupportedCapability {
-            object_type: self.object_type.clone(),
+            workbench_type: self.workbench_type.clone(),
             capability,
         }
     }
@@ -158,27 +159,27 @@ impl ObjectKey<()> {
     /// Subobjects require a parent and must instead be created through
     /// [`ObjectKey::subobject`].
     pub fn from_workbench_type(
-        object_type: &GlobalWorkbenchType,
+        workbench_type: &GlobalWorkbenchType,
         name: impl Into<String>,
     ) -> Result<Self, ObjectError> {
-        let descriptor = descriptors::object_type_descriptor(object_type).ok_or_else(|| {
+        let descriptor = descriptors::object_type_descriptor(workbench_type).ok_or_else(|| {
             ObjectError::UnsupportedObjectType {
-                object_type: object_type.clone(),
+                workbench_type: workbench_type.clone(),
             }
         })?;
 
         descriptor
             .category()
             .ok_or_else(|| ObjectError::ParentObjectRequired {
-                object_type: object_type.clone(),
+                workbench_type: workbench_type.clone(),
             })?;
 
-        Ok(Self::from_parts(name.into(), object_type.clone(), None))
+        Ok(Self::from_parts(name.into(), workbench_type.clone(), None))
     }
 
     /// Recovers a typed key when this object has the requested type.
     pub fn typed<T: ObjectType>(&self) -> Option<ObjectKey<T>> {
-        if self.object_type() != &T::WORKBENCH_TYPE {
+        if self.workbench_type() != &T::WORKBENCH_TYPE {
             return None;
         }
         Some(self.retag())
@@ -189,7 +190,7 @@ impl<T> Clone for ObjectKey<T> {
     fn clone(&self) -> Self {
         Self {
             name: self.name.clone(),
-            object_type: self.object_type.clone(),
+            workbench_type: self.workbench_type.clone(),
             parent: self.parent.clone(),
             marker: PhantomData,
         }
@@ -201,15 +202,15 @@ impl<T> Identity for ObjectKey<T> {
         self.name()
     }
 
-    fn object_type(&self) -> &GlobalWorkbenchType {
-        self.object_type()
+    fn workbench_type(&self) -> &GlobalWorkbenchType {
+        self.workbench_type()
     }
 }
 
 impl<T, U> PartialEq<ObjectKey<U>> for ObjectKey<T> {
     fn eq(&self, other: &ObjectKey<U>) -> bool {
         self.name == other.name
-            && self.object_type == other.object_type
+            && self.workbench_type == other.workbench_type
             && self.parent == other.parent
     }
 }
@@ -219,14 +220,14 @@ impl<T> Eq for ObjectKey<T> {}
 impl<T> Hash for ObjectKey<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.name.hash(state);
-        self.object_type.hash(state);
+        self.workbench_type.hash(state);
         self.parent.hash(state);
     }
 }
 
 impl<T> fmt::Display for ObjectKey<T> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{} ({})", self.name, self.object_type)
+        write!(formatter, "{} ({})", self.name, self.workbench_type)
     }
 }
 
@@ -237,7 +238,8 @@ impl<T> fmt::Display for ObjectKey<T> {
 #[serde(deny_unknown_fields)]
 struct RawObjectKey {
     name: String,
-    object_type: GlobalWorkbenchType,
+    #[serde(rename = "object_type")]
+    workbench_type: GlobalWorkbenchType,
     #[serde(default)]
     parent: Option<Box<ObjectKey<()>>>,
 }
@@ -251,7 +253,7 @@ impl<'de> Deserialize<'de> for ObjectKey<()> {
         validate_parent_identity(&reference).map_err(serde::de::Error::custom)?;
         Ok(Self::from_parts(
             reference.name,
-            reference.object_type,
+            reference.workbench_type,
             reference.parent,
         ))
     }
@@ -263,11 +265,11 @@ impl<'de, T: ObjectType> Deserialize<'de> for ObjectKey<T> {
         D: Deserializer<'de>,
     {
         let reference = RawObjectKey::deserialize(deserializer)?;
-        if reference.object_type != T::WORKBENCH_TYPE {
+        if reference.workbench_type != T::WORKBENCH_TYPE {
             return Err(serde::de::Error::custom(
                 ObjectError::UnexpectedObjectType {
                     expected: T::WORKBENCH_TYPE,
-                    actual: reference.object_type,
+                    actual: reference.workbench_type,
                 },
             ));
         }
@@ -284,18 +286,18 @@ fn validate_parent_identity(reference: &RawObjectKey) -> Result<(), ObjectError>
     let Some(parent) = &reference.parent else {
         return Ok(());
     };
-    if !descriptors::requires_parent(&reference.object_type) {
+    if !descriptors::requires_parent(&reference.workbench_type) {
         return Err(ObjectError::InvalidParentObject {
-            object_type: reference.object_type.clone(),
+            workbench_type: reference.workbench_type.clone(),
             reason: "the object type is directly addressable".to_owned(),
         });
     }
-    if !descriptors::supports_subobject(&parent.object_type, &reference.object_type) {
+    if !descriptors::supports_subobject(&parent.workbench_type, &reference.workbench_type) {
         return Err(ObjectError::InvalidParentObject {
-            object_type: reference.object_type.clone(),
+            workbench_type: reference.workbench_type.clone(),
             reason: format!(
                 "type `{}` does not declare this subobject relationship",
-                parent.object_type
+                parent.workbench_type
             ),
         });
     }
@@ -316,6 +318,13 @@ mod tests {
         });
         let expected =
             ObjectKey::<FunctionGroup>::new("z_group").subobject::<FunctionModule>("z_module");
+        let serialized = serde_json::json!({
+            "name": "Z_MODULE",
+            "object_type": "FUGR/FF",
+            "parent": { "name": "Z_GROUP", "object_type": "FUGR/F" }
+        });
+        assert_eq!(serde_json::to_value(&expected).unwrap(), serialized);
+        assert_eq!(serde_json::to_value(expected.erase()).unwrap(), serialized);
         assert_eq!(
             serde_json::from_value::<ObjectKey<FunctionModule>>(json.clone()).unwrap(),
             expected
@@ -336,7 +345,7 @@ mod tests {
         let program = ObjectKey::<Program>::new("Z_TEST");
         let object = program.erase();
 
-        assert_eq!(object.object_type().as_str(), "PROG/P");
+        assert_eq!(object.workbench_type().as_str(), "PROG/P");
         assert_eq!(object.typed::<Program>(), Some(program));
         assert!(object.typed::<Include>().is_none());
     }
@@ -362,9 +371,20 @@ mod tests {
         let program = ObjectKey::<Program>::new("Z_TEST");
         let serialized = serde_json::to_value(&program).unwrap();
 
-        assert!(serialized.get("uri").is_none());
+        assert_eq!(
+            serialized,
+            serde_json::json!({
+                "name": "Z_TEST", "object_type": "PROG/P"
+            })
+        );
         assert!(serde_json::from_value::<ObjectKey<Program>>(serialized.clone()).is_ok());
         assert!(serde_json::from_value::<ObjectKey<crate::Class>>(serialized).is_err());
+
+        let renamed_wire_field = serde_json::json!({
+            "name": "Z_TEST", "workbench_type": "PROG/P"
+        });
+        assert!(serde_json::from_value::<ObjectKey<Program>>(renamed_wire_field.clone()).is_err());
+        assert!(serde_json::from_value::<ObjectKey<()>>(renamed_wire_field).is_err());
     }
 
     #[test]

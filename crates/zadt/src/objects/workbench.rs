@@ -262,10 +262,10 @@ mod tests {
             "amdp",
             "CLAS/OCN/definitions",
         ] {
-            let object_type: GlobalWorkbenchType = value.parse().unwrap();
+            let workbench_type: GlobalWorkbenchType = value.parse().unwrap();
 
-            assert_eq!(object_type.as_str(), value);
-            assert_eq!(object_type.to_string(), value);
+            assert_eq!(workbench_type.as_str(), value);
+            assert_eq!(workbench_type.to_string(), value);
         }
     }
 

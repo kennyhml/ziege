@@ -100,7 +100,7 @@ pub struct FunctionGroupProperties {
         doc = "The function group's global Workbench type."
     )]
     #[serde(rename = "@adtcore:type")]
-    pub(crate) object_type: GlobalWorkbenchType,
+    pub(crate) workbench_type: GlobalWorkbenchType,
     #[serde(rename = "@adtcore:changedAt")]
     pub last_changed: String,
     #[serde(rename = "@adtcore:version")]
@@ -165,7 +165,7 @@ pub struct FunctionModuleProperties {
         doc = "The function module's global Workbench type."
     )]
     #[serde(rename = "@adtcore:type")]
-    pub(crate) object_type: GlobalWorkbenchType,
+    pub(crate) workbench_type: GlobalWorkbenchType,
     #[serde(rename = "@adtcore:changedAt")]
     pub last_changed: String,
     #[serde(rename = "@adtcore:version")]
@@ -216,7 +216,7 @@ pub struct FunctionGroupIncludeProperties {
         doc = "The include's global Workbench type."
     )]
     #[serde(rename = "@adtcore:type")]
-    pub(crate) object_type: GlobalWorkbenchType,
+    pub(crate) workbench_type: GlobalWorkbenchType,
     #[serde(rename = "@adtcore:changedAt")]
     pub last_changed: String,
     #[serde(rename = "@adtcore:version")]

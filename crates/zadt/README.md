@@ -129,6 +129,9 @@ Key equality includes the logical parent. Located reference equality and hashing
 compare name, Workbench type, and URI, ignoring both logical parent metadata and
 the optional parent URI.
 
+Keys and references expose their exact ADT identifier through `workbench_type()`,
+returning a `GlobalWorkbenchType` such as `CLAS/OC` or `PROG/I`.
+
 ### Snapshots
 
 Queries from either keys or located references return `ObjectSnapshot<T>`. A
@@ -211,7 +214,7 @@ when editing and serializing properties. New backend fields require an explicit
 model update; intentionally open scalar vocabularies such as `Other(String)` remain
 open.
 
-Keys and located references also use strict Serde models. A key contains `name`,
+Keys and located references also use strict Serde models. A serialized key contains `name`,
 `object_type`, and an optional logical `parent`. A located reference contains
 `key`, mandatory `uri`, and optional `parent_uri`; it cannot deserialize from a
 bare key. Names normalize to ASCII uppercase, typed keys validate their Workbench

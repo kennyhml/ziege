@@ -119,12 +119,12 @@ impl Operation for ActivationRun {
             let object = target.resolve(resolver)?;
             let reference = &mut objects.objects[*index];
             reference.uri = Some(object.uri().to_string());
-            if crate::objects::descriptors::requires_parent(object.object_type()) {
+            if crate::objects::descriptors::requires_parent(object.workbench_type()) {
                 reference.parent_uri = Some(
                     object
                         .resolve_parent_uri(resolver)?
                         .ok_or_else(|| ObjectError::ParentObjectRequired {
-                            object_type: object.object_type().clone(),
+                            workbench_type: object.workbench_type().clone(),
                         })?
                         .to_string(),
                 );
@@ -135,9 +135,9 @@ impl Operation for ActivationRun {
             if object.name.is_none() {
                 return Err(ObjectError::IncompleteObjectReference { field: "name" }.into());
             }
-            let object_type =
+            let workbench_type =
                 object
-                    .object_type
+                    .workbench_type
                     .as_ref()
                     .ok_or(ObjectError::IncompleteObjectReference {
                         field: "object type",
@@ -145,11 +145,11 @@ impl Operation for ActivationRun {
             if object.uri.is_none() {
                 return Err(ObjectError::IncompleteObjectReference { field: "uri" }.into());
             }
-            if crate::objects::descriptors::requires_parent(object_type)
+            if crate::objects::descriptors::requires_parent(workbench_type)
                 && object.parent_uri.is_none()
             {
                 return Err(ObjectError::ParentObjectRequired {
-                    object_type: object_type.clone(),
+                    workbench_type: workbench_type.clone(),
                 }
                 .into());
             }
@@ -397,9 +397,9 @@ mod tests {
         assert!(matches!(
             module.activation().encode(client.discovery()),
             Err(EncodeError::Resolve(crate::ResolveError::Object(
-                ObjectError::ParentObjectRequired { object_type }
+                ObjectError::ParentObjectRequired { workbench_type }
             )))
-                if object_type == FunctionModule::WORKBENCH_TYPE
+                if workbench_type == FunctionModule::WORKBENCH_TYPE
         ));
     }
 
@@ -471,8 +471,8 @@ mod tests {
         for run in [object.activation(), object.erase().activation()] {
             assert!(matches!(
                 run.encode(client.discovery()),
-                Err(EncodeError::Object(ObjectError::ParentObjectRequired { object_type }))
-                    if object_type == FunctionModule::WORKBENCH_TYPE
+                Err(EncodeError::Object(ObjectError::ParentObjectRequired { workbench_type }))
+                    if workbench_type == FunctionModule::WORKBENCH_TYPE
             ));
         }
 
@@ -515,7 +515,7 @@ mod tests {
             ObjectReferences {
                 objects: vec![AdvertisedObjectReference {
                     name: Some("Z_SYNTAX_TEST".to_owned()),
-                    object_type: Some(Class::WORKBENCH_TYPE),
+                    workbench_type: Some(Class::WORKBENCH_TYPE),
                     ..Default::default()
                 }],
             },

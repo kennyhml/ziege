@@ -21,7 +21,7 @@ pub struct ObjectRunResult {
     pub reference: ObjectKey,
 
     /// The exact Workbench type of the executed object.
-    pub object_type: GlobalWorkbenchType,
+    pub workbench_type: GlobalWorkbenchType,
 
     /// The rendered output returned by SAP.
     pub content: String,
@@ -30,12 +30,12 @@ pub struct ObjectRunResult {
 impl ObjectRunResult {
     pub(crate) fn new(
         reference: ObjectKey,
-        object_type: GlobalWorkbenchType,
+        workbench_type: GlobalWorkbenchType,
         content: String,
     ) -> Self {
         Self {
             reference,
-            object_type,
+            workbench_type,
             content,
         }
     }
@@ -122,7 +122,7 @@ impl Operation for ObjectRun {
             .map_err(ObjectError::InvalidResponseEncoding)?;
         Ok(ObjectRunResult::new(
             self.reference.clone(),
-            self.reference.object_type().clone(),
+            self.reference.workbench_type().clone(),
             content,
         ))
     }
@@ -135,7 +135,7 @@ impl ObjectKey<()> {
             .descriptor()
             .and_then(|descriptor| descriptor.run())
             .ok_or_else(|| ObjectError::UnsupportedCapability {
-                object_type: self.object_type().clone(),
+                workbench_type: self.workbench_type().clone(),
                 capability: "immediate run",
             })?;
         Ok(ObjectRun::new(self.clone(), run))
@@ -257,7 +257,7 @@ mod tests {
         }
 
         assert_eq!(program_output.reference, program.erase());
-        assert_eq!(program_output.object_type.as_str(), "PROG/P");
+        assert_eq!(program_output.workbench_type.as_str(), "PROG/P");
         assert_eq!(program_output.content, "program output");
 
         let class = ObjectKey::<Class>::new("ZCL_EXAMPLE");

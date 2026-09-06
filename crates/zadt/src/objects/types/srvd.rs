@@ -94,7 +94,7 @@ pub struct ServiceDefinitionProperties {
         doc = "The Service Definition's global Workbench type."
     )]
     #[serde(rename = "@adtcore:type")]
-    pub(crate) object_type: GlobalWorkbenchType,
+    pub(crate) workbench_type: GlobalWorkbenchType,
 
     /// The timestamp at which the object was last changed.
     #[serde(rename = "@adtcore:changedAt")]
@@ -168,7 +168,7 @@ mod tests {
             .build()
             .unwrap();
         assert_eq!(properties.name, "");
-        assert_eq!(properties.object_type, ServiceDefinition::WORKBENCH_TYPE);
+        assert_eq!(properties.workbench_type, ServiceDefinition::WORKBENCH_TYPE);
         assert_eq!(properties.source_type, "S");
         assert!(properties.abap_language_version.is_none());
 
@@ -196,7 +196,7 @@ mod tests {
         let properties = properties();
 
         assert_eq!(properties.name, "MANAGEDISTRIBUTIONS");
-        assert_eq!(properties.object_type, ServiceDefinition::WORKBENCH_TYPE);
+        assert_eq!(properties.workbench_type, ServiceDefinition::WORKBENCH_TYPE);
         assert_eq!(properties.version, WorkbenchVersion::Active);
         assert_eq!(properties.source_type, "S");
         assert_eq!(properties.source_type_description, "Definition");

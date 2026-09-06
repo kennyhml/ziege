@@ -200,7 +200,7 @@ impl PendingFavoriteObject {
     fn resolve(&self, resolver: &Discovery, list: &str) -> Result<FavoriteObject, ResolveError> {
         Ok(FavoriteObject {
             uri: self.reference.resolve_uri(resolver)?.to_string(),
-            object_type: self.reference.key().object_type().clone(),
+            workbench_type: self.reference.key().workbench_type().clone(),
             name: self.reference.key().name().to_owned(),
             list: Some(list.to_owned()),
             operation: Some(self.operation.as_str().to_owned()),
@@ -252,7 +252,7 @@ pub struct FavoriteObject {
     pub uri: String,
 
     #[serde(rename = "@adtcore:type")]
-    pub object_type: GlobalWorkbenchType,
+    pub workbench_type: GlobalWorkbenchType,
 
     #[serde(rename = "@adtcore:name")]
     pub name: String,
@@ -268,7 +268,7 @@ impl From<FavoriteObject> for AdvertisedObjectReference {
     fn from(value: FavoriteObject) -> Self {
         AdvertisedObjectReference {
             uri: Some(value.uri),
-            object_type: Some(value.object_type),
+            workbench_type: Some(value.workbench_type),
             name: Some(value.name),
             ..Default::default()
         }

@@ -83,7 +83,7 @@ pub struct InterfaceProperties {
         doc = "The interface's global Workbench type."
     )]
     #[serde(rename = "@adtcore:type")]
-    pub(crate) object_type: GlobalWorkbenchType,
+    pub(crate) workbench_type: GlobalWorkbenchType,
 
     /// The timestamp at which the interface was last changed.
     #[serde(rename = "@adtcore:changedAt")]
@@ -176,7 +176,7 @@ mod tests {
             .build()
             .unwrap();
         assert_eq!(properties.name, "");
-        assert_eq!(properties.object_type, Interface::WORKBENCH_TYPE);
+        assert_eq!(properties.workbench_type, Interface::WORKBENCH_TYPE);
         assert!(properties.abap_language_version.is_none());
 
         let reference = ObjectRef::new(
@@ -202,7 +202,7 @@ mod tests {
         let properties = properties();
 
         assert_eq!(properties.name, "IF_ADT_URI_MAPPER");
-        assert_eq!(properties.object_type, Interface::WORKBENCH_TYPE);
+        assert_eq!(properties.workbench_type, Interface::WORKBENCH_TYPE);
         assert_eq!(properties.version, WorkbenchVersion::Active);
         assert_eq!(properties.source_uri, "source/main");
         assert_eq!(

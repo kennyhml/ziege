@@ -63,7 +63,7 @@ pub struct ClassProperties {
         doc = "The class's global Workbench type."
     )]
     #[serde(rename = "@adtcore:type")]
-    pub(crate) object_type: GlobalWorkbenchType,
+    pub(crate) workbench_type: GlobalWorkbenchType,
     /// The timestamp at which the class was last changed.
     #[serde(rename = "@adtcore:changedAt")]
     pub last_changed: String,
@@ -370,9 +370,9 @@ pub struct ClassSourceProperties {
     /// The include name exactly as advertised by SAP.
     #[serde(rename = "@adtcore:name")]
     pub name: String,
-    /// The include object type.
+    /// The include Workbench type.
     #[serde(rename = "@adtcore:type")]
-    pub object_type: GlobalWorkbenchType,
+    pub workbench_type: GlobalWorkbenchType,
     /// The timestamp at which this source was last changed.
     #[serde(rename = "@adtcore:changedAt")]
     pub last_changed: String,
@@ -397,14 +397,14 @@ impl ClassSourceProperties {
     /// Creates a sparse source declaration for class creation.
     pub fn for_creation(
         name: impl Into<String>,
-        object_type: GlobalWorkbenchType,
+        workbench_type: GlobalWorkbenchType,
         include_type: impl Into<String>,
     ) -> Self {
         Self {
             include_type: include_type.into(),
             source_uri: String::new(),
             name: name.into(),
-            object_type,
+            workbench_type,
             last_changed: String::new(),
             version: WorkbenchVersion::New,
             created_at: String::new(),
@@ -434,7 +434,7 @@ mod class_create_sources {
         #[serde(rename = "@adtcore:name")]
         name: &'a str,
         #[serde(rename = "@adtcore:type")]
-        object_type: &'a GlobalWorkbenchType,
+        workbench_type: &'a GlobalWorkbenchType,
         #[serde(rename = "@class:includeType")]
         include_type: &'a str,
     }
@@ -445,7 +445,7 @@ mod class_create_sources {
         #[serde(rename = "@adtcore:name")]
         name: String,
         #[serde(rename = "@adtcore:type")]
-        object_type: GlobalWorkbenchType,
+        workbench_type: GlobalWorkbenchType,
         #[serde(rename = "@class:includeType")]
         include_type: String,
     }
@@ -458,7 +458,7 @@ mod class_create_sources {
             .iter()
             .map(|source| WireSource {
                 name: &source.name,
-                object_type: &source.object_type,
+                workbench_type: &source.workbench_type,
                 include_type: &source.include_type,
             })
             .collect::<Vec<_>>()
@@ -475,7 +475,7 @@ mod class_create_sources {
                 .map(|source| {
                     ClassSourceProperties::for_creation(
                         source.name,
-                        source.object_type,
+                        source.workbench_type,
                         source.include_type,
                     )
                 })
@@ -606,11 +606,23 @@ mod tests {
             Some(AdvertisedObjectReference::default())
         );
         assert_eq!(properties.name, "");
-        assert_eq!(properties.object_type, Class::WORKBENCH_TYPE);
+        assert_eq!(properties.workbench_type, Class::WORKBENCH_TYPE);
         assert_eq!(properties.template, Some(ClassTemplate::new("ZOTHERCLASS")));
         assert_eq!(properties.sources[0].source_uri, "");
         assert!(properties.is_final);
         assert_eq!(properties.visibility, "public");
+
+        let xml = String::from_utf8(properties.to_xml().unwrap()).unwrap();
+        assert!(xml.contains("adtcore:type=\"CLAS/OC\""));
+        assert!(!xml.contains("workbench_type"));
+        let json = serde_json::to_value(&properties).unwrap();
+        assert_eq!(json["@adtcore:type"], "CLAS/OC");
+        assert_eq!(json["class:include"][0]["@adtcore:type"], "CLAS/OC");
+        assert!(!json.to_string().contains("workbench_type"));
+        assert_eq!(
+            serde_json::from_value::<ClassCreateProperties>(json).unwrap(),
+            properties
+        );
     }
 
     #[test]
@@ -618,7 +630,7 @@ mod tests {
         let class = parse(CLASS_XML).unwrap();
 
         assert_eq!(class.name, "CL_ADT_URI_MAPPER");
-        assert_eq!(class.object_type, Class::WORKBENCH_TYPE);
+        assert_eq!(class.workbench_type, Class::WORKBENCH_TYPE);
         assert_eq!(class.version, WorkbenchVersion::Active);
         assert_eq!(
             class.abap_language_version,
@@ -716,6 +728,8 @@ mod tests {
         assert_eq!(json["@adtcore:name"], "CX_ROOT");
         assert_eq!(json["@adtcore:type"], "CLAS/OC");
         assert_eq!(json["@adtcore:abapLanguageVersion"], "X");
+        assert_eq!(json["class:include"][0]["@adtcore:type"], "CLAS/I");
+        assert!(!json.to_string().contains("workbench_type"));
         assert_eq!(json["@class:category"], "exceptionClass");
         assert_eq!(
             json["class:include"][1]["@abapsource:sourceUri"],
@@ -751,6 +765,13 @@ mod tests {
         let properties = Class::DESCRIPTOR
             .properties_from_json(&reference, serde_json::to_value(&class).unwrap())
             .unwrap();
+        let json = Class::DESCRIPTOR
+            .properties_to_json(&reference, &properties)
+            .unwrap();
+        assert_eq!(json["@adtcore:type"], "CLAS/OC");
+        assert_eq!(json["adtcore:packageRef"]["@adtcore:type"], "DEVC/K");
+        assert_eq!(json["class:include"][0]["@adtcore:type"], "CLAS/I");
+        assert!(!json.to_string().contains("workbench_type"));
         let xml = String::from_utf8(
             Class::DESCRIPTOR
                 .properties_to_xml(&reference, &properties)
@@ -767,6 +788,8 @@ mod tests {
         assert!(xml.contains("xmlns:adtcore=\"http://www.sap.com/adt/core\""));
         assert!(xml.contains("xmlns:atom=\"http://www.w3.org/2005/Atom\""));
         assert!(xml.contains("adtcore:name=\"CL_ADT_URI_MAPPER\""));
+        assert!(xml.contains("adtcore:type=\"CLAS/OC\""));
+        assert!(!xml.contains("workbench_type"));
         assert!(xml.contains("<adtcore:packageRef"));
         assert!(xml.contains("<class:include"));
         assert!(xml.contains("<atom:link"));
@@ -800,18 +823,18 @@ mod tests {
             )
             .replace("adtcore:type=\"CLAS/I\"", "adtcore:type=\"FUTURE/INCLUDE\"");
         let class = parse(&wire_values).unwrap();
-        assert_eq!(class.object_type.as_str(), "PROG/P");
+        assert_eq!(class.workbench_type.as_str(), "PROG/P");
         assert_eq!(class.name, "OTHER_CLASS");
         assert_eq!(class.version, WorkbenchVersion::Active);
         assert_eq!(
-            class.package.object_type.as_ref().unwrap().as_str(),
+            class.package.workbench_type.as_ref().unwrap().as_str(),
             "FUTURE/PACKAGE"
         );
         assert!(
             class
                 .sources
                 .iter()
-                .all(|include| include.object_type.as_str() == "FUTURE/INCLUDE")
+                .all(|include| include.workbench_type.as_str() == "FUTURE/INCLUDE")
         );
     }
 

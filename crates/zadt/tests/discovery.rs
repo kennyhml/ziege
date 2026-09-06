@@ -152,7 +152,7 @@ async fn runtime_object_types_use_the_registered_descriptor() {
     Logon::default().execute(&client).await.unwrap();
     let client = client.discover().await.unwrap();
 
-    for (object_type, name, expected_uri) in [
+    for (workbench_type, name, expected_uri) in [
         ("PROG/P", "Z_TEST", "/sap/bc/adt/programs/programs/z_test"),
         ("PROG/I", "ZTEST", "/sap/bc/adt/programs/includes/ztest"),
         (
@@ -203,10 +203,10 @@ async fn runtime_object_types_use_the_registered_descriptor() {
             "/sap/bc/adt/functions/groups/z_test_group",
         ),
     ] {
-        let parsed_type: GlobalWorkbenchType = object_type.parse().unwrap();
+        let parsed_type: GlobalWorkbenchType = workbench_type.parse().unwrap();
         let object = ObjectKey::from_workbench_type(&parsed_type, name).unwrap();
 
-        assert_eq!(object.object_type().as_str(), object_type);
+        assert_eq!(object.workbench_type().as_str(), workbench_type);
         assert_eq!(
             client
                 .discovery()
@@ -215,7 +215,7 @@ async fn runtime_object_types_use_the_registered_descriptor() {
                 .as_str(),
             expected_uri
         );
-        assert!(match object_type {
+        assert!(match workbench_type {
             "PROG/P" => object.typed::<zadt::Program>().is_some(),
             "PROG/I" => object.typed::<zadt::Include>().is_some(),
             "CLAS/OC" => object.typed::<Class>().is_some(),
@@ -236,15 +236,15 @@ async fn runtime_object_types_use_the_registered_descriptor() {
     let child_type: GlobalWorkbenchType = "FUGR/FF".parse().unwrap();
     assert!(matches!(
         ObjectKey::from_workbench_type(&child_type, "ZZZZFUNC"),
-        Err(ObjectError::ParentObjectRequired { object_type })
-            if object_type.as_str() == "FUGR/FF"
+        Err(ObjectError::ParentObjectRequired { workbench_type })
+            if workbench_type.as_str() == "FUGR/FF"
     ));
 
     let unsupported_type: GlobalWorkbenchType = "ENQU/DL".parse().unwrap();
     assert!(matches!(
         ObjectKey::from_workbench_type(&unsupported_type, "EZABAPGIT"),
-        Err(ObjectError::UnsupportedObjectType { object_type })
-            if object_type.as_str() == "ENQU/DL"
+        Err(ObjectError::UnsupportedObjectType { workbench_type })
+            if workbench_type.as_str() == "ENQU/DL"
     ));
 }
 

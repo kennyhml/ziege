@@ -178,19 +178,19 @@ pub trait Resources {
 pub trait Identity {
     fn object_name(&self) -> &str;
 
-    fn object_type(&self) -> &GlobalWorkbenchType;
+    fn workbench_type(&self) -> &GlobalWorkbenchType;
 
     fn validate_for(&self, expected: &impl Identity) -> Result<(), ObjectError> {
-        if self.object_type() != expected.object_type() {
+        if self.workbench_type() != expected.workbench_type() {
             return Err(ObjectError::UnexpectedObjectType {
-                expected: expected.object_type().clone(),
-                actual: self.object_type().clone(),
+                expected: expected.workbench_type().clone(),
+                actual: self.workbench_type().clone(),
             });
         }
         if self.object_name() != expected.object_name() {
             return Err(ObjectError::UnexpectedObjectReference {
-                expected: format!("{} ({})", expected.object_name(), expected.object_type()),
-                actual: format!("{} ({})", self.object_name(), self.object_type()),
+                expected: format!("{} ({})", expected.object_name(), expected.workbench_type()),
+                actual: format!("{} ({})", self.object_name(), self.workbench_type()),
             });
         }
         Ok(())

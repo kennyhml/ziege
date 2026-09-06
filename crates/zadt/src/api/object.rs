@@ -166,7 +166,7 @@ impl ObjectKey<()> {
         // object type does not support creation.
         let create_media_types = descriptor.creation_media_types().ok_or_else(|| {
             ObjectError::UnsupportedCapability {
-                object_type: self.object_type().clone(),
+                workbench_type: self.workbench_type().clone(),
                 capability: "object creation",
             }
         })?;
@@ -1026,7 +1026,7 @@ mod tests {
         let client = discovered_client(DISCOVERY_XML);
         let mut properties = create_properties();
         properties.name = "ZOTHER".to_owned();
-        properties.object_type = Package::WORKBENCH_TYPE;
+        properties.workbench_type = Package::WORKBENCH_TYPE;
         let operation = reference("ZZZTEST").create(properties);
         let request = operation.encode(client.discovery()).unwrap();
         let body = std::str::from_utf8(request.body()).unwrap();
@@ -1205,7 +1205,7 @@ mod tests {
             if mismatch_name {
                 properties.name = "ZOTHER".to_owned();
             } else {
-                properties.object_type = Package::WORKBENCH_TYPE;
+                properties.workbench_type = Package::WORKBENCH_TYPE;
             }
             let json = serde_json::to_value(&properties).unwrap();
             let errors = [
