@@ -3,11 +3,12 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTyped, MediaTypes, ToXml, WorkbenchVersion,
+    MediaTypes, ToXml, WorkbenchVersion,
 };
 
 #[object_type(
     properties = MetadataExtensionProperties,
+    media_types = MediaTypes::new(&["application/vnd.sap.adt.ddic.ddlx.v1+xml"]),
     workbench_type = "DDLX/EX",
     collection(
         scheme = "http://www.sap.com/wbobj/cds",
@@ -114,10 +115,6 @@ pub struct MetadataExtensionProperties {
     pub package: AdvertisedObjectReference,
 }
 
-impl MediaTyped for MetadataExtensionProperties {
-    const MEDIA_TYPES: MediaTypes = MediaTypes::new(&["application/vnd.sap.adt.ddic.ddlx.v1+xml"]);
-}
-
 impl ToXml for MetadataExtensionProperties {
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
         ("ddlx", "http://www.sap.com/adt/ddic/ddlxsources"),
@@ -130,7 +127,7 @@ impl ToXml for MetadataExtensionProperties {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, AssignObjectIdentity, ObjectKey, ObjectType};
+    use crate::{AdtUri, Create, ObjectKey, ObjectRef, ObjectType};
 
     const METADATA_EXTENSION_XML: &str =
         include_str!("../../../tests/fixtures/metadata-extension-c-mdoapplicationscope.xml");
@@ -154,8 +151,11 @@ mod tests {
         assert_eq!(properties.object_type, MetadataExtension::WORKBENCH_TYPE);
         assert!(properties.abap_language_version.is_none());
 
-        let reference = ObjectKey::<MetadataExtension>::new("Z_METADATA_EXTENSION");
-        properties.assign_identity(&reference);
+        let reference = ObjectRef::new(
+            ObjectKey::<MetadataExtension>::new("Z_METADATA_EXTENSION"),
+            AdtUri::parse("/sap/bc/adt/ddic/ddlx/sources/z_metadata_extension").unwrap(),
+        );
+        MetadataExtension::prepare_payload(&mut properties, &reference);
         let body = properties.to_xml().unwrap();
         let body = std::str::from_utf8(&body).unwrap();
 
@@ -193,7 +193,7 @@ mod tests {
                 AdtUri::parse("/sap/bc/adt/ddic/ddlx/sources/c_mdoapplicationscope").unwrap(),
             ),
             crate::WorkbenchVersion::Active,
-            MetadataExtensionProperties::MEDIA_TYPES[0],
+            MetadataExtension::MEDIA_TYPES[0],
             None,
             properties,
         );

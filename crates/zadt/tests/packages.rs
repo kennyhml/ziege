@@ -3,8 +3,7 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    AccessMode, Client, Discovery, MediaTyped, ObjectKey, Operation, Package, PackageProperties,
-    ReqwestTransport,
+    AccessMode, Client, Discovery, ObjectKey, ObjectType, Operation, Package, ReqwestTransport,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -89,7 +88,7 @@ async fn package_properties_advertise_all_supported_contracts() {
     let client = discovered_client(&server).await;
     let reference = ObjectKey::<Package>::new("sadt_tools_core");
     let response = reference.query().execute(&client).await.unwrap();
-    assert_eq!(response.media_type(), PackageProperties::MEDIA_TYPES[0]);
+    assert_eq!(response.media_type(), Package::MEDIA_TYPES[0]);
     let package = response.properties();
 
     assert_eq!(response.reference().name(), "SADT_TOOLS_CORE");

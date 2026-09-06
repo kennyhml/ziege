@@ -2,9 +2,10 @@ use http::{Method, StatusCode};
 use serde::Deserialize;
 
 use crate::{
-    AdtRequest, AdtUri, AdvertisedLink, EncodeError, EncodedOperation, Independent, Links,
-    ObjectError, ObjectSnapshot, ObjectStructureRef, Operation, OperationResponse, Relations,
-    ResponseError, Stateless, Structure, WorkbenchVersion, resource::resolve_href,
+    AdtRequest, AdtUri, AdvertisedLink, EncodeError, EncodedOperation, Independent, ObjectError,
+    ObjectRef, ObjectSnapshot, ObjectStructureRef, Operation, OperationResponse, Relations,
+    ResponseError, SnapshotResources, Stateless, Structure, WorkbenchVersion,
+    resource::resolve_href,
 };
 
 /// Fetches the structure representation advertised by an object.
@@ -128,31 +129,32 @@ impl ObjectStructureRef {
     }
 }
 
-impl<T: Structure> ObjectSnapshot<T> {
-    pub(crate) fn object_structure_from_parts(
-        reference: &crate::ObjectRef<T>,
-        uri: &AdtUri,
-        properties: &T::Properties,
-    ) -> Result<ObjectStructureQuery, ObjectError> {
-        ObjectStructureRef::from_relations(reference.erase(), uri, properties.links())?
-            .map(|reference| reference.query())
-            .ok_or(ObjectError::MissingRelation {
-                relation: ObjectStructureRef::RELATION,
-            })
-    }
+fn structure_resource<T>(
+    reference: &ObjectRef<T>,
+    resources: SnapshotResources<'_>,
+) -> Result<ObjectStructureQuery, ObjectError> {
+    let link = resources.object_link(ObjectStructureRef::RELATION).ok_or(
+        ObjectError::MissingRelation {
+            relation: ObjectStructureRef::RELATION,
+        },
+    )?;
+    Ok(ObjectStructureRef::from_link(reference.erase(), link)?.query())
+}
 
+impl<T: Structure> ObjectSnapshot<T> {
     /// Creates a query for the object-structure relation advertised by this object.
     pub fn object_structure(&self) -> Result<ObjectStructureQuery, ObjectError> {
-        Self::object_structure_from_parts(self.reference(), self.uri(), self.properties())
+        structure_resource(self.reference(), self.resources())
     }
 }
 
 impl ObjectSnapshot<()> {
     /// Creates an object-structure query through the runtime descriptor.
     pub fn object_structure(&self) -> Result<ObjectStructureQuery, ObjectError> {
-        self.reference()
-            .require_descriptor()?
-            .object_structure(self)
+        if !self.reference().require_descriptor()?.supports_structure() {
+            return Err(self.reference().unsupported_capability("object structure"));
+        }
+        structure_resource(self.reference(), self.resources())
     }
 }
 

@@ -3,11 +3,12 @@ use zadt_macros::object_type;
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTyped, MediaTypes, ToXml, WorkbenchVersion,
+    MediaTypes, ToXml, WorkbenchVersion,
 };
 
 #[object_type(
     properties = DataElementProperties,
+    media_types = MediaTypes::new(&["application/vnd.sap.adt.dataelements.v2+xml"]),
     workbench_type = "DTEL/DE",
     collection(scheme = "http://www.sap.com/wbobj/dictionary", term = "dtelde",),
     capabilities()
@@ -82,11 +83,6 @@ pub struct DataElementProperties {
     /// The Data Element's type definition and field behavior.
     #[serde(rename = "dtel:dataElement")]
     pub definition: DataElementDefinition,
-}
-
-impl MediaTyped for DataElementProperties {
-    const MEDIA_TYPES: MediaTypes =
-        MediaTypes::new(&["application/vnd.sap.adt.dataelements.v2+xml"]);
 }
 
 impl ToXml for DataElementProperties {

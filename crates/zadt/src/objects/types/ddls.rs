@@ -3,11 +3,12 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTyped, MediaTypes, ToXml, WorkbenchVersion,
+    MediaTypes, ToXml, WorkbenchVersion,
 };
 
 #[object_type(
     properties = DataDefinitionProperties,
+    media_types = MediaTypes::new(&["application/vnd.sap.adt.ddlSource+xml"]),
     workbench_type = "DDLS/DF",
     collection(
         scheme = "http://www.sap.com/adt/categories/ddic/ddlsources",
@@ -130,10 +131,6 @@ pub struct DataDefinitionProperties {
     pub package: AdvertisedObjectReference,
 }
 
-impl MediaTyped for DataDefinitionProperties {
-    const MEDIA_TYPES: MediaTypes = MediaTypes::new(&["application/vnd.sap.adt.ddlSource+xml"]);
-}
-
 impl ToXml for DataDefinitionProperties {
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
         ("ddl", "http://www.sap.com/adt/ddic/ddlsources"),
@@ -146,7 +143,7 @@ impl ToXml for DataDefinitionProperties {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AssignObjectIdentity, ObjectKey, ObjectType};
+    use crate::{AdtUri, Create, ObjectKey, ObjectRef, ObjectType};
 
     const DATA_DEFINITION_XML: &str =
         include_str!("../../../tests/fixtures/data-definition-i-businesspartner.xml");
@@ -170,8 +167,11 @@ mod tests {
         assert_eq!(properties.object_type, DataDefinition::WORKBENCH_TYPE);
         assert!(properties.abap_language_version.is_none());
 
-        let reference = ObjectKey::<DataDefinition>::new("Z_DATA_DEFINITION");
-        properties.assign_identity(&reference);
+        let reference = ObjectRef::new(
+            ObjectKey::<DataDefinition>::new("Z_DATA_DEFINITION"),
+            AdtUri::parse("/sap/bc/adt/ddic/ddl/sources/z_data_definition").unwrap(),
+        );
+        DataDefinition::prepare_payload(&mut properties, &reference);
         let body = properties.to_xml().unwrap();
         let body = std::str::from_utf8(&body).unwrap();
 

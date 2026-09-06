@@ -2,12 +2,13 @@ use serde::{Deserialize, Serialize};
 use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
-    AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType, MediaTyped, MediaTypes, ToXml,
+    AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType, MediaTypes, ToXml,
     WorkbenchVersion,
 };
 
 #[object_type(
     properties = AnnotationDefinitionProperties,
+    media_types = MediaTypes::new(&["application/vnd.sap.adt.ddic.ddla.v1+xml"]),
     workbench_type = "DDLA/ADF",
     collection(
         scheme = "http://www.sap.com/wbobj/cds",
@@ -106,10 +107,6 @@ pub struct AnnotationDefinitionProperties {
     pub package: AdvertisedObjectReference,
 }
 
-impl MediaTyped for AnnotationDefinitionProperties {
-    const MEDIA_TYPES: MediaTypes = MediaTypes::new(&["application/vnd.sap.adt.ddic.ddla.v1+xml"]);
-}
-
 impl ToXml for AnnotationDefinitionProperties {
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
         ("ddla", "http://www.sap.com/adt/ddic/ddlasources"),
@@ -122,7 +119,7 @@ impl ToXml for AnnotationDefinitionProperties {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, AssignObjectIdentity, ObjectKey, ObjectType};
+    use crate::{AdtUri, Create, ObjectKey, ObjectRef, ObjectType};
 
     const ANNOTATION_DEFINITION_XML: &str =
         include_str!("../../../tests/fixtures/annotation-definition-ui.xml");
@@ -145,8 +142,11 @@ mod tests {
         assert_eq!(properties.name, "");
         assert_eq!(properties.object_type, AnnotationDefinition::WORKBENCH_TYPE);
 
-        let reference = ObjectKey::<AnnotationDefinition>::new("Z_ANNOTATION_DEFINITION");
-        properties.assign_identity(&reference);
+        let reference = ObjectRef::new(
+            ObjectKey::<AnnotationDefinition>::new("Z_ANNOTATION_DEFINITION"),
+            AdtUri::parse("/sap/bc/adt/ddic/ddla/sources/z_annotation_definition").unwrap(),
+        );
+        AnnotationDefinition::prepare_payload(&mut properties, &reference);
         let body = properties.to_xml().unwrap();
         let body = std::str::from_utf8(&body).unwrap();
 
@@ -184,7 +184,7 @@ mod tests {
                 AdtUri::parse("/sap/bc/adt/ddic/ddla/sources/ui").unwrap(),
             ),
             crate::WorkbenchVersion::Active,
-            AnnotationDefinitionProperties::MEDIA_TYPES[0],
+            AnnotationDefinition::MEDIA_TYPES[0],
             None,
             properties,
         );

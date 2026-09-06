@@ -19,7 +19,8 @@ Object identity, location, and loaded state are separate:
 - `ObjectRef<T>` is a located identity: a key, a mandatory validated `AdtUri`, and
   optional immediate parent URI metadata. It does not contain loaded properties.
 - `ObjectSnapshot<T>` is a loaded representation: a located reference, properties,
-  Workbench version, media type, and optional ETag.
+  Workbench version, media type, and optional ETag, with a borrowed scoped-resource
+  view available on demand.
 
 Both a logical key and a located reference construct the same operation type:
 
@@ -138,6 +139,35 @@ converting between typed and erased snapshots preserves the location and known
 parent metadata. Follow-up queries and property updates retain that location
 rather than deriving it again from the logical key.
 
+Property updates are read-modify-write operations: clone the loaded typed
+properties, or edit the owned JSON returned by an erased snapshot, preserving
+fields that are not being changed. Updates reject a mismatched object name or
+Workbench type rather than overwriting those fields. Identity assignment is
+reserved for sparse creation payloads, where `Create` supplies the target identity
+and resolved parent context during encoding.
+
+Object properties implement the public `Resources` trait. Its
+`resources(&self) -> ResourceView<'_>` method borrows resource metadata without
+taking a base URI. `ObjectType::Properties` requires this trait; `Source` and
+`SourceComponents` remain capability markers, not resource extractors.
+
+Typed and erased snapshots expose `resources()`, which binds that unbound view to
+the snapshot's own URI. There is no public function taking properties plus an
+arbitrary base URI. The resulting lightweight, copyable `SnapshotResources<'_>`
+borrows the loaded properties and object URI, not a stored resource collection. Its
+`iter()` yields `SnapshotResource<'_>` values borrowing advertised links and
+component names, keeping object-level and component-level metadata distinct.
+Cloning, erasing, and restoring a snapshot do not extract or cache resources.
+Primary sources use component `main`; source entries borrow the authoritative
+`sourceUri` and expose matching representation metadata even when no Atom source
+link exists. Metadata matching happens only when selecting a source or iterating
+entries, not when loading a snapshot or constructing the view. Only the selected
+resource is materialized as an owned navigation handle; URI matching may still
+allocate temporary values, so not every operation is allocation-free. Invalid
+resource targets fail only when selecting a handle or resolving a link, so an
+unusable unrelated link does not prevent loading the snapshot. Navigation leaves
+the original wire properties intact for XML serialization and runtime JSON edits.
+
 Some operations require the relations advertised by loaded properties. For
 example, not every global class has a test-classes include, and an existing
 include need not live at an assumed path. Source navigation uses advertised
@@ -151,13 +181,26 @@ Typed keys, references, and snapshots, such as `ObjectKey<Class>`,
 operations and associated property types. Typed parent keys also restrict which
 subobjects can be constructed.
 
+`ObjectType::MEDIA_TYPES`, for example `Class::MEDIA_TYPES`, lists the supported
+property representations for an object family in preference order. Creation uses
+the same list, negotiated against the collection's accepted media types. The list
+belongs to the object model, not its properties payload. A loaded snapshot's
+`media_type()` identifies the representation actually received from the backend.
+
 The runtime forms, `ObjectKey<()>`, `ObjectRef<()>`, and `ObjectSnapshot<()>`,
 retain the Workbench type as data. They are useful when object identity comes from
 a code editor, command line, or repository response. Capabilities that vary by
 object family are checked at runtime and can return an unsupported-type or
-unsupported-capability error. Internal descriptors dispatch to the same concrete
-property models and capability implementations through monomorphized function
-pointers. Erasing or recovering a reference's type does not discard its location.
+unsupported-capability error. Internal descriptors use monomorphized function
+pointers for property codecs and borrowed resource views, and capability flags for
+source and structure navigation. Typed and erased navigation use the same scoped
+resource view. Erasing or recovering a reference's type does not discard its
+location.
+
+The private `Sealed` and `SnapshotKindSealed` traits are empty markers. Neither
+they nor `SnapshotKind` dispatch resources: typed snapshots call the properties'
+`Resources` method directly, while erased snapshots use their registered
+descriptor to call that same method before binding the view to their own URI.
 
 ### Wire Model Strictness
 

@@ -3,11 +3,12 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTyped, MediaTypes, ToXml, WorkbenchVersion,
+    MediaTypes, ToXml, WorkbenchVersion,
 };
 
 #[object_type(
     properties = DomainProperties,
+    media_types = MediaTypes::new(&["application/vnd.sap.adt.domains.v2+xml"]),
     workbench_type = "DOMA/DD",
     collection(
         scheme = "http://www.sap.com/wbobj/dictionary",
@@ -101,10 +102,6 @@ pub struct DomainProperties {
     /// The Domain's type, output, and value information.
     #[serde(rename = "doma:content")]
     pub content: DomainContent,
-}
-
-impl MediaTyped for DomainProperties {
-    const MEDIA_TYPES: MediaTypes = MediaTypes::new(&["application/vnd.sap.adt.domains.v2+xml"]);
 }
 
 impl ToXml for DomainProperties {
@@ -228,7 +225,7 @@ pub struct DomainFixedValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AssignObjectIdentity, ObjectKey, ObjectType};
+    use crate::{AdtUri, Create, ObjectKey, ObjectRef, ObjectType};
 
     const DOMAIN_TRKORR_XML: &str = include_str!("../../../tests/fixtures/domain-trkorr.xml");
     const DOMAIN_XFELD_XML: &str = include_str!("../../../tests/fixtures/domain-xfeld.xml");
@@ -252,8 +249,11 @@ mod tests {
         assert_eq!(properties.object_type, Domain::WORKBENCH_TYPE);
         assert!(properties.abap_language_version.is_none());
 
-        let reference = ObjectKey::<Domain>::new("Z_DOMAIN");
-        properties.assign_identity(&reference);
+        let reference = ObjectRef::new(
+            ObjectKey::<Domain>::new("Z_DOMAIN"),
+            AdtUri::parse("/sap/bc/adt/ddic/domains/z_domain").unwrap(),
+        );
+        Domain::prepare_payload(&mut properties, &reference);
         let body = properties.to_xml().unwrap();
         let body = std::str::from_utf8(&body).unwrap();
 

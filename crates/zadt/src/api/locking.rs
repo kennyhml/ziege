@@ -115,7 +115,7 @@ impl ObjectLock {
         &self,
         object: &ObjectRef<T>,
     ) -> Result<(), ObjectError> {
-        if !object.same_identity(&self.object) {
+        if object != &self.object {
             return Err(ObjectError::ObjectLockMismatch {
                 expected: object.to_string(),
                 actual: self.object.to_string(),
@@ -225,7 +225,7 @@ impl<T> ObjectKey<T> {
 
     /// Creates an operation that releases this object's lock.
     pub fn unlock(&self, object_lock: ObjectLock) -> Result<UnlockRequest, ObjectError> {
-        if !self.same_identity(object_lock.object().key()) {
+        if self != object_lock.object().key() {
             return Err(ObjectError::ObjectLockMismatch {
                 expected: self.to_string(),
                 actual: object_lock.object().to_string(),
@@ -243,7 +243,7 @@ impl<T> ObjectRef<T> {
 
     /// Releases a lock for this object's identity and URI.
     pub fn unlock(&self, object_lock: ObjectLock) -> Result<UnlockRequest, ObjectError> {
-        if !self.same_identity(object_lock.object()) {
+        if self != object_lock.object() {
             return Err(ObjectError::ObjectLockMismatch {
                 expected: self.to_string(),
                 actual: object_lock.object().to_string(),

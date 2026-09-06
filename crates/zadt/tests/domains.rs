@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Client, Discovery, Domain, DomainCreateProperties, DomainProperties, EntityTag, Logon,
-    MediaTyped, ObjectKey, Operation, ReqwestTransport, WorkbenchVersion,
+    Client, Discovery, Domain, DomainCreateProperties, EntityTag, Logon, ObjectKey, ObjectType,
+    Operation, ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -90,7 +90,7 @@ async fn domain_properties_preserve_the_nested_v2_contract() {
         .await
         .unwrap();
 
-    assert_eq!(object.media_type(), DomainProperties::MEDIA_TYPES[0]);
+    assert_eq!(object.media_type(), Domain::MEDIA_TYPES[0]);
     assert_eq!(
         object.properties().content.type_information.length,
         "000020"

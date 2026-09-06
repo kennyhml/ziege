@@ -3,9 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    AnnotationDefinition, AnnotationDefinitionCreateProperties, AnnotationDefinitionProperties,
-    Client, Discovery, EntityTag, Logon, MediaTyped, ObjectKey, Operation, ReqwestTransport,
-    WorkbenchVersion,
+    AnnotationDefinition, AnnotationDefinitionCreateProperties, Client, Discovery, EntityTag,
+    Logon, ObjectKey, ObjectType, Operation, ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -109,10 +108,7 @@ async fn annotation_definition_properties_advertise_the_primary_source() {
         .await
         .unwrap();
 
-    assert_eq!(
-        object.media_type(),
-        AnnotationDefinitionProperties::MEDIA_TYPES[0]
-    );
+    assert_eq!(object.media_type(), AnnotationDefinition::MEDIA_TYPES[0]);
     assert_eq!(object.properties().source_uri, "./ui/source/main");
     assert_eq!(
         object.etag().map(EntityTag::as_str),

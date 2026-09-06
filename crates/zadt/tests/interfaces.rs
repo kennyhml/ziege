@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Client, Discovery, EntityTag, Interface, InterfaceCreateProperties, InterfaceProperties, Logon,
-    MediaTyped, ObjectKey, Operation, ReqwestTransport, WorkbenchVersion,
+    Client, Discovery, EntityTag, Interface, InterfaceCreateProperties, Logon, ObjectKey,
+    ObjectType, Operation, ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -113,7 +113,7 @@ async fn interface_properties_advertise_source_and_structure() {
         .unwrap();
     let structure = object.object_structure().unwrap();
 
-    assert_eq!(object.media_type(), InterfaceProperties::MEDIA_TYPES[0]);
+    assert_eq!(object.media_type(), Interface::MEDIA_TYPES[0]);
     assert_eq!(object.properties().source_uri, "source/main");
     assert_eq!(
         structure.resource.uri.as_str(),

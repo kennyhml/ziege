@@ -1,8 +1,8 @@
 use super::super::{
-    AbapLanguageVersion, AdvertisedObjectReference, GlobalWorkbenchType, MediaTyped, ObjectKey,
-    ObjectType, Source, SourceComponents, ToXml, WorkbenchVersion,
+    AbapLanguageVersion, AdvertisedObjectReference, GlobalWorkbenchType, ObjectKey, ObjectType,
+    ToXml, WorkbenchVersion,
 };
-use crate::{MediaTypes, resource::AdvertisedLink};
+use crate::{MediaTypes, ResourceView, resource::AdvertisedLink};
 use serde::{Deserialize, Serialize};
 use zadt_macros::{CreateProperties, object_type};
 
@@ -19,6 +19,12 @@ use zadt_macros::{CreateProperties, object_type};
 /// differs based on how old the class is. Legacy classes follow a different layout.
 #[object_type(
     properties = ClassProperties,
+    media_types = MediaTypes::new(&[
+        "application/vnd.sap.adt.oo.classes.v4+xml",
+        "application/vnd.sap.adt.oo.classes.v3+xml",
+        "application/vnd.sap.adt.oo.classes.v2+xml",
+    ]),
+    resources = class_resources,
     workbench_type = "CLAS/OC",
     collection(scheme = "http://www.sap.com/adt/categories/oo", term = "classes",),
     capabilities(
@@ -186,14 +192,6 @@ pub struct ClassProperties {
     pub root_entity: Option<AdvertisedObjectReference>,
 }
 
-impl MediaTyped for ClassProperties {
-    const MEDIA_TYPES: MediaTypes = MediaTypes::new(&[
-        "application/vnd.sap.adt.oo.classes.v4+xml",
-        "application/vnd.sap.adt.oo.classes.v3+xml",
-        "application/vnd.sap.adt.oo.classes.v2+xml",
-    ]);
-}
-
 impl ToXml for ClassProperties {
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
         ("class", "http://www.sap.com/adt/oo/classes"),
@@ -323,24 +321,16 @@ impl ClassTemplateProperty {
     }
 }
 
-impl Source for Class {
-    fn source_uri(properties: &Self::Properties) -> Option<&str> {
-        properties
-            .sources
-            .iter()
-            .find(|source| source.include_type == "main")
-            .map(|source| source.source_uri.as_str())
-    }
-}
-
-impl SourceComponents for Class {
-    fn source_component_uri<'a>(properties: &'a Self::Properties, name: &str) -> Option<&'a str> {
-        properties
-            .sources
-            .iter()
-            .find(|source| source.include_type == name)
-            .map(|source| source.source_uri.as_str())
-    }
+fn class_resources(properties: &ClassProperties) -> ResourceView<'_> {
+    ResourceView::new(&properties.links)
+        .with_syntax_links(
+            properties
+                .syntax_configuration
+                .as_ref()
+                .and_then(|syntax| syntax.language.as_ref())
+                .map_or(&[], |language| language.links.as_slice()),
+        )
+        .with_components(&properties.sources)
 }
 
 /// The syntax configuration embedded in a class-properties payload.

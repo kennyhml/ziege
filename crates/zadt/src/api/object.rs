@@ -10,8 +10,8 @@ use crate::{
     compatibility::MediaTypes,
     error::{EncodeError, ResponseError},
     objects::{
-        AssignObjectIdentity, Create, MediaTyped, ObjectIdentity, ObjectKey, ObjectRef,
-        ObjectTarget, ObjectType, ToXml, WorkbenchVersion, XmlConversion,
+        Create, Identity, ObjectKey, ObjectRef, ObjectTarget, ObjectType, ToXml, WorkbenchVersion,
+        XmlCodec,
     },
     operation::{EncodedOperation, IfNoneMatch, Operation, OperationResponse, Stateless},
     protocol::EntityTag,
@@ -79,7 +79,7 @@ impl<T, P> ObjectCreation<T, P> {
 impl<T, P> Operation for ObjectCreation<T, P>
 where
     T: Create<Payload = P>,
-    P: AssignObjectIdentity + Clone + ToXml + Send + Sync,
+    P: Clone + ToXml + Send + Sync,
 {
     type Kind = Stateless;
     type Response = ();
@@ -91,7 +91,7 @@ where
         // PERF: No choice but to clone the payload because we need the resolver.
         // Not a big issue as its rather small and creation is rare.
         let mut payload = self.payload.clone();
-        payload.assign_reference(&reference);
+        T::prepare_payload(&mut payload, &reference);
 
         let body = payload.to_xml()?;
         self.build_request(body, resolver)
@@ -140,7 +140,7 @@ where
             reference: self.clone(),
             payload,
             transport_request: None,
-            media_types: T::CREATE_MEDIA_TYPES,
+            media_types: T::MEDIA_TYPES,
         }
     }
 }
@@ -238,7 +238,7 @@ where
     type ResolutionRequirement = RequiresDiscovery;
 
     fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
-        self.build_request(T::Properties::MEDIA_TYPES, resolver)
+        self.build_request(T::MEDIA_TYPES, resolver)
     }
 
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
@@ -416,6 +416,7 @@ impl<T> IfMatch<ObjectUpdate<T>> {
 impl<T: ObjectType> ObjectSnapshot<T> {
     /// Creates a stateless update guarded by the entity tag from this snapshot.
     ///
+    /// Properties must retain this snapshot's object name and type.
     /// Construction fails when the snapshot has no entity tag. A failed HTTP
     /// precondition is represented by [`crate::PreconditionResult::Failed`].
     pub fn update_if_match(
@@ -429,6 +430,7 @@ impl<T: ObjectType> ObjectSnapshot<T> {
 
     /// Creates a stateful update guarded by a persistent modification lock.
     ///
+    /// Properties must retain this snapshot's object name and type.
     /// The lock must belong to this object and permit modifications. Its user
     /// session and transport request are retained by the returned operation.
     pub fn update_with_lock(
@@ -441,8 +443,8 @@ impl<T: ObjectType> ObjectSnapshot<T> {
         Locked::try_new(update, lock, self.reference())
     }
 
-    fn update(&self, mut properties: T::Properties) -> Result<ObjectUpdate<T>, ObjectError> {
-        properties.assign_identity(self.reference());
+    fn update(&self, properties: T::Properties) -> Result<ObjectUpdate<T>, ObjectError> {
+        properties.validate_for(self.reference())?;
 
         Ok(ObjectUpdate {
             resource: self.reference().clone().into(),
@@ -456,6 +458,7 @@ impl<T: ObjectType> ObjectSnapshot<T> {
 impl ObjectSnapshot<()> {
     /// Creates a stateless update guarded by the entity tag from this snapshot.
     ///
+    /// Properties must retain this snapshot's object name and type.
     /// Construction fails when the snapshot has no entity tag. JSON conversion
     /// and XML encoding also occur during construction and can fail. A failed
     /// HTTP precondition is represented by [`crate::PreconditionResult::Failed`].
@@ -470,6 +473,7 @@ impl ObjectSnapshot<()> {
 
     /// Creates a stateful update guarded by a persistent modification lock.
     ///
+    /// Properties must retain this snapshot's object name and type.
     /// The lock must belong to this object and permit modifications. Its user
     /// session and transport request are retained by the returned operation.
     /// JSON conversion and XML encoding occur during construction and can fail.
@@ -513,7 +517,7 @@ impl<T: ObjectType> ObjectSnapshot<T> {
         response.require_success()?;
         let uri = response.request_target().clone();
 
-        let supported = T::Properties::MEDIA_TYPES;
+        let supported = T::MEDIA_TYPES;
         let media_type = response.require_supported_media_type(supported)?;
 
         let properties = T::Properties::from_xml(response.body())?;
@@ -638,7 +642,7 @@ mod tests {
         assert!(!typed_request.headers().contains_key(header::ACCEPT));
         assert_eq!(
             typed_request.headers()[header::CONTENT_TYPE],
-            ClassProperties::MEDIA_TYPES[0]
+            Class::MEDIA_TYPES[0]
         );
         assert_eq!(typed_request.target().as_str(), "/sap/bc/adt/oo/classes");
         assert_eq!(typed_request.body(), runtime_request.body());
@@ -674,13 +678,10 @@ mod tests {
         let typed = typed.encode(client.discovery()).unwrap();
         let runtime = runtime.encode(client.discovery()).unwrap();
 
-        assert_eq!(
-            typed.headers()[header::CONTENT_TYPE],
-            ClassProperties::MEDIA_TYPES[0]
-        );
+        assert_eq!(typed.headers()[header::CONTENT_TYPE], Class::MEDIA_TYPES[0]);
         assert_eq!(
             runtime.headers()[header::CONTENT_TYPE],
-            ClassProperties::MEDIA_TYPES[0]
+            Class::MEDIA_TYPES[0]
         );
         assert_eq!(typed.target().as_str(), "/sap/bc/adt/oo/classes");
     }
@@ -688,7 +689,7 @@ mod tests {
     #[test]
     fn creation_rejects_a_collection_without_an_accepted_media_type() {
         let mut discovery = String::from_utf8(DISCOVERY_XML.to_vec()).unwrap();
-        for media_type in ClassProperties::MEDIA_TYPES {
+        for media_type in Class::MEDIA_TYPES {
             discovery = discovery.replace(&format!("<app:accept>{media_type}</app:accept>"), "");
         }
         let client = discovered_client(discovery.as_bytes());
@@ -707,7 +708,7 @@ mod tests {
             } => {
                 assert_eq!(
                     supported,
-                    Class::CREATE_MEDIA_TYPES
+                    Class::MEDIA_TYPES
                         .iter()
                         .map(|media_type| (*media_type).to_owned())
                         .collect::<Vec<_>>()
@@ -737,7 +738,7 @@ mod tests {
 
         assert_eq!(
             request.headers()[header::CONTENT_TYPE],
-            ClassProperties::MEDIA_TYPES[2]
+            Class::MEDIA_TYPES[2]
         );
     }
 
@@ -859,7 +860,7 @@ mod tests {
             let mut headers = HeaderMap::new();
             headers.insert(
                 header::CONTENT_TYPE,
-                HeaderValue::from_static(ClassProperties::MEDIA_TYPES[0]),
+                HeaderValue::from_static(Class::MEDIA_TYPES[0]),
             );
             headers.insert(header::ETAG, HeaderValue::from_static("class-etag"));
             OperationResponse::new(
@@ -939,7 +940,7 @@ mod tests {
             let mut headers = HeaderMap::new();
             headers.insert(
                 header::CONTENT_TYPE,
-                HeaderValue::from_static(ClassProperties::MEDIA_TYPES[0]),
+                HeaderValue::from_static(Class::MEDIA_TYPES[0]),
             );
             let response = || {
                 OperationResponse::new(
@@ -969,7 +970,7 @@ mod tests {
                 AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
             ),
             WorkbenchVersion::Active,
-            ClassProperties::MEDIA_TYPES[0],
+            Class::MEDIA_TYPES[0],
             Some(EntityTag::from_static("class-etag")),
             properties,
         )
@@ -1120,7 +1121,7 @@ mod tests {
     }
 
     #[test]
-    fn updates_canonicalize_identity_and_use_the_property_version() {
+    fn updates_preserve_identity_and_use_the_property_version() {
         let client = discovered_client(DISCOVERY_XML);
         let reference = reference("CL_ADT_URI_MAPPER");
         let properties: ClassProperties = serde_xml_rs::from_reader(CLASS_XML).unwrap();
@@ -1130,15 +1131,13 @@ mod tests {
                 AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
             ),
             WorkbenchVersion::Active,
-            ClassProperties::MEDIA_TYPES[0],
+            Class::MEDIA_TYPES[0],
             Some(EntityTag::from_static("class-etag")),
             properties.clone(),
         );
         let lock = ObjectLock::for_test(snapshot.reference().erase(), AccessMode::Modify);
 
         let mut typed_properties = properties;
-        typed_properties.name = "ZOTHER".to_owned();
-        typed_properties.object_type = Package::WORKBENCH_TYPE;
         typed_properties.version = WorkbenchVersion::Inactive;
         let typed_update = snapshot.update_if_match(typed_properties).unwrap();
         fn assert_stateless<O: Operation<Kind = Stateless>>(_: &O) {}
@@ -1147,8 +1146,6 @@ mod tests {
 
         let runtime_snapshot = snapshot.into_erased();
         let mut runtime_properties = runtime_snapshot.properties().unwrap();
-        runtime_properties["@adtcore:name"] = "ZOTHER".into();
-        runtime_properties["@adtcore:type"] = "DEVC/K".into();
         runtime_properties["@adtcore:version"] = "inactive".into();
         let runtime_update = runtime_snapshot
             .update_with_lock(lock, runtime_properties)
@@ -1188,6 +1185,59 @@ mod tests {
     }
 
     #[test]
+    fn updates_reject_mismatched_names_and_types() {
+        let properties: ClassProperties = serde_xml_rs::from_reader(CLASS_XML).unwrap();
+        let snapshot = ObjectSnapshot::new(
+            ObjectRef::new(
+                reference("CL_ADT_URI_MAPPER"),
+                AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
+            ),
+            WorkbenchVersion::Active,
+            Class::MEDIA_TYPES[0],
+            Some(EntityTag::from_static("class-etag")),
+            properties,
+        );
+        let runtime_snapshot = snapshot.clone().into_erased();
+        let lock = ObjectLock::for_test(snapshot.reference().erase(), AccessMode::Modify);
+
+        for mismatch_name in [true, false] {
+            let mut properties = snapshot.properties().clone();
+            if mismatch_name {
+                properties.name = "ZOTHER".to_owned();
+            } else {
+                properties.object_type = Package::WORKBENCH_TYPE;
+            }
+            let json = serde_json::to_value(&properties).unwrap();
+            let errors = [
+                snapshot.update_if_match(properties.clone()).unwrap_err(),
+                snapshot
+                    .update_with_lock(lock.clone(), properties)
+                    .unwrap_err(),
+                runtime_snapshot.update_if_match(json.clone()).unwrap_err(),
+                runtime_snapshot
+                    .update_with_lock(lock.clone(), json)
+                    .unwrap_err(),
+            ];
+
+            for error in errors {
+                if mismatch_name {
+                    assert!(matches!(
+                        error,
+                        ObjectError::UnexpectedObjectReference { .. }
+                    ));
+                } else {
+                    assert!(matches!(
+                        error,
+                        ObjectError::UnexpectedObjectType { expected, actual }
+                            if expected == Class::WORKBENCH_TYPE
+                                && actual == Package::WORKBENCH_TYPE
+                    ));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn optimistic_update_reports_a_failed_precondition() {
         let client = discovered_client(DISCOVERY_XML);
         let reference = reference("CL_ADT_URI_MAPPER");
@@ -1198,7 +1248,7 @@ mod tests {
                 AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
             ),
             WorkbenchVersion::Active,
-            ClassProperties::MEDIA_TYPES[0],
+            Class::MEDIA_TYPES[0],
             Some(EntityTag::from_static("stale-etag")),
             properties.clone(),
         );
@@ -1230,7 +1280,7 @@ mod tests {
                 AdtUri::parse("/sap/bc/adt/oo/classes/cl_adt_uri_mapper").unwrap(),
             ),
             WorkbenchVersion::Active,
-            ClassProperties::MEDIA_TYPES[0],
+            Class::MEDIA_TYPES[0],
             None,
             properties.clone(),
         );

@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Class, ClassProperties, Client, ConditionalResult, Discovery, EntityTag, Logon, MediaTyped,
-    ObjectKey, ObjectSnapshot, Operation, ReqwestTransport, WorkbenchVersion,
+    Class, Client, ConditionalResult, Discovery, EntityTag, Logon, ObjectKey, ObjectSnapshot,
+    ObjectType, Operation, ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -212,7 +212,7 @@ async fn class_properties_query_converts_the_live_v4_manifest() {
         .execute(&client)
         .await
         .unwrap();
-    assert_eq!(response.media_type(), ClassProperties::MEDIA_TYPES[0]);
+    assert_eq!(response.media_type(), Class::MEDIA_TYPES[0]);
     let class = response.properties();
     let source_ref = response.source().unwrap();
     let source = source_ref.query().execute(&client).await.unwrap();
@@ -276,14 +276,14 @@ async fn class_properties_query_accepts_server_selected_v2_and_v3() {
         .execute(&client)
         .await
         .unwrap();
-    assert_eq!(response.media_type(), ClassProperties::MEDIA_TYPES[2]);
+    assert_eq!(response.media_type(), Class::MEDIA_TYPES[2]);
     let response = reference
         .query()
         .workbench_version(WorkbenchVersion::Inactive)
         .execute(&client)
         .await
         .unwrap();
-    assert_eq!(response.media_type(), ClassProperties::MEDIA_TYPES[1]);
+    assert_eq!(response.media_type(), Class::MEDIA_TYPES[1]);
 
     logon.assert_async().await;
     discovery.assert_async().await;

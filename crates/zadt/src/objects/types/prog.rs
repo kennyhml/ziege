@@ -1,25 +1,29 @@
 use serde::{Deserialize, Serialize};
 use zadt_macros::object_type;
 
-use super::super::{
-    AbapLanguageVersion, GlobalWorkbenchType, MediaTyped, ObjectKey, ToXml, WorkbenchVersion,
-};
-use crate::{AdvertisedLink, AdvertisedObjectReference, MediaTypes};
+use super::super::{AbapLanguageVersion, GlobalWorkbenchType, ObjectKey, ToXml, WorkbenchVersion};
+use crate::{AdvertisedLink, AdvertisedObjectReference, MediaTypes, ResourceView};
 
 #[object_type(
     properties = ProgramProperties,
+    media_types = MediaTypes::new(&[
+        "application/vnd.sap.adt.programs.programs.v3+xml",
+        "application/vnd.sap.adt.programs.programs.v2+xml",
+    ]),
+    resources = program_resources,
     workbench_type = "PROG/P",
     collection(
         scheme = "http://www.sap.com/adt/categories/programs",
         term = "programs",
     ),
-    capabilities(Source(properties.source_uri), Structure, Run)
+    capabilities(Source, Structure, Run)
 )]
 /// The ABAP program object type.
 pub struct Program;
 
 #[object_type(
     properties = IncludeProperties,
+    media_types = MediaTypes::new(&["application/vnd.sap.adt.programs.includes.v2+xml"]),
     workbench_type = "PROG/I",
     collection(
         scheme = "http://www.sap.com/adt/categories/programs",
@@ -159,13 +163,6 @@ pub struct ProgramProperties {
     pub links: Vec<AdvertisedLink>,
 }
 
-impl MediaTyped for ProgramProperties {
-    const MEDIA_TYPES: MediaTypes = MediaTypes::new(&[
-        "application/vnd.sap.adt.programs.programs.v3+xml",
-        "application/vnd.sap.adt.programs.programs.v2+xml",
-    ]);
-}
-
 impl ToXml for ProgramProperties {
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
         ("program", "http://www.sap.com/adt/programs/programs"),
@@ -173,6 +170,12 @@ impl ToXml for ProgramProperties {
         ("adtcore", "http://www.sap.com/adt/core"),
         ("atom", "http://www.w3.org/2005/Atom"),
     ];
+}
+
+fn program_resources(properties: &ProgramProperties) -> ResourceView<'_> {
+    ResourceView::new(&properties.links)
+        .with_syntax_links(&properties.syntax_configuration.language.links)
+        .with_main(&properties.source_uri)
 }
 
 /// The complete standalone ABAP include-properties payload.
@@ -254,11 +257,6 @@ pub struct IncludeProperties {
     /// Atom links embedded at the payload root.
     #[serde(rename = "atom:link", default)]
     pub links: Vec<AdvertisedLink>,
-}
-
-impl MediaTyped for IncludeProperties {
-    const MEDIA_TYPES: MediaTypes =
-        MediaTypes::new(&["application/vnd.sap.adt.programs.includes.v2+xml"]);
 }
 
 impl ToXml for IncludeProperties {

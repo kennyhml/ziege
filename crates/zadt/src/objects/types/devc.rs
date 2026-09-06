@@ -3,11 +3,15 @@ use zadt_macros::object_type;
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTyped, MediaTypes, ToXml, WorkbenchVersion,
+    MediaTypes, ToXml, WorkbenchVersion,
 };
 
 #[object_type(
     properties = PackageProperties,
+    media_types = MediaTypes::new(&[
+        "application/vnd.sap.adt.packages.v2+xml",
+        "application/vnd.sap.adt.packages.v1+xml",
+    ]),
     workbench_type = "DEVC/K",
     collection(scheme = "http://www.sap.com/wbobj/packages", term = "devck",),
     capabilities()
@@ -82,13 +86,6 @@ pub struct PackageProperties {
     /// Direct subpackages included in the properties representation.
     #[serde(rename = "pak:subPackages")]
     pub sub_packages: Option<PackageSubpackages>,
-}
-
-impl MediaTyped for PackageProperties {
-    const MEDIA_TYPES: MediaTypes = MediaTypes::new(&[
-        "application/vnd.sap.adt.packages.v2+xml",
-        "application/vnd.sap.adt.packages.v1+xml",
-    ]);
 }
 
 impl ToXml for PackageProperties {

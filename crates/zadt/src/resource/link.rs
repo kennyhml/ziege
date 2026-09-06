@@ -113,8 +113,8 @@ impl AdvertisedLink {
 #[derive(Debug, thiserror::Error)]
 #[error("ADT link `{href}` could not be resolved: {source}")]
 pub struct AdtLinkError {
-    href: String,
-    source: AdtUriError,
+    pub(super) href: String,
+    pub(super) source: AdtUriError,
 }
 
 impl AdtLinkError {

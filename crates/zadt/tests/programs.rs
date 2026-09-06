@@ -3,9 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    AccessMode, Client, ConditionalResult, Discovery, EntityTag, Include, IncludeProperties, Logon,
-    MediaTyped, ObjectKey, Operation, Program, ProgramProperties, ReqwestTransport,
-    WorkbenchVersion,
+    AccessMode, Client, ConditionalResult, Discovery, EntityTag, Include, Logon, ObjectKey,
+    ObjectType, Operation, Program, ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -160,7 +159,7 @@ async fn include_properties_query_converts_the_live_ztest_properties() {
         .execute(&client)
         .await
         .unwrap();
-    assert_eq!(response.media_type(), IncludeProperties::MEDIA_TYPES[0]);
+    assert_eq!(response.media_type(), Include::MEDIA_TYPES[0]);
     let include = response.properties();
     let source = response
         .source()
@@ -237,7 +236,7 @@ async fn program_properties_query_converts_the_live_z_test_v3_properties() {
     let client = discovered_client(transport).await;
     let reference = ObjectKey::<Program>::new("Z_TEST");
     let response = reference.query().execute(&client).await.unwrap();
-    assert_eq!(response.media_type(), ProgramProperties::MEDIA_TYPES[0]);
+    assert_eq!(response.media_type(), Program::MEDIA_TYPES[0]);
     let program = response.properties();
     let source = response
         .source()
@@ -347,7 +346,7 @@ async fn program_properties_query_accepts_server_selected_v2() {
         .execute(&client)
         .await
         .unwrap();
-    assert_eq!(response.media_type(), ProgramProperties::MEDIA_TYPES[1]);
+    assert_eq!(response.media_type(), Program::MEDIA_TYPES[1]);
     let program = response.properties();
 
     assert_eq!(response.reference().name(), "Z_TEST");

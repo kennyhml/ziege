@@ -1,41 +1,10 @@
-use std::{collections::HashMap, fmt, hash::Hash, marker::PhantomData};
+use std::{collections::HashMap, fmt, hash::Hash};
 
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use stduritemplate::Value;
 
-use super::{
-    GlobalWorkbenchType, ObjectIdentity, ObjectType, PrimaryObjectType, SubObject, descriptors,
-};
+use super::{GlobalWorkbenchType, Identity, ObjectKey, ObjectType, descriptors};
 use crate::{Discovery, ResolveError, error::ObjectError, resource::AdtUriTemplate, uri::AdtUri};
-
-/// A logical key identifying an ADT object independently of its URI.
-///
-/// Unlike [`ObjectRef<T>`], this value has no concrete resource location.
-/// The type parameter `T` selects the operations available for that object
-/// family.
-///
-/// [`ObjectKey<()>`] stores the object family at runtime. It is useful when the
-/// family comes from user input or a repository response.
-///
-/// A [`Discovery`] resolves the object when an operation is encoded. Child
-/// keys retain their parent so the relationship template can be selected
-/// without caching discovery state on the key.
-#[derive(Debug, Serialize)]
-#[serde(bound(serialize = ""))]
-pub struct ObjectKey<T = ()> {
-    /// The full name of the object
-    name: String,
-
-    /// The workbench type of the object
-    object_type: GlobalWorkbenchType,
-
-    /// An optional parent of this object, if it has one
-    #[serde(skip_serializing_if = "Option::is_none")]
-    parent: Option<Box<ObjectKey<()>>>,
-
-    #[serde(skip)]
-    marker: PhantomData<fn() -> T>,
-}
 
 /// An ADT object at a concrete, validated resource URI.
 ///
@@ -64,6 +33,13 @@ impl<T> ObjectRef<T> {
         }
     }
 
+    /// Attaches immediate parent location metadata without changing identity.
+    #[must_use]
+    pub fn with_parent_uri(mut self, uri: AdtUri) -> Self {
+        self.parent_uri = Some(uri);
+        self
+    }
+
     /// Returns the logical object key, including any known parent identity.
     pub fn key(&self) -> &ObjectKey<T> {
         &self.key
@@ -77,13 +53,6 @@ impl<T> ObjectRef<T> {
     /// Returns the advertised or resolved immediate parent URI, when known.
     pub fn parent_uri(&self) -> Option<&AdtUri> {
         self.parent_uri.as_ref()
-    }
-
-    /// Attaches immediate parent location metadata without changing identity.
-    #[must_use]
-    pub fn with_parent_uri(mut self, uri: AdtUri) -> Self {
-        self.parent_uri = Some(uri);
-        self
     }
 
     /// Returns the object name.
@@ -103,12 +72,6 @@ impl<T> ObjectRef<T> {
             uri: self.uri.clone(),
             parent_uri: self.parent_uri.clone(),
         }
-    }
-
-    pub(crate) fn same_identity<U>(&self, other: &ObjectRef<U>) -> bool {
-        self.name() == other.name()
-            && self.object_type() == other.object_type()
-            && self.uri == other.uri
     }
 
     pub(crate) fn require_descriptor(
@@ -184,9 +147,11 @@ impl ObjectRef<()> {
     }
 }
 
-impl<T> PartialEq for ObjectRef<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.same_identity(other)
+impl<T, U> PartialEq<ObjectRef<U>> for ObjectRef<T> {
+    fn eq(&self, other: &ObjectRef<U>) -> bool {
+        self.name() == other.name()
+            && self.object_type() == other.object_type()
+            && self.uri == other.uri
     }
 }
 
@@ -206,190 +171,7 @@ impl<T> fmt::Display for ObjectRef<T> {
     }
 }
 
-/// An operation target that either needs discovery or already has a location.
-#[derive(Debug)]
-pub(crate) enum ObjectTarget<T = ()> {
-    Logical(ObjectKey<T>),
-    Located(ObjectRef<T>),
-}
-
-impl<T> From<ObjectKey<T>> for ObjectTarget<T> {
-    fn from(key: ObjectKey<T>) -> Self {
-        Self::Logical(key)
-    }
-}
-
-impl<T> From<ObjectRef<T>> for ObjectTarget<T> {
-    fn from(reference: ObjectRef<T>) -> Self {
-        Self::Located(reference)
-    }
-}
-
-impl<T> Clone for ObjectTarget<T> {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Logical(key) => Self::Logical(key.clone()),
-            Self::Located(reference) => Self::Located(reference.clone()),
-        }
-    }
-}
-
-impl<T> ObjectTarget<T> {
-    pub(crate) fn key(&self) -> &ObjectKey<T> {
-        match self {
-            Self::Logical(key) => key,
-            Self::Located(reference) => reference.key(),
-        }
-    }
-
-    pub(crate) fn resolve_uri(&self, discovery: &Discovery) -> Result<AdtUri, ResolveError> {
-        match self {
-            Self::Logical(key) => discovery.resolve_object_uri(key),
-            Self::Located(reference) => Ok(reference.uri.clone()),
-        }
-    }
-
-    pub(crate) fn resolve(&self, discovery: &Discovery) -> Result<ObjectRef<T>, ResolveError> {
-        match self {
-            Self::Logical(key) => discovery.resolve_object(key),
-            Self::Located(reference) => Ok(reference.clone()),
-        }
-    }
-
-    /// Attaches the response location without discarding known parent metadata.
-    pub(crate) fn at(&self, uri: AdtUri) -> ObjectRef<T> {
-        match self {
-            Self::Logical(key) => ObjectRef::new(key.clone(), uri),
-            Self::Located(reference) => ObjectRef {
-                uri,
-                ..reference.clone()
-            },
-        }
-    }
-}
-
-impl<T> ObjectKey<T> {
-    pub(crate) fn from_parts(
-        name: String,
-        object_type: GlobalWorkbenchType,
-        parent: Option<Box<ObjectKey<()>>>,
-    ) -> Self {
-        Self {
-            name: name.to_ascii_uppercase(),
-            object_type,
-            parent,
-            marker: PhantomData,
-        }
-    }
-
-    /// Returns the object name.
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    /// Returns the exact Workbench type retained by this key.
-    pub fn object_type(&self) -> &GlobalWorkbenchType {
-        &self.object_type
-    }
-
-    /// Returns a runtime-typed copy of this object identity.
-    pub fn erase(&self) -> ObjectKey<()> {
-        self.retag()
-    }
-
-    fn retag<U>(&self) -> ObjectKey<U> {
-        ObjectKey {
-            name: self.name.clone(),
-            object_type: self.object_type.clone(),
-            parent: self.parent.clone(),
-            marker: PhantomData,
-        }
-    }
-
-    pub(crate) fn descriptor(&self) -> Option<&'static descriptors::ObjectTypeDescriptor> {
-        descriptors::object_type_descriptor(&self.object_type)
-    }
-
-    pub(crate) fn require_descriptor(
-        &self,
-    ) -> Result<&'static descriptors::ObjectTypeDescriptor, ObjectError> {
-        self.descriptor()
-            .ok_or_else(|| ObjectError::UnsupportedObjectType {
-                object_type: self.object_type().clone(),
-            })
-    }
-
-    pub(crate) fn same_identity<U>(&self, other: &ObjectKey<U>) -> bool {
-        self.name == other.name
-            && self.object_type == other.object_type
-            && self.parent == other.parent
-    }
-
-    pub(crate) fn unsupported_capability(&self, capability: &'static str) -> ObjectError {
-        ObjectError::UnsupportedCapability {
-            object_type: self.object_type.clone(),
-            capability,
-        }
-    }
-
-    /// Returns the logical parent identity for a subobject.
-    pub fn parent(&self) -> Option<&ObjectKey<()>> {
-        self.parent.as_deref()
-    }
-}
-
-impl<T: PrimaryObjectType> ObjectKey<T> {
-    /// Creates a logical primary-object key.
-    pub fn new(name: impl Into<String>) -> Self {
-        Self::from_parts(name.into(), T::WORKBENCH_TYPE, None)
-    }
-}
-
-impl ObjectKey<()> {
-    /// Creates a logical primary-object key from a Workbench type.
-    ///
-    /// Subobjects require a parent and must instead be created through
-    /// [`ObjectKey::subobject`].
-    pub fn from_workbench_type(
-        object_type: &GlobalWorkbenchType,
-        name: impl Into<String>,
-    ) -> Result<Self, ObjectError> {
-        let descriptor = descriptors::object_type_descriptor(object_type).ok_or_else(|| {
-            ObjectError::UnsupportedObjectType {
-                object_type: object_type.clone(),
-            }
-        })?;
-
-        descriptor
-            .category()
-            .ok_or_else(|| ObjectError::ParentObjectRequired {
-                object_type: object_type.clone(),
-            })?;
-
-        Ok(Self::from_parts(name.into(), object_type.clone(), None))
-    }
-
-    /// Recovers a typed key when this object has the requested type.
-    pub fn typed<T: ObjectType>(&self) -> Option<ObjectKey<T>> {
-        if self.object_type() != &T::WORKBENCH_TYPE {
-            return None;
-        }
-        Some(self.retag())
-    }
-}
-
-impl<T> Clone for ObjectKey<T> {
-    fn clone(&self) -> Self {
-        Self {
-            name: self.name.clone(),
-            object_type: self.object_type.clone(),
-            parent: self.parent.clone(),
-            marker: PhantomData,
-        }
-    }
-}
-
-impl<T> ObjectIdentity for ObjectKey<T> {
+impl<T> Identity for ObjectRef<T> {
     fn object_name(&self) -> &str {
         self.name()
     }
@@ -397,110 +179,6 @@ impl<T> ObjectIdentity for ObjectKey<T> {
     fn object_type(&self) -> &GlobalWorkbenchType {
         self.object_type()
     }
-}
-
-impl<T> ObjectIdentity for ObjectRef<T> {
-    fn object_name(&self) -> &str {
-        self.name()
-    }
-
-    fn object_type(&self) -> &GlobalWorkbenchType {
-        self.object_type()
-    }
-}
-
-impl<T> PartialEq for ObjectKey<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.same_identity(other)
-    }
-}
-
-impl<T> Eq for ObjectKey<T> {}
-
-impl<T> Hash for ObjectKey<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
-        self.object_type.hash(state);
-        self.parent.hash(state);
-    }
-}
-
-impl<T> fmt::Display for ObjectKey<T> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{} ({})", self.name, self.object_type)
-    }
-}
-
-/// Temporary Serde value used while deserializing an [`ObjectKey`].
-///
-/// For typed keys, the Workbench type is checked before the key is constructed.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawObjectKey {
-    name: String,
-    object_type: GlobalWorkbenchType,
-    #[serde(default)]
-    parent: Option<Box<ObjectKey<()>>>,
-}
-
-impl<'de> Deserialize<'de> for ObjectKey<()> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let reference = RawObjectKey::deserialize(deserializer)?;
-        validate_parent_identity(&reference).map_err(serde::de::Error::custom)?;
-        Ok(Self::from_parts(
-            reference.name,
-            reference.object_type,
-            reference.parent,
-        ))
-    }
-}
-
-impl<'de, T: ObjectType> Deserialize<'de> for ObjectKey<T> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let reference = RawObjectKey::deserialize(deserializer)?;
-        if reference.object_type != T::WORKBENCH_TYPE {
-            return Err(serde::de::Error::custom(
-                ObjectError::UnexpectedObjectType {
-                    expected: T::WORKBENCH_TYPE,
-                    actual: reference.object_type,
-                },
-            ));
-        }
-        validate_parent_identity(&reference).map_err(serde::de::Error::custom)?;
-        Ok(Self::from_parts(
-            reference.name,
-            T::WORKBENCH_TYPE,
-            reference.parent,
-        ))
-    }
-}
-
-fn validate_parent_identity(reference: &RawObjectKey) -> Result<(), ObjectError> {
-    let Some(parent) = &reference.parent else {
-        return Ok(());
-    };
-    if !descriptors::requires_parent(&reference.object_type) {
-        return Err(ObjectError::InvalidParentObject {
-            object_type: reference.object_type.clone(),
-            reason: "the object type is directly addressable".to_owned(),
-        });
-    }
-    if !descriptors::supports_subobject(&parent.object_type, &reference.object_type) {
-        return Err(ObjectError::InvalidParentObject {
-            object_type: reference.object_type.clone(),
-            reason: format!(
-                "type `{}` does not declare this subobject relationship",
-                parent.object_type
-            ),
-        });
-    }
-    Ok(())
 }
 
 /// A partial object reference exactly as advertised in an ADT payload.
@@ -541,8 +219,8 @@ pub struct AdvertisedObjectReference {
 impl<T> From<&ObjectKey<T>> for AdvertisedObjectReference {
     fn from(value: &ObjectKey<T>) -> Self {
         Self {
-            object_type: Some(value.object_type.clone()),
-            name: Some(value.name.clone()),
+            object_type: Some(value.object_type().clone()),
+            name: Some(value.name().to_owned()),
             ..Default::default()
         }
     }
@@ -677,57 +355,11 @@ impl Discovery {
     }
 }
 
-impl<P: PrimaryObjectType> ObjectKey<P> {
-    /// Creates a logical subobject key belonging to this primary object.
-    ///
-    /// [`SubObject<C>`] guarantees that `P` declares a subobject relationship
-    /// with `C`, so constructing the child key is infallible.
-    ///
-    /// The parent key is retained for later discovery-based resolution.
-    pub fn subobject<C>(&self, name: impl Into<String>) -> ObjectKey<C>
-    where
-        C: ObjectType,
-        P: SubObject<C>,
-    {
-        ObjectKey::from_parts(name.into(), C::WORKBENCH_TYPE, Some(Box::new(self.erase())))
-    }
-}
-
-impl ObjectKey<()> {
-    /// Creates a logical subobject key belonging to this primary object.
-    ///
-    /// Because the object type is erased, there are no static guarantees that
-    /// this object has any of the requested subobjects or even any at all. This
-    /// is instead turned into a descriptor backed runtime check.
-    ///
-    /// The parent key is retained for later discovery-based resolution.
-    pub fn subobject(
-        &self,
-        child_type: &GlobalWorkbenchType,
-        name: &str,
-    ) -> Result<ObjectKey<()>, ObjectError> {
-        let descriptor = self.require_descriptor()?;
-        descriptor
-            .subobjects()
-            .iter()
-            .find(|subobject| subobject.object_type() == child_type)
-            .ok_or_else(|| ObjectError::UnsupportedSubObjectType {
-                parent_type: self.object_type().clone(),
-                child_type: child_type.clone(),
-            })?;
-
-        Ok(ObjectKey::from_parts(
-            name.to_owned(),
-            child_type.clone(),
-            Some(Box::new(self.clone())),
-        ))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{FunctionGroup, FunctionModule, Include, Program};
+    use crate::objects::ObjectTarget;
+    use crate::{FunctionGroup, FunctionModule, Program};
 
     fn discovery(xml: &[u8]) -> Discovery {
         struct UnusedTransport;
@@ -822,30 +454,6 @@ mod tests {
     }
 
     #[test]
-    fn deserialized_keys_normalize_names_including_parent_names() {
-        let json = serde_json::json!({
-            "name": "z_module",
-            "object_type": "FUGR/FF",
-            "parent": { "name": "z_group", "object_type": "FUGR/F" }
-        });
-        let expected =
-            ObjectKey::<FunctionGroup>::new("z_group").subobject::<FunctionModule>("z_module");
-        assert_eq!(
-            serde_json::from_value::<ObjectKey<FunctionModule>>(json.clone()).unwrap(),
-            expected
-        );
-        assert_eq!(
-            serde_json::from_value::<ObjectKey<()>>(json).unwrap(),
-            expected.erase()
-        );
-        let primary: ObjectKey<Program> = serde_json::from_value(serde_json::json!({
-            "name": "/namespace/z_program", "object_type": "PROG/P"
-        }))
-        .unwrap();
-        assert_eq!(primary, ObjectKey::<Program>::new("/namespace/z_program"));
-    }
-
-    #[test]
     fn located_identity_ignores_parent_metadata_but_includes_uri() {
         let first =
             ObjectKey::<FunctionGroup>::new("Z_FIRST").subobject::<FunctionModule>("Z_MODULE");
@@ -857,19 +465,23 @@ mod tests {
         let second = ObjectRef::new(second, uri)
             .with_parent_uri(AdtUri::parse("advertised/parent").unwrap());
         assert_eq!(first, second);
-        assert!(first.same_identity(&second.erase()));
+        assert_eq!(first, second.erase());
+        assert_eq!(second.erase(), first);
         let mut identities = std::collections::HashSet::from([first.clone()]);
         assert!(!identities.insert(second));
         let other_uri = ObjectRef::new(first.key().clone(), AdtUri::parse("other/module").unwrap());
         assert_ne!(first, other_uri);
+        assert_ne!(first, other_uri.erase());
         assert!(identities.insert(other_uri));
         let other_name = ObjectRef::new(
             ObjectKey::<FunctionGroup>::new("Z_FIRST").subobject::<FunctionModule>("Z_OTHER"),
             first.uri().clone(),
         );
         assert_ne!(first, other_name);
+        assert_ne!(first, other_name.erase());
         let other_type = ObjectRef::new(ObjectKey::<Program>::new("Z_MODULE"), first.uri().clone());
-        assert!(!first.same_identity(&other_type));
+        assert_ne!(first, other_type);
+        assert_ne!(other_type, first);
     }
 
     #[test]
@@ -997,68 +609,6 @@ mod tests {
             serde_json::from_value::<AdvertisedObjectReference>(json).unwrap(),
             reference
         );
-    }
-
-    #[test]
-    fn erased_reference_recovers_its_registered_type() {
-        let program = ObjectKey::<Program>::new("Z_TEST");
-        let object = program.erase();
-
-        assert_eq!(object.object_type().as_str(), "PROG/P");
-        assert_eq!(object.typed::<Program>(), Some(program));
-        assert!(object.typed::<Include>().is_none());
-    }
-
-    #[test]
-    fn typed_reference_deserialization_validates_its_marker() {
-        let program = ObjectKey::<Program>::new("Z_TEST");
-        let serialized = serde_json::to_value(&program).unwrap();
-
-        assert!(serialized.get("uri").is_none());
-        assert!(serde_json::from_value::<ObjectKey<Program>>(serialized.clone()).is_ok());
-        assert!(serde_json::from_value::<ObjectKey<crate::Class>>(serialized).is_err());
-    }
-
-    #[test]
-    fn reference_deserialization_rejects_unknown_fields_including_parents() {
-        let module =
-            ObjectKey::<FunctionGroup>::new("Z_GROUP").subobject::<FunctionModule>("Z_MODULE");
-        let original = serde_json::to_value(module).unwrap();
-        for pointer in ["", "/parent"] {
-            let mut json = original.clone();
-            json.pointer_mut(pointer).unwrap()["unexpected"] = true.into();
-            let typed =
-                serde_json::from_value::<ObjectKey<FunctionModule>>(json.clone()).unwrap_err();
-            let erased = serde_json::from_value::<ObjectKey<()>>(json).unwrap_err();
-            for error in [typed, erased] {
-                assert!(
-                    error.to_string().contains("unknown field `unexpected`"),
-                    "{error}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn reference_deserialization_validates_parent_metadata() {
-        let group = ObjectKey::<FunctionGroup>::new("Z_TEST_GROUP");
-        let module = group.subobject::<FunctionModule>("ZZZZFUNC");
-        let serialized = serde_json::to_value(&module).unwrap();
-
-        assert!(serde_json::from_value::<ObjectKey<FunctionModule>>(serialized.clone()).is_ok());
-
-        let mut wrong_parent_type = serialized.clone();
-        wrong_parent_type["parent"]["object_type"] = serde_json::json!("PROG/P");
-        assert!(serde_json::from_value::<ObjectKey<FunctionModule>>(wrong_parent_type).is_err());
-
-        let mut primary_with_parent =
-            serde_json::to_value(ObjectKey::<Program>::new("Z_TEST")).unwrap();
-        primary_with_parent["parent"] = serialized["parent"].clone();
-        assert!(serde_json::from_value::<ObjectKey<Program>>(primary_with_parent).is_err());
-
-        let mut detached_child = serialized;
-        detached_child.as_object_mut().unwrap().remove("parent");
-        assert!(serde_json::from_value::<ObjectKey<FunctionModule>>(detached_child).is_ok());
     }
 
     #[test]

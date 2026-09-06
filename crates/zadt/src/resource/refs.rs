@@ -40,6 +40,29 @@ impl<T> OwnedResourceRef<T> {
             marker: PhantomData,
         }
     }
+
+    /// Resolves a resource href against its owner and retains its advertised ETag.
+    pub fn from_href(
+        object: ObjectRef,
+        href: &str,
+        etag: Option<String>,
+    ) -> Result<Self, ObjectError> {
+        let resolved =
+            resolve_href(object.uri(), href).map_err(|source| ObjectError::InvalidLink {
+                href: href.to_owned(),
+                source,
+            })?;
+        let mut reference = Self::new(object, resolved.target);
+        reference.query = resolved.query;
+        reference.fragment = resolved.fragment;
+        reference.etag = etag;
+        Ok(reference)
+    }
+
+    /// Constructs a resource reference from an already-selected advertised link.
+    pub fn from_link(object: ObjectRef, link: &AdvertisedLink) -> Result<Self, ObjectError> {
+        Self::from_href(object, &link.href, link.etag.clone())
+    }
 }
 
 impl<T> fmt::Display for OwnedResourceRef<T> {
@@ -91,35 +114,6 @@ pub type ObjectStructureRef = OwnedResourceRef<kind::ObjectStructure>;
 
 impl ObjectStructureRef {
     pub(crate) const RELATION: &'static str = "http://www.sap.com/adt/relations/objectstructure";
-
-    pub(crate) fn from_relations(
-        object: ObjectRef<()>,
-        object_uri: &AdtUri,
-        links: &[AdvertisedLink],
-    ) -> Result<Option<Self>, ObjectError> {
-        links
-            .iter()
-            .find(|link| link.relation.as_deref() == Some(Self::RELATION))
-            .map(|link| Self::from_relation(object, object_uri, link))
-            .transpose()
-    }
-
-    fn from_relation(
-        object: ObjectRef<()>,
-        object_uri: &AdtUri,
-        link: &AdvertisedLink,
-    ) -> Result<Self, ObjectError> {
-        let resolved =
-            resolve_href(object_uri, &link.href).map_err(|source| ObjectError::InvalidLink {
-                href: link.href.clone(),
-                source,
-            })?;
-        let mut reference = Self::new(object, resolved.target);
-        reference.query = resolved.query;
-        reference.fragment = resolved.fragment;
-        reference.etag = link.etag.clone();
-        Ok(reference)
-    }
 }
 
 /// The text-elements resource advertised for an ADT object.
@@ -147,19 +141,7 @@ pub type ParserRef = OwnedResourceRef<kind::Parser>;
 /// [`ObjectRef`]. [`SourceRef::update`](crate::SourceRef::update) uses that
 /// relationship to validate an [`ObjectLock`](crate::ObjectLock) before creating
 /// the update operation.
+///
+/// Its ETag is the advertised plain-text source validator, not the owning
+/// object's properties ETag or a later source response's ETag.
 pub type SourceRef = OwnedResourceRef<kind::Source>;
-
-pub(crate) fn source_from_href(
-    object: ObjectRef<()>,
-    object_uri: &AdtUri,
-    href: &str,
-) -> Result<SourceRef, ObjectError> {
-    let resolved = resolve_href(object_uri, href).map_err(|source| ObjectError::InvalidLink {
-        href: href.to_owned(),
-        source,
-    })?;
-    let mut reference = SourceRef::new(object, resolved.target);
-    reference.query = resolved.query;
-    reference.fragment = resolved.fragment;
-    Ok(reference)
-}

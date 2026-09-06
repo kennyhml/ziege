@@ -3,12 +3,17 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTyped, MediaTypes, SyntaxConfiguration, ToXml, WorkbenchVersion,
+    MediaTypes, ResourceView, SyntaxConfiguration, ToXml, WorkbenchVersion,
 };
 
 /// An ABAP function group.
 #[object_type(
     properties = FunctionGroupProperties,
+    media_types = MediaTypes::new(&[
+        "application/vnd.sap.adt.functions.groups.v3+xml",
+        "application/vnd.sap.adt.functions.groups.v2+xml",
+    ]),
+    resources = function_group_resources,
     workbench_type = "FUGR/F",
     collection(
         scheme = "http://www.sap.com/adt/categories/functions",
@@ -26,7 +31,7 @@ use crate::{
     ),
     capabilities(
         Create(FunctionGroupCreateProperties),
-        Source(properties.source_uri),
+        Source,
         Structure,
     )
 )]
@@ -35,6 +40,7 @@ pub struct FunctionGroup;
 /// A function module owned by an ABAP function group.
 #[object_type(
     properties = FunctionModuleProperties,
+    media_types = MediaTypes::new(&["application/vnd.sap.adt.functions.fmodules.v3+xml"]),
     workbench_type = "FUGR/FF",
     subobject,
     capabilities(
@@ -47,6 +53,7 @@ pub struct FunctionModule;
 /// A source include owned by an ABAP function group.
 #[object_type(
     properties = FunctionGroupIncludeProperties,
+    media_types = MediaTypes::new(&["application/vnd.sap.adt.functions.fincludes.v2+xml"]),
     workbench_type = "FUGR/I",
     subobject,
     capabilities(
@@ -120,13 +127,6 @@ pub struct FunctionGroupProperties {
     pub syntax_configuration: SyntaxConfiguration,
 }
 
-impl MediaTyped for FunctionGroupProperties {
-    const MEDIA_TYPES: MediaTypes = MediaTypes::new(&[
-        "application/vnd.sap.adt.functions.groups.v3+xml",
-        "application/vnd.sap.adt.functions.groups.v2+xml",
-    ]);
-}
-
 impl ToXml for FunctionGroupProperties {
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
         ("group", "http://www.sap.com/adt/functions/groups"),
@@ -134,6 +134,12 @@ impl ToXml for FunctionGroupProperties {
         ("adtcore", "http://www.sap.com/adt/core"),
         ("atom", "http://www.w3.org/2005/Atom"),
     ];
+}
+
+fn function_group_resources(properties: &FunctionGroupProperties) -> ResourceView<'_> {
+    ResourceView::new(&properties.links)
+        .with_syntax_links(&properties.syntax_configuration.language.links)
+        .with_main(&properties.source_uri)
 }
 
 /// The complete function-module properties payload.
@@ -180,11 +186,6 @@ pub struct FunctionModuleProperties {
     pub container: AdvertisedObjectReference,
     #[serde(rename = "atom:link", default)]
     pub links: Vec<AdvertisedLink>,
-}
-
-impl MediaTyped for FunctionModuleProperties {
-    const MEDIA_TYPES: MediaTypes =
-        MediaTypes::new(&["application/vnd.sap.adt.functions.fmodules.v3+xml"]);
 }
 
 impl ToXml for FunctionModuleProperties {
@@ -238,11 +239,6 @@ pub struct FunctionGroupIncludeProperties {
     pub links: Vec<AdvertisedLink>,
 }
 
-impl MediaTyped for FunctionGroupIncludeProperties {
-    const MEDIA_TYPES: MediaTypes =
-        MediaTypes::new(&["application/vnd.sap.adt.functions.fincludes.v2+xml"]);
-}
-
 impl ToXml for FunctionGroupIncludeProperties {
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
         ("finclude", "http://www.sap.com/adt/functions/fincludes"),
@@ -255,7 +251,7 @@ impl ToXml for FunctionGroupIncludeProperties {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, AssignObjectIdentity, ObjectKey, ObjectRef};
+    use crate::{AdtUri, Create, ObjectKey, ObjectRef};
 
     const GROUP_XML: &str = include_str!("../../../tests/fixtures/function-group-z-test-group.xml");
     const GROUP_V2_XML: &str =
@@ -285,12 +281,12 @@ mod tests {
             .abap_language_version(AbapLanguageVersion::CloudDevelopment)
             .build()
             .unwrap();
-        let reference = ObjectKey::<FunctionGroup>::new("Z_TEST_GROUP");
-        properties.assign_reference(&ObjectRef::for_test(
-            reference,
+        let reference = ObjectRef::for_test(
+            ObjectKey::<FunctionGroup>::new("Z_TEST_GROUP"),
             AdtUri::parse("/sap/bc/adt/functions/groups/z_test_group").unwrap(),
             None,
-        ));
+        );
+        FunctionGroup::prepare_payload(&mut properties, &reference);
 
         let body = String::from_utf8(properties.to_xml().unwrap()).unwrap();
         assert!(body.contains("<group:abapFunctionGroup"));
@@ -348,11 +344,12 @@ mod tests {
             .description("zttfart")
             .build()
             .unwrap();
-        properties.assign_reference(&ObjectRef::for_test(
+        let reference = ObjectRef::for_test(
             include,
             AdtUri::parse("/sap/bc/adt/functions/groups/zgroup123/includes/lzgroup123rrr").unwrap(),
             Some(resolved_parent),
-        ));
+        );
+        FunctionGroupInclude::prepare_payload(&mut properties, &reference);
 
         let body = String::from_utf8(properties.to_xml().unwrap()).unwrap();
         assert!(body.contains("<finclude:abapFunctionGroupInclude"));

@@ -3,11 +3,16 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTyped, MediaTypes, Source, SyntaxConfiguration, ToXml, WorkbenchVersion,
+    MediaTypes, ResourceView, SyntaxConfiguration, ToXml, WorkbenchVersion,
 };
 
 #[object_type(
     properties = InterfaceProperties,
+    media_types = MediaTypes::new(&[
+        "application/vnd.sap.adt.oo.interfaces.v5+xml",
+        "application/vnd.sap.adt.oo.interfaces.v4+xml",
+    ]),
+    resources = interface_resources,
     workbench_type = "INTF/OI",
     collection(
         scheme = "http://www.sap.com/adt/categories/oo",
@@ -127,13 +132,6 @@ pub struct InterfaceProperties {
     pub syntax_configuration: SyntaxConfiguration,
 }
 
-impl MediaTyped for InterfaceProperties {
-    const MEDIA_TYPES: MediaTypes = MediaTypes::new(&[
-        "application/vnd.sap.adt.oo.interfaces.v5+xml",
-        "application/vnd.sap.adt.oo.interfaces.v4+xml",
-    ]);
-}
-
 impl ToXml for InterfaceProperties {
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
         ("intf", "http://www.sap.com/adt/oo/interfaces"),
@@ -144,16 +142,20 @@ impl ToXml for InterfaceProperties {
     ];
 }
 
-impl Source for Interface {
-    fn source_uri(properties: &Self::Properties) -> Option<&str> {
-        (!properties.modeled).then_some(properties.source_uri.as_str())
+fn interface_resources(properties: &InterfaceProperties) -> ResourceView<'_> {
+    let resources = ResourceView::new(&properties.links)
+        .with_syntax_links(&properties.syntax_configuration.language.links);
+    if !properties.modeled {
+        resources.with_main(&properties.source_uri)
+    } else {
+        resources
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AssignObjectIdentity, ObjectKey, ObjectType};
+    use crate::{AdtUri, Create, ObjectKey, ObjectRef, ObjectType, Resources};
 
     const INTERFACE_XML: &str =
         include_str!("../../../tests/fixtures/interface-if-adt-uri-mapper-v5.xml");
@@ -177,8 +179,11 @@ mod tests {
         assert_eq!(properties.object_type, Interface::WORKBENCH_TYPE);
         assert!(properties.abap_language_version.is_none());
 
-        let reference = ObjectKey::<Interface>::new("ZIF_EXAMPLE");
-        properties.assign_identity(&reference);
+        let reference = ObjectRef::new(
+            ObjectKey::<Interface>::new("ZIF_EXAMPLE"),
+            AdtUri::parse("/sap/bc/adt/oo/interfaces/zif_example").unwrap(),
+        );
+        Interface::prepare_payload(&mut properties, &reference);
         let body = properties.to_xml().unwrap();
         let body = std::str::from_utf8(&body).unwrap();
 
@@ -200,6 +205,10 @@ mod tests {
         assert_eq!(properties.object_type, Interface::WORKBENCH_TYPE);
         assert_eq!(properties.version, WorkbenchVersion::Active);
         assert_eq!(properties.source_uri, "source/main");
+        assert_eq!(
+            properties.resources().main_source_uri(),
+            Some("source/main")
+        );
         assert_eq!(
             properties
                 .abap_language_version
@@ -225,7 +234,7 @@ mod tests {
         let body = INTERFACE_XML.replace("abapoo:modeled=\"false\"", "abapoo:modeled=\"true\"");
         let properties = parse(&body).unwrap();
 
-        assert!(<Interface as Source>::source_uri(&properties).is_none());
+        assert_eq!(properties.resources().main_source_uri(), None);
     }
 
     #[test]

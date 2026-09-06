@@ -120,8 +120,8 @@ mod tests {
     use super::*;
     use crate::{
         AdtRequest, AdtResponse, AdtUri, Client, CompatibilityError, ConditionalResult, Discovery,
-        EntityTag, Include, IncludeProperties, MediaTyped, ObjectError, ObjectQuery,
-        OperationError, ProgramProperties, ResolveError, Transport, WorkbenchVersion,
+        EntityTag, Include, ObjectError, ObjectQuery, ObjectType, OperationError, ResolveError,
+        Transport, WorkbenchVersion,
     };
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
@@ -213,10 +213,7 @@ mod tests {
             .encode(client.discovery())
             .unwrap();
 
-        assert_eq!(
-            request.headers()[header::ACCEPT],
-            IncludeProperties::MEDIA_TYPES[0]
-        );
+        assert_eq!(request.headers()[header::ACCEPT], Include::MEDIA_TYPES[0]);
     }
 
     #[test]
@@ -363,14 +360,9 @@ mod tests {
     #[test]
     fn tags_a_v2_program_properties_representation() {
         let representation = program_properties_query()
-            .decode(program_properties_response(
-                ProgramProperties::MEDIA_TYPES[1],
-            ))
+            .decode(program_properties_response(Program::MEDIA_TYPES[1]))
             .unwrap();
-        assert_eq!(
-            representation.media_type(),
-            ProgramProperties::MEDIA_TYPES[1]
-        );
+        assert_eq!(representation.media_type(), Program::MEDIA_TYPES[1]);
         assert_eq!(representation.reference().name(), "Z_TEST");
         assert_eq!(
             representation.workbench_version(),
@@ -381,14 +373,9 @@ mod tests {
     #[test]
     fn tags_a_v3_program_properties_representation() {
         let representation = program_properties_query()
-            .decode(program_properties_response(
-                ProgramProperties::MEDIA_TYPES[0],
-            ))
+            .decode(program_properties_response(Program::MEDIA_TYPES[0]))
             .unwrap();
-        assert_eq!(
-            representation.media_type(),
-            ProgramProperties::MEDIA_TYPES[0]
-        );
+        assert_eq!(representation.media_type(), Program::MEDIA_TYPES[0]);
         assert_eq!(representation.reference().name(), "Z_TEST");
     }
 
@@ -432,8 +419,8 @@ mod tests {
             } if target == request_target()
                 && content_type == "application/json"
                 && supported == [
-                    ProgramProperties::MEDIA_TYPES[0],
-                    ProgramProperties::MEDIA_TYPES[1],
+                    Program::MEDIA_TYPES[0],
+                    Program::MEDIA_TYPES[1],
                 ]
         ));
     }
@@ -442,9 +429,7 @@ mod tests {
     fn wraps_a_modified_conditional_program_properties_query() {
         let response = program_properties_query()
             .if_none_match(EntityTag::from_static("old-etag"))
-            .decode(program_properties_response(
-                ProgramProperties::MEDIA_TYPES[0],
-            ))
+            .decode(program_properties_response(Program::MEDIA_TYPES[0]))
             .unwrap();
 
         assert!(matches!(response, ConditionalResult::Modified(_)));
@@ -453,9 +438,7 @@ mod tests {
     #[test]
     fn loaded_program_revalidates_with_its_entity_tag() {
         let program = program_properties_query()
-            .decode(program_properties_response(
-                ProgramProperties::MEDIA_TYPES[0],
-            ))
+            .decode(program_properties_response(Program::MEDIA_TYPES[0]))
             .unwrap();
         let client = discovered_client(DISCOVERY_XML);
         let request = program

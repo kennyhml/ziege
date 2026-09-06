@@ -3,11 +3,12 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTyped, MediaTypes, ToXml, WorkbenchVersion,
+    MediaTypes, ToXml, WorkbenchVersion,
 };
 
 #[object_type(
     properties = ServiceDefinitionProperties,
+    media_types = MediaTypes::new(&["application/vnd.sap.adt.ddic.srvd.v1+xml"]),
     workbench_type = "SRVD/SRV",
     collection(
         scheme = "http://www.sap.com/wbobj/raps",
@@ -134,10 +135,6 @@ pub struct ServiceDefinitionProperties {
     pub package: AdvertisedObjectReference,
 }
 
-impl MediaTyped for ServiceDefinitionProperties {
-    const MEDIA_TYPES: MediaTypes = MediaTypes::new(&["application/vnd.sap.adt.ddic.srvd.v1+xml"]);
-}
-
 impl ToXml for ServiceDefinitionProperties {
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[
         ("srvd", "http://www.sap.com/adt/ddic/srvdsources"),
@@ -150,7 +147,7 @@ impl ToXml for ServiceDefinitionProperties {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AdtUri, AssignObjectIdentity, ObjectKey, ObjectType};
+    use crate::{AdtUri, Create, ObjectKey, ObjectRef, ObjectType};
 
     const SERVICE_DEFINITION_XML: &str =
         include_str!("../../../tests/fixtures/service-definition-managedistributions.xml");
@@ -175,8 +172,11 @@ mod tests {
         assert_eq!(properties.source_type, "S");
         assert!(properties.abap_language_version.is_none());
 
-        let reference = ObjectKey::<ServiceDefinition>::new("Z_SERVICE_DEFINITION");
-        properties.assign_identity(&reference);
+        let reference = ObjectRef::new(
+            ObjectKey::<ServiceDefinition>::new("Z_SERVICE_DEFINITION"),
+            AdtUri::parse("/sap/bc/adt/ddic/srvd/sources/z_service_definition").unwrap(),
+        );
+        ServiceDefinition::prepare_payload(&mut properties, &reference);
         let body = properties.to_xml().unwrap();
         let body = std::str::from_utf8(&body).unwrap();
 
@@ -217,7 +217,7 @@ mod tests {
                 AdtUri::parse("/sap/bc/adt/ddic/srvd/sources/managedistributions").unwrap(),
             ),
             crate::WorkbenchVersion::Active,
-            ServiceDefinitionProperties::MEDIA_TYPES[0],
+            ServiceDefinition::MEDIA_TYPES[0],
             None,
             properties,
         );

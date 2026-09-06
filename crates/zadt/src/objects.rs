@@ -1,9 +1,10 @@
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::{CategoryId, MediaTypes, ObjectError, resource::AdvertisedLink};
+use crate::{AdtUri, CategoryId, Discovery, MediaTypes, ObjectError, ResolveError, ResourceView};
 
 mod capabilities;
 pub(crate) mod descriptors;
+mod key;
 mod reference;
 mod snapshot;
 mod types;
@@ -12,8 +13,8 @@ mod workbench;
 pub use capabilities::{Create, Source, SourceComponents, Structure};
 pub(crate) use capabilities::{ImmediateRun, RunCapability};
 pub use descriptors::SubObjectDescriptor;
-pub(crate) use reference::ObjectTarget;
-pub use reference::{AdvertisedObjectReference, ObjectKey, ObjectRef, ObjectReferences};
+pub use key::ObjectKey;
+pub use reference::{AdvertisedObjectReference, ObjectRef, ObjectReferences};
 pub(crate) use snapshot::ErasedProperties;
 pub use snapshot::ObjectSnapshot;
 pub use types::*;
@@ -32,7 +33,10 @@ pub use workbench::{
 /// some primary parent object, is a valid object type.
 pub trait ObjectType: private::Sealed + Send + Sync + Sized + 'static {
     /// The complete properties payload loaded for this object family.
-    type Properties: Clone + XmlConversion + MediaTyped + Links + AssignObjectIdentity + 'static;
+    type Properties: XmlCodec + Identity + Resources + 'static + Clone;
+
+    /// Supported XML properties media types, in client preference order.
+    const MEDIA_TYPES: MediaTypes;
 
     /// The object's global Workbench type.
     const WORKBENCH_TYPE: GlobalWorkbenchType;
@@ -53,6 +57,90 @@ pub trait SubObject<C: ObjectType>: PrimaryObjectType {
     const DESCRIPTOR: SubObjectDescriptor;
 }
 
+/// An operation target that either needs discovery or already has a location.
+///
+/// This is internal operation machinery, though it may be useful to expose
+/// it if we settle on letting consumers implement their own operations.
+///
+/// This effectively allows operations to be pseudo generic over the state
+/// of the object identity. If the object is alreade resolved ([`ObjectRef<T>`])
+/// no lookup is needed. [`ObjectKey<T>`] can be resolved against the discovery
+/// at the time the uri is required.
+///
+/// Both logical keys and located references convert directly into this target.
+///
+/// Some operations only require an [`ObjectKey<T>`], such as object creation.
+#[derive(Debug)]
+pub(crate) enum ObjectTarget<T = ()> {
+    Logical(ObjectKey<T>),
+    Located(ObjectRef<T>),
+}
+
+impl<T> ObjectTarget<T> {
+    /// Normalizes and returns the underlying [`ObjectKey<T>`].
+    pub(crate) fn key(&self) -> &ObjectKey<T> {
+        match self {
+            Self::Logical(key) => key,
+            Self::Located(reference) => reference.key(),
+        }
+    }
+
+    /// Resolves the [`AdtUri`] of this object against the discovery.
+    ///
+    /// If the object is alreade a reference with a uri, a clone is returnd.
+    pub(crate) fn resolve_uri(&self, discovery: &Discovery) -> Result<AdtUri, ResolveError> {
+        match self {
+            Self::Logical(key) => discovery.resolve_object_uri(key),
+            Self::Located(reference) => Ok(reference.uri().clone()),
+        }
+    }
+
+    /// Resolves the [`ObjectRef<T>`] of this object from the discovery.
+    ///
+    /// If the object is alreade a reference, a clone is returnd.
+    pub(crate) fn resolve(&self, discovery: &Discovery) -> Result<ObjectRef<T>, ResolveError> {
+        match self {
+            Self::Logical(key) => discovery.resolve_object(key),
+            Self::Located(reference) => Ok(reference.clone()),
+        }
+    }
+
+    /// Attaches the response location without discarding known parent metadata.
+    pub(crate) fn at(&self, uri: AdtUri) -> ObjectRef<T> {
+        match self {
+            Self::Logical(key) => ObjectRef::new(key.clone(), uri),
+            Self::Located(reference) => {
+                let located = ObjectRef::new(reference.key().clone(), uri);
+                match reference.parent_uri() {
+                    Some(parent_uri) => located.with_parent_uri(parent_uri.clone()),
+                    None => located,
+                }
+            }
+        }
+    }
+}
+
+impl<T> From<ObjectKey<T>> for ObjectTarget<T> {
+    fn from(key: ObjectKey<T>) -> Self {
+        Self::Logical(key)
+    }
+}
+
+impl<T> From<ObjectRef<T>> for ObjectTarget<T> {
+    fn from(reference: ObjectRef<T>) -> Self {
+        Self::Located(reference)
+    }
+}
+
+impl<T> Clone for ObjectTarget<T> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Logical(key) => Self::Logical(key.clone()),
+            Self::Located(reference) => Self::Located(reference.clone()),
+        }
+    }
+}
+
 /// An XML payload and the namespaces required to encode it through Serde.
 pub trait ToXml: Serialize {
     const XML_NAMESPACES: &'static [(&'static str, &'static str)] = &[];
@@ -71,34 +159,28 @@ pub trait ToXml: Serialize {
 }
 
 /// An XML payload that supports both owned deserialization and serialization.
-pub trait XmlConversion: ToXml + DeserializeOwned + Send + Sync {
+pub trait XmlCodec: ToXml + DeserializeOwned + Send + Sync {
     fn from_xml(body: &[u8]) -> Result<Self, ObjectError> {
         serde_xml_rs::from_reader(body).map_err(ObjectError::InvalidResponse)
     }
 }
 
-impl<T> XmlConversion for T where T: ToXml + DeserializeOwned + Send + Sync {}
+impl<T> XmlCodec for T where T: ToXml + DeserializeOwned + Send + Sync {}
 
-/// The ordered media types supported for one complete properties payload.
-pub trait MediaTyped {
-    /// Supported media types in client preference order.
-    const MEDIA_TYPES: MediaTypes;
-}
-
-/// A properties representation containing advertised links.
-pub trait Links {
-    /// Returns the links in wire order.
-    fn links(&self) -> &[AdvertisedLink];
+/// Resources advertised by an object's properties, without a bound object URI.
+pub trait Resources {
+    /// Borrows resource metadata; snapshots bind the view to their own URI.
+    fn resources(&self) -> ResourceView<'_>;
 }
 
 /// Identity embedded in an object payload.
 #[doc(hidden)]
-pub trait ObjectIdentity {
+pub trait Identity {
     fn object_name(&self) -> &str;
 
     fn object_type(&self) -> &GlobalWorkbenchType;
 
-    fn validate_for(&self, expected: &impl ObjectIdentity) -> Result<(), ObjectError> {
+    fn validate_for(&self, expected: &impl Identity) -> Result<(), ObjectError> {
         if self.object_type() != expected.object_type() {
             return Err(ObjectError::UnexpectedObjectType {
                 expected: expected.object_type().clone(),
@@ -112,16 +194,6 @@ pub trait ObjectIdentity {
             });
         }
         Ok(())
-    }
-}
-
-/// An object payload whose identity is assigned from its target reference.
-#[doc(hidden)]
-pub trait AssignObjectIdentity: ObjectIdentity {
-    fn assign_identity(&mut self, identity: &impl ObjectIdentity);
-
-    fn assign_reference<T>(&mut self, reference: &ObjectRef<T>) {
-        self.assign_identity(reference);
     }
 }
 

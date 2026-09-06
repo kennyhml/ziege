@@ -3,8 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    AccessMode, Client, DataElement, DataElementProperties, Discovery, Logon, MediaTyped,
-    ObjectKey, Operation, ReqwestTransport, WorkbenchVersion,
+    AccessMode, Client, DataElement, Discovery, Logon, ObjectKey, ObjectType, Operation,
+    ReqwestTransport, WorkbenchVersion,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -91,7 +91,7 @@ async fn data_element_properties_use_one_read_write_representation() {
         .await
         .unwrap();
 
-    assert_eq!(response.media_type(), DataElementProperties::MEDIA_TYPES[0]);
+    assert_eq!(response.media_type(), DataElement::MEDIA_TYPES[0]);
     assert_eq!(
         response.etag().map(|etag| etag.as_str()),
         Some("data-element-etag")

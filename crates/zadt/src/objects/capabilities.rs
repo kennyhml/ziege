@@ -1,5 +1,5 @@
-use super::{AssignObjectIdentity, MediaTyped, ObjectType, ToXml};
-use crate::{CategoryId, MediaTypes};
+use super::{ObjectRef, ObjectType, ToXml};
+use crate::CategoryId;
 
 /// Marks an object capable of being executed immediately (not a job).
 ///
@@ -38,17 +38,11 @@ impl RunCapability {
 
 /// An object with a readable primary source resource.
 ///
-/// The source URI is resolved from the object's loaded properties.
-pub trait Source: ObjectType {
-    #[doc(hidden)]
-    fn source_uri(properties: &Self::Properties) -> Option<&str>;
-}
+/// The source URI and its scoped metadata are selected from snapshot resources.
+pub trait Source: ObjectType {}
 
 /// An object with source components advertised by its loaded properties.
-pub trait SourceComponents: Source {
-    #[doc(hidden)]
-    fn source_component_uri<'a>(properties: &'a Self::Properties, name: &str) -> Option<&'a str>;
-}
+pub trait SourceComponents: Source {}
 
 /// An object whose loaded properties can advertise a structural representation.
 pub trait Structure: ObjectType {}
@@ -56,11 +50,9 @@ pub trait Structure: ObjectType {}
 /// An object family that can be created through its collection resource.
 pub trait Create: ObjectType {
     /// The sparse XML payload accepted during creation.
-    type Payload: AssignObjectIdentity + Clone + ToXml + Send + Sync;
+    type Payload: Clone + ToXml + Send + Sync;
 
-    /// Creation media types in client preference order.
-    ///
-    /// By default, sparse creation payloads support the same representations as
-    /// the complete object properties.
-    const CREATE_MEDIA_TYPES: MediaTypes = <Self::Properties as MediaTyped>::MEDIA_TYPES;
+    /// Assigns the target identity and resolved parent context during encoding.
+    #[doc(hidden)]
+    fn prepare_payload<T>(payload: &mut Self::Payload, reference: &ObjectRef<T>);
 }

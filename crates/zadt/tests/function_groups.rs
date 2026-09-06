@@ -3,9 +3,8 @@
 use httpmock::Mock;
 use httpmock::prelude::*;
 use zadt::{
-    Client, Discovery, FunctionGroup, FunctionGroupInclude, FunctionGroupIncludeProperties,
-    FunctionGroupProperties, FunctionModule, FunctionModuleProperties, Logon, MediaTyped,
-    ObjectKey, ObjectRef, Operation, ReqwestTransport,
+    Client, Discovery, FunctionGroup, FunctionGroupInclude, FunctionModule, Logon, ObjectKey,
+    ObjectRef, ObjectType, Operation, ReqwestTransport,
 };
 
 const DISCOVERY_XML: &str = include_str!("fixtures/discovery.xml");
@@ -141,15 +140,9 @@ async fn function_group_family_uses_discovered_subobject_targets() {
         .await
         .unwrap();
 
-    assert_eq!(group.media_type(), FunctionGroupProperties::MEDIA_TYPES[0]);
-    assert_eq!(
-        module.media_type(),
-        FunctionModuleProperties::MEDIA_TYPES[0]
-    );
-    assert_eq!(
-        include.media_type(),
-        FunctionGroupIncludeProperties::MEDIA_TYPES[0]
-    );
+    assert_eq!(group.media_type(), FunctionGroup::MEDIA_TYPES[0]);
+    assert_eq!(module.media_type(), FunctionModule::MEDIA_TYPES[0]);
+    assert_eq!(include.media_type(), FunctionGroupInclude::MEDIA_TYPES[0]);
     assert_eq!(
         module.properties().container.name.as_deref(),
         Some("Z_TEST_GROUP")
@@ -179,7 +172,7 @@ async fn repository_child_queries_retain_the_advertised_uri_without_a_parent_key
         .mock_async(|when, then| {
             when.method(GET).path(uri);
             then.status(200)
-                .header("content-type", FunctionModuleProperties::MEDIA_TYPES[0])
+                .header("content-type", FunctionModule::MEDIA_TYPES[0])
                 .body(MODULE_XML);
         })
         .await;

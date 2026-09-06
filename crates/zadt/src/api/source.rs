@@ -1,12 +1,12 @@
 use http::{Method, StatusCode};
 
 use crate::{
-    AdtRequest,
+    AdtRequest, ObjectRef, SnapshotResources,
     error::{EncodeError, ObjectError, ResponseError},
     objects::{ObjectSnapshot, Source, SourceComponents},
     operation::{EncodedOperation, Independent, Operation, OperationResponse, Stateful, Stateless},
     protocol::{EntityTag, TEXT_PLAIN_MEDIA_TYPE},
-    resource::{SourceRef, refs::source_from_href},
+    resource::SourceRef,
 };
 
 use super::{
@@ -88,6 +88,7 @@ impl Operation for ObjectSourceQuery {
     fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
         response.require_status(StatusCode::OK)?;
         response.require_content_type(&[TEXT_PLAIN_MEDIA_TYPE])?;
+
         let etag = response.etag();
         let content = String::from_utf8(response.into_body())
             .map_err(ObjectError::InvalidResponseEncoding)?;
@@ -95,54 +96,49 @@ impl Operation for ObjectSourceQuery {
     }
 }
 
-impl<T: Source> ObjectSnapshot<T> {
-    pub(crate) fn source_from_parts(
-        reference: &crate::ObjectRef<T>,
-        uri: &crate::AdtUri,
-        properties: &T::Properties,
-    ) -> Result<SourceRef, ObjectError> {
-        let href =
-            T::source_uri(properties).ok_or(ObjectError::MissingRelation { relation: "source" })?;
-        source_from_href(reference.erase(), uri, href)
-    }
+fn source_resource<T>(
+    reference: &ObjectRef<T>,
+    resources: SnapshotResources<'_>,
+    name: &str,
+) -> Result<Option<SourceRef>, ObjectError> {
+    resources
+        .source(name)
+        .map(|resource| {
+            SourceRef::from_href(
+                reference.erase(),
+                resource.href(),
+                resource.etag().map(str::to_owned),
+            )
+        })
+        .transpose()
+}
 
+impl<T: Source> ObjectSnapshot<T> {
     /// Resolves the primary source advertised by this loaded object.
     pub fn source(&self) -> Result<SourceRef, ObjectError> {
-        Self::source_from_parts(self.reference(), self.uri(), self.properties())
+        source_resource(self.reference(), self.resources(), "main")?
+            .ok_or(ObjectError::MissingRelation { relation: "source" })
     }
 }
 
 impl<T: SourceComponents> ObjectSnapshot<T> {
-    pub(crate) fn source_component_from_parts(
-        reference: &crate::ObjectRef<T>,
-        uri: &crate::AdtUri,
-        properties: &T::Properties,
-        name: &str,
-    ) -> Result<Option<SourceRef>, ObjectError> {
-        let Some(href) = T::source_component_uri(properties, name) else {
-            return Ok(None);
-        };
-        source_from_href(reference.erase(), uri, href).map(Some)
-    }
-
     /// Resolves one named source component supported by this loaded object family.
     pub fn source_component(
         &self,
         name: impl AsRef<str>,
     ) -> Result<Option<SourceRef>, ObjectError> {
-        Self::source_component_from_parts(
-            self.reference(),
-            self.uri(),
-            self.properties(),
-            name.as_ref(),
-        )
+        source_resource(self.reference(), self.resources(), name.as_ref())
     }
 }
 
 impl ObjectSnapshot<()> {
     /// Resolves the primary source advertised by this runtime-typed object.
     pub fn source(&self) -> Result<SourceRef, ObjectError> {
-        self.reference().require_descriptor()?.source(self)
+        if !self.reference().require_descriptor()?.supports_source() {
+            return Err(self.reference().unsupported_capability("source"));
+        }
+        source_resource(self.reference(), self.resources(), "main")?
+            .ok_or(ObjectError::MissingRelation { relation: "source" })
     }
 
     /// Resolves one named source component supported by this runtime-typed object.
@@ -150,9 +146,14 @@ impl ObjectSnapshot<()> {
         &self,
         name: impl AsRef<str>,
     ) -> Result<Option<SourceRef>, ObjectError> {
-        self.reference()
+        if !self
+            .reference()
             .require_descriptor()?
-            .source_component(self, name.as_ref())
+            .supports_source_components()
+        {
+            return Err(self.reference().unsupported_capability("source components"));
+        }
+        source_resource(self.reference(), self.resources(), name.as_ref())
     }
 }
 
@@ -402,7 +403,7 @@ mod tests {
         )
         .with_parent_uri(AdtUri::parse("advertised/parent").unwrap());
         let source =
-            source_from_href(owner.erase(), owner.uri(), "source/main?version=inactive").unwrap();
+            SourceRef::from_href(owner.erase(), "source/main?version=inactive", None).unwrap();
         assert_eq!(source.object, owner.erase());
         assert_eq!(source.object.parent_uri(), owner.parent_uri());
         assert_eq!(

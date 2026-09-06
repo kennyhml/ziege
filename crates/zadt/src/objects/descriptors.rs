@@ -1,13 +1,10 @@
 use super::{
-    AccessControl, AnnotationDefinition, AssignObjectIdentity, Class, Create, DataDefinition,
-    DataElement, Domain, ErasedProperties, FunctionGroup, FunctionGroupInclude, FunctionModule,
-    GlobalWorkbenchType, Include, Interface, MediaTyped, MetadataExtension, ObjectIdentity,
-    ObjectKey, ObjectRef, ObjectSnapshot, ObjectType, Package, Program, RunCapability,
-    ServiceDefinition, Source, SourceComponents, Structure, ToXml, XmlConversion,
+    AccessControl, AnnotationDefinition, Class, Create, DataDefinition, DataElement, Domain,
+    ErasedProperties, FunctionGroup, FunctionGroupInclude, FunctionModule, GlobalWorkbenchType,
+    Identity, Include, Interface, MetadataExtension, ObjectKey, ObjectRef, ObjectType, Package,
+    Program, Resources, RunCapability, ServiceDefinition, ToXml, XmlCodec,
 };
-use crate::{
-    CategoryId, ObjectStructureQuery, SourceRef, compatibility::MediaTypes, error::ObjectError,
-};
+use crate::{CategoryId, ResourceView, compatibility::MediaTypes, error::ObjectError};
 
 /// Runtime descriptor for one modeled object type.
 ///
@@ -18,11 +15,11 @@ use crate::{
 ///
 /// This descriptor bridges those erased references to their concrete object
 /// families. It stores required addressing and properties metadata together
-/// with optional adapters for capabilities supported by the object family.
+/// with metadata for capabilities supported by the object family.
 /// Consequently, erased operations validate object types and capabilities at
 /// runtime, while typed operations retain their compile-time guarantees.
 ///
-/// The adapters are function pointers with common erased signatures. Generic
+/// Property codecs and resource extraction use common erased signatures. Generic
 /// implementations are monomorphized for each registered object type and then
 /// stored using those signatures. For example, [`PropertiesCodec::for_type`]
 /// stores `PropertiesCodec::decode_xml::<T>` as:
@@ -81,7 +78,9 @@ impl ObjectTypeDescriptor {
     }
 
     pub(crate) fn creation_media_types(&self) -> Option<MediaTypes> {
-        self.capabilities.create.map(|create| create.media_types)
+        self.capabilities
+            .create
+            .map(|_| self.properties.media_types)
     }
 
     pub(crate) fn creation_payload_to_xml(
@@ -100,37 +99,20 @@ impl ObjectTypeDescriptor {
         self.capabilities.run
     }
 
-    pub(crate) fn source(&self, object: &ObjectSnapshot<()>) -> Result<SourceRef, ObjectError> {
-        let source = self
-            .capabilities
-            .source
-            .ok_or_else(|| object.reference().unsupported_capability("source"))?;
-        source(object)
+    pub(crate) fn supports_source(&self) -> bool {
+        self.capabilities.source
     }
 
-    pub(crate) fn source_component(
-        &self,
-        object: &ObjectSnapshot<()>,
-        name: &str,
-    ) -> Result<Option<crate::SourceRef>, ObjectError> {
-        let source_component = self.capabilities.source_component.ok_or_else(|| {
-            object
-                .reference()
-                .unsupported_capability("source components")
-        })?;
-        source_component(object, name)
+    pub(crate) fn supports_source_components(&self) -> bool {
+        self.capabilities.source_component
     }
 
-    pub(crate) fn object_structure(
-        &self,
-        object: &ObjectSnapshot<()>,
-    ) -> Result<ObjectStructureQuery, ObjectError> {
-        let object_structure = self.capabilities.object_structure.ok_or_else(|| {
-            object
-                .reference()
-                .unsupported_capability("object structure")
-        })?;
-        object_structure(object)
+    pub(crate) fn supports_structure(&self) -> bool {
+        self.capabilities.object_structure
+    }
+
+    pub(crate) fn resources<'a>(&self, properties: &'a ErasedProperties) -> ResourceView<'a> {
+        (self.properties.resources)(properties)
     }
 
     pub(crate) fn properties_from_xml(
@@ -175,11 +157,9 @@ type DecodeJsonFn = fn(&ObjectKey, serde_json::Value) -> Result<ErasedProperties
 type EncodeXmlFn = fn(&ObjectKey, &ErasedProperties) -> Result<Vec<u8>, ObjectError>;
 type EncodeJsonFn = fn(&ObjectKey, &ErasedProperties) -> Result<serde_json::Value, ObjectError>;
 type EncodeCreationFn = fn(&ObjectRef, serde_json::Value) -> Result<Vec<u8>, ObjectError>;
-type SourceFn = fn(&ObjectSnapshot<()>) -> Result<SourceRef, ObjectError>;
-type SourceComponentFn = fn(&ObjectSnapshot<()>, &str) -> Result<Option<SourceRef>, ObjectError>;
-type ObjectStructureFn = fn(&ObjectSnapshot<()>) -> Result<ObjectStructureQuery, ObjectError>;
+type ResourcesFn = for<'a> fn(&'a ErasedProperties) -> ResourceView<'a>;
 
-/// Type-erased codecs for one complete properties representation.
+/// Type-erased codecs and resource extraction for one complete properties representation.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PropertiesCodec {
     media_types: MediaTypes,
@@ -187,16 +167,18 @@ pub(crate) struct PropertiesCodec {
     decode_json: DecodeJsonFn,
     encode_xml: EncodeXmlFn,
     encode_json: EncodeJsonFn,
+    resources: ResourcesFn,
 }
 
 impl PropertiesCodec {
     pub(crate) const fn for_type<T: ObjectType>() -> Self {
         Self {
-            media_types: T::Properties::MEDIA_TYPES,
+            media_types: T::MEDIA_TYPES,
             decode_xml: Self::decode_xml::<T>,
             decode_json: Self::decode_json::<T>,
             encode_xml: Self::encode_xml::<T>,
             encode_json: Self::encode_json::<T>,
+            resources: Self::resources::<T>,
         }
     }
 
@@ -215,9 +197,9 @@ impl PropertiesCodec {
         properties: serde_json::Value,
     ) -> Result<ErasedProperties, ObjectError> {
         validate_object_type::<T>(object)?;
-        let mut properties: T::Properties =
+        let properties: T::Properties =
             serde_json::from_value(properties).map_err(ObjectError::InvalidPropertiesJson)?;
-        properties.assign_identity(object);
+        properties.validate_for(object)?;
         Ok(std::sync::Arc::new(properties))
     }
 
@@ -240,6 +222,10 @@ impl PropertiesCodec {
         serde_json::to_value(properties).map_err(ObjectError::InvalidPropertiesJson)
     }
 
+    fn resources<T: ObjectType>(properties: &ErasedProperties) -> ResourceView<'_> {
+        Self::properties::<T>(properties).resources()
+    }
+
     fn properties<T: ObjectType>(properties: &ErasedProperties) -> &T::Properties {
         properties
             .downcast_ref::<T::Properties>()
@@ -250,7 +236,6 @@ impl PropertiesCodec {
 /// Type-erased codec and media types for an object-creation payload.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CreateCodec {
-    media_types: MediaTypes,
     encode: EncodeCreationFn,
 }
 
@@ -261,7 +246,6 @@ impl CreateCodec {
         T::Payload: serde::de::DeserializeOwned,
     {
         Self {
-            media_types: T::CREATE_MEDIA_TYPES,
             encode: Self::encode::<T>,
         }
     }
@@ -274,7 +258,7 @@ impl CreateCodec {
         validate_object_type::<T>(reference.key())?;
         let mut payload: T::Payload =
             serde_json::from_value(payload).map_err(ObjectError::InvalidPropertiesJson)?;
-        payload.assign_reference(reference);
+        T::prepare_payload(&mut payload, reference);
         payload.to_xml()
     }
 }
@@ -294,18 +278,18 @@ pub(crate) enum ObjectAddressing {
 pub(crate) struct RuntimeCapabilities {
     create: Option<CreateCodec>,
     run: Option<RunCapability>,
-    source: Option<SourceFn>,
-    source_component: Option<SourceComponentFn>,
-    object_structure: Option<ObjectStructureFn>,
+    source: bool,
+    source_component: bool,
+    object_structure: bool,
 }
 
 impl RuntimeCapabilities {
     pub(crate) const fn new(
         create: Option<CreateCodec>,
         run: Option<RunCapability>,
-        source: Option<SourceFn>,
-        source_component: Option<SourceComponentFn>,
-        object_structure: Option<ObjectStructureFn>,
+        source: bool,
+        source_component: bool,
+        object_structure: bool,
     ) -> Self {
         Self {
             create,
@@ -314,38 +298,6 @@ impl RuntimeCapabilities {
             source_component,
             object_structure,
         }
-    }
-
-    pub(crate) fn source_adapter<T: Source>(
-        object: &ObjectSnapshot<()>,
-    ) -> Result<SourceRef, ObjectError> {
-        ObjectSnapshot::<T>::source_from_parts(
-            &object.typed_reference::<T>()?,
-            object.uri(),
-            object.typed_properties::<T>(),
-        )
-    }
-
-    pub(crate) fn source_component_adapter<T: SourceComponents>(
-        object: &ObjectSnapshot<()>,
-        name: &str,
-    ) -> Result<Option<SourceRef>, ObjectError> {
-        ObjectSnapshot::<T>::source_component_from_parts(
-            &object.typed_reference::<T>()?,
-            object.uri(),
-            object.typed_properties::<T>(),
-            name,
-        )
-    }
-
-    pub(crate) fn object_structure_adapter<T: Structure>(
-        object: &ObjectSnapshot<()>,
-    ) -> Result<ObjectStructureQuery, ObjectError> {
-        ObjectSnapshot::<T>::object_structure_from_parts(
-            &object.typed_reference::<T>()?,
-            object.uri(),
-            object.typed_properties::<T>(),
-        )
     }
 }
 
@@ -505,7 +457,8 @@ mod tests {
         )
         .into_erased();
 
-        let source = Class::DESCRIPTOR.source(&object).unwrap();
+        assert!(Class::DESCRIPTOR.supports_source());
+        let source = object.source().unwrap();
 
         assert_eq!(
             source.uri.as_str(),
