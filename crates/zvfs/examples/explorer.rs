@@ -207,7 +207,7 @@ fn kind_detail(kind: &NodeKind) -> String {
             object_count,
             ..
         } => format!(" ({facet}={value}, {object_count} objects)"),
-        NodeKind::Object { object } => format!(" ({})", object.object_type),
+        NodeKind::Object { object } => format!(" ({})", object.workbench_type),
         _ => String::new(),
     }
 }
@@ -243,7 +243,7 @@ fn print_node(node: &Node) {
             println!("hierarchical children: {has_children_of_same_facet}");
         }
         NodeKind::Object { object } => {
-            println!("kind:   object ({})", object.object_type);
+            println!("kind:   object ({})", object.workbench_type);
             println!("name:   {}", object.name);
             println!("package: {}", object.package);
             println!("uri:    {}", object.uri);

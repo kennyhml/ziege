@@ -1,6 +1,8 @@
 use std::{any::Any, fmt, sync::Arc};
 
-use super::{Identity, ObjectRef, ObjectType, Resources, SnapshotKind, WorkbenchVersion};
+use super::{
+    Identity, ObjectKey, ObjectRef, ObjectType, Resources, SnapshotKind, WorkbenchVersion,
+};
 use crate::{AdtUri, EntityTag, ObjectError, SnapshotResources};
 
 pub(crate) type ErasedProperties = Arc<dyn Any + Send + Sync>;
@@ -18,8 +20,9 @@ pub(crate) type ErasedProperties = Arc<dyn Any + Send + Sync>;
 /// Supported object families are handled through an internal descriptor, and
 /// operations check that descriptor and the loaded properties at runtime.
 ///
-/// Runtime properties remain type-erased internally. Consumers can export them
-/// as JSON and supply edited JSON to a property-update operation.
+/// Runtime properties remain type-erased internally. Consumers can borrow them
+/// through [`ObjectSnapshot::typed_properties`] or export them as JSON and supply
+/// edited JSON to a property-update operation.
 ///
 /// Some operations use links advertised by the loaded properties. Operations
 /// that only need the object identity can use [`ObjectSnapshot::reference`].
@@ -32,6 +35,12 @@ pub struct ObjectSnapshot<T: SnapshotKind = ()> {
 }
 
 impl<T: SnapshotKind> ObjectSnapshot<T> {
+    /// Returns the logical key, including any known parent identity.
+    /// Use [`Self::reference`] for operations that should retain the loaded URI.
+    pub fn key(&self) -> &ObjectKey<T> {
+        self.reference.key()
+    }
+
     /// Returns the reference identifying this snapshot.
     pub fn reference(&self) -> &ObjectRef<T> {
         &self.reference
@@ -155,6 +164,24 @@ impl ObjectSnapshot<()> {
             .properties_to_json(self.reference.key(), &self.properties)
     }
 
+    /// Borrows the concrete properties after checking the object's Workbench type.
+    ///
+    /// `T` is the object family, such as [`super::Class`], not its properties type.
+    /// The returned reference borrows this snapshot's storage without cloning or
+    /// serializing it. A different family returns [`ObjectError::UnexpectedObjectType`].
+    pub fn typed_properties<T: ObjectType>(&self) -> Result<&T::Properties, ObjectError> {
+        if self.key().workbench_type() != &T::WORKBENCH_TYPE {
+            return Err(ObjectError::UnexpectedObjectType {
+                expected: T::WORKBENCH_TYPE,
+                actual: self.key().workbench_type().clone(),
+            });
+        }
+        Ok(self
+            .properties
+            .downcast_ref::<T::Properties>()
+            .expect("registered descriptor must retain its concrete property type"))
+    }
+
     /// Returns a borrowed resource view bound to this snapshot's URI.
     ///
     /// Derived on demand from the properties; resource targets are validated when used.
@@ -240,7 +267,59 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{FunctionGroup, FunctionModule, ObjectKey, XmlCodec};
+    use crate::{FunctionGroup, FunctionModule, XmlCodec};
+
+    #[test]
+    fn typed_properties_borrow_shared_storage_and_reject_a_different_family() {
+        let properties = <FunctionModule as ObjectType>::Properties::from_xml(include_bytes!(
+            "../../tests/fixtures/function-module-zzzzfunc.xml"
+        ))
+        .unwrap();
+        let name = properties.name.as_ptr();
+        let links = properties.links.as_ptr();
+        let snapshot = ObjectSnapshot::new(
+            ObjectRef::new(
+                ObjectKey::<FunctionGroup>::new("Z_TEST_GROUP")
+                    .subobject::<FunctionModule>("ZZZZFUNC"),
+                AdtUri::parse("advertised/module").unwrap(),
+            ),
+            WorkbenchVersion::Active,
+            FunctionModule::MEDIA_TYPES[0],
+            None,
+            properties,
+        )
+        .into_erased();
+        let shared = snapshot.clone();
+        let borrowed = snapshot.typed_properties::<FunctionModule>().unwrap();
+        assert_eq!(borrowed.name.as_ptr(), name);
+        assert_eq!(borrowed.links.as_ptr(), links);
+        assert!(std::ptr::eq(
+            borrowed,
+            snapshot
+                .properties
+                .downcast_ref::<<FunctionModule as ObjectType>::Properties>()
+                .unwrap(),
+        ));
+        assert!(std::ptr::eq(
+            borrowed,
+            shared.typed_properties::<FunctionModule>().unwrap(),
+        ));
+        assert!(matches!(
+            snapshot.typed_properties::<FunctionGroup>(),
+            Err(ObjectError::UnexpectedObjectType { expected, actual })
+                if expected == FunctionGroup::WORKBENCH_TYPE
+                    && actual == FunctionModule::WORKBENCH_TYPE
+        ));
+        assert!(std::ptr::eq(
+            borrowed,
+            snapshot.typed_properties::<FunctionModule>().unwrap(),
+        ));
+        assert_eq!(Arc::strong_count(&snapshot.properties), 2);
+        assert_eq!(
+            serde_json::to_value(borrowed).unwrap(),
+            snapshot.properties().unwrap()
+        );
+    }
 
     #[test]
     fn resource_entries_borrow_typed_and_erased_properties() {
@@ -309,12 +388,15 @@ mod tests {
             properties,
         );
         assert!(!snapshot.resources().is_empty());
+        assert!(std::ptr::eq(snapshot.key(), snapshot.reference().key()));
+        assert_eq!(snapshot.key(), reference.key());
         let cloned = snapshot.clone();
         assert_eq!(cloned.resources(), snapshot.resources());
         let erased = cloned.into_erased();
         assert_eq!(erased.resources(), snapshot.resources());
         assert_eq!(erased.clone().resources(), snapshot.resources());
-        assert_eq!(erased.reference().key(), &reference.key().erase());
+        assert!(std::ptr::eq(erased.key(), erased.reference().key()));
+        assert_eq!(erased.key(), &reference.key().erase());
         assert_eq!(erased.uri(), reference.uri());
         assert_eq!(erased.reference().parent_uri(), reference.parent_uri());
         assert!(erased.properties().is_ok());

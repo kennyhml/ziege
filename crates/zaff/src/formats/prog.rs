@@ -1,197 +1,259 @@
+//! Program and standalone Include mapping to AFF `.prog.json` documents.
+//!
+//! Both object families use the PROG format, but their ADT property models differ.
+//! [`ProgramProperties`] provides a program type and editor-lock flag.
+//! [`IncludeProperties`] has no corresponding fields, so the AFF type is fixed
+//! to `include` and the editor-lock flag has no implemented mapping.
+//!
+//! The mapping tables use AFF JSON paths and ADT Rust field names, not XML
+//! attribute names. Fields listed as unsupported belong to the AFF model but
+//! have no implemented ADT backing here. The `.prog.abap` file is bound
+//! separately to the advertised main source.
+
+use garde::Validate;
 use serde::{Deserialize, Serialize};
-use zadt::{
-    GlobalWorkbenchType, Include, IncludeProperties, MediaTyped, ObjectSnapshot, ObjectType,
-    Program, ProgramProperties,
-};
+use zadt::{Include, IncludeProperties, ObjectSnapshot, ObjectType, Program, ProgramProperties};
 
 use crate::{
-    Cardinality, ComponentId, FileBacking, FileSpec, ObjectFormat, ProjectionError,
-    format::{
-        FileDescriptor, FormatDescriptor, PropertiesCodec, PropertyProjection,
-        SourceFileDescriptor, UnbackedFileDescriptor, decode_properties, encode_properties,
-    },
-    language,
+    Cardinality, FileSpec, ObjectFormat, ProjectionError,
+    formats::{Mapping, PropertiesMapping},
+    helpers::is_false,
+    models::{language_from_adt, language_to_adt},
+    validate::one_of,
 };
 
-pub const PROGRAM_FORMAT: ObjectFormat = ObjectFormat::new("PROG", "1");
+pub(crate) static PROGRAM_FORMAT: ObjectFormat = ObjectFormat {
+    object_type: "PROG",
+    version: "1",
+    workbench_types: &[Program::WORKBENCH_TYPE, Include::WORKBENCH_TYPE],
+    files: &[
+        FileSpec::new(
+            "<name>.prog.json",
+            Cardinality::One,
+            Mapping::Properties(PropertiesMapping { render, merge }),
+        ),
+        FileSpec::new(
+            "<name>.prog.abap",
+            Cardinality::One,
+            Mapping::Source { component: None },
+        ),
+        FileSpec::new(
+            "<name>.prog.texts.<lang>.properties",
+            Cardinality::ZeroOrMore,
+            Mapping::Unavailable,
+        ),
+        FileSpec::new(
+            "<name>.prog.headings.<lang>.properties",
+            Cardinality::ZeroOrMore,
+            Mapping::Unavailable,
+        ),
+        FileSpec::new(
+            "<name>.prog.selections.<lang>.properties",
+            Cardinality::ZeroOrMore,
+            Mapping::Unavailable,
+        ),
+    ],
+};
 
-#[derive(Debug)]
-pub(crate) struct ProgramDescriptor;
+/// Renders ADT [`ProgramProperties`] or [`IncludeProperties`] as pretty-printed
+/// AFF JSON with a trailing newline. Both use the PROG format.
+fn render(snapshot: &ObjectSnapshot<()>) -> Result<String, ProjectionError> {
+    let workbench_type = snapshot.reference().workbench_type();
 
-#[derive(Debug)]
-struct ProgramMetadata;
+    let document = if workbench_type == &Program::WORKBENCH_TYPE {
+        ProjectedProgramProperties::from_program(snapshot.typed_properties::<Program>()?)?
+    } else if workbench_type == &Include::WORKBENCH_TYPE {
+        ProjectedProgramProperties::from_include(snapshot.typed_properties::<Include>()?)?
+    } else {
+        return Err(ProjectionError::UnsupportedRepositoryType {
+            workbench_type: workbench_type.clone(),
+        });
+    };
+    let mut content = serde_json::to_string_pretty(&document)?;
+    content.push('\n');
+    Ok(content)
+}
 
-static PROGRAM_FILES: &[FileSpec] = &[
-    FileSpec::new("<name>.prog.json", Cardinality::One, &ProgramMetadata),
-    FileSpec::new(
-        "<name>.prog.abap",
-        Cardinality::One,
-        &SourceFileDescriptor::main(ComponentId::new("source/main")),
-    ),
-    FileSpec::new(
-        "<name>.prog.texts.<lang>.properties",
-        Cardinality::ZeroOrMore,
-        &UnbackedFileDescriptor::new(ComponentId::new("text/texts")),
-    ),
-    FileSpec::new(
-        "<name>.prog.headings.<lang>.properties",
-        Cardinality::ZeroOrMore,
-        &UnbackedFileDescriptor::new(ComponentId::new("text/headings")),
-    ),
-    FileSpec::new(
-        "<name>.prog.selections.<lang>.properties",
-        Cardinality::ZeroOrMore,
-        &UnbackedFileDescriptor::new(ComponentId::new("text/selections")),
-    ),
-];
+/// Validates edited AFF JSON and applies its changes to a copy of the snapshot
+/// properties. Returns changed ADT wire JSON, or `None` for a validated no-op.
+fn merge(
+    snapshot: &ObjectSnapshot<()>,
+    edited: &str,
+) -> Result<Option<serde_json::Value>, ProjectionError> {
+    let workbench_type = snapshot.reference().workbench_type();
 
-impl FormatDescriptor for ProgramDescriptor {
-    fn format(&self) -> ObjectFormat {
-        PROGRAM_FORMAT
-    }
-
-    fn repository_types(&self) -> &'static [GlobalWorkbenchType] {
-        const TYPES: &[GlobalWorkbenchType] = &[Program::WORKBENCH_TYPE, Include::WORKBENCH_TYPE];
-        TYPES
-    }
-
-    fn files(&self) -> &'static [FileSpec] {
-        PROGRAM_FILES
-    }
-
-    fn repository_type_from_metadata(
-        &self,
-        metadata: &[u8],
-    ) -> Result<GlobalWorkbenchType, ProjectionError> {
-        let metadata: MetadataDiscriminator = serde_json::from_slice(metadata)?;
-        if metadata.format_version != PROGRAM_FORMAT.version() {
-            return Err(ProjectionError::UnsupportedFormatVersion {
-                object_type: PROGRAM_FORMAT.object_type(),
-                version: metadata.format_version,
-            });
+    if workbench_type == &Program::WORKBENCH_TYPE {
+        let original = snapshot.typed_properties::<Program>()?;
+        let merged = merge_program_properties(original, edited)?;
+        if merged == *original {
+            return Ok(None);
         }
-        match metadata
-            .general_information
-            .and_then(|information| information.program_type)
-            .as_deref()
-        {
-            None | Some("executableProgram" | "modulePool" | "subroutinePool") => {
-                Ok(Program::WORKBENCH_TYPE)
-            }
-            Some("include") => Ok(Include::WORKBENCH_TYPE),
-            Some(program_type) => Err(ProjectionError::UnsupportedProgramType {
-                program_type: program_type.to_owned(),
-            }),
+        serde_json::to_value(merged).map(Some).map_err(Into::into)
+    } else if workbench_type == &Include::WORKBENCH_TYPE {
+        let original = snapshot.typed_properties::<Include>()?;
+        let merged = merge_include_properties(original, edited)?;
+        if merged == *original {
+            return Ok(None);
         }
+        serde_json::to_value(merged).map(Some).map_err(Into::into)
+    } else {
+        Err(ProjectionError::UnsupportedRepositoryType {
+            workbench_type: workbench_type.clone(),
+        })
     }
 }
 
-impl FileDescriptor for ProgramMetadata {
-    fn component(&self) -> ComponentId {
-        ComponentId::new("metadata")
-    }
-
-    fn bind(
-        &self,
-        object: &dyn crate::format::ProjectionObject,
-        _language: Option<&str>,
-    ) -> Result<Option<FileBacking>, ProjectionError> {
-        if object.object_type() != &Program::WORKBENCH_TYPE
-            && object.object_type() != &Include::WORKBENCH_TYPE
-        {
-            return Err(ProjectionError::UnsupportedFileComponent {
-                object_type: object.object_type().clone(),
-                component: self.component(),
-            });
-        }
-        Ok(Some(FileBacking::Properties(object.reference())))
-    }
-
-    fn properties_codec(&self) -> Option<&dyn PropertiesCodec> {
-        Some(self)
-    }
-}
-
-impl PropertiesCodec for ProgramMetadata {
-    fn render(&self, properties: &ObjectSnapshot<()>) -> Result<String, ProjectionError> {
-        if ProgramProperties::MEDIA_TYPES.contains(properties.media_type()) {
-            return render_program_properties(&decode_properties::<ProgramProperties>(
-                properties, "PROG",
-            )?);
-        }
-        render_include_properties(&decode_properties::<IncludeProperties>(properties, "PROG")?)
-    }
-
-    fn merge(
-        &self,
-        original: &ObjectSnapshot<()>,
-        edited: &str,
-    ) -> Result<serde_json::Value, ProjectionError> {
-        if ProgramProperties::MEDIA_TYPES.contains(original.media_type()) {
-            let properties = decode_properties::<ProgramProperties>(original, "PROG")?;
-            return encode_properties(merge_program_properties(&properties, edited)?, "PROG");
-        }
-        let properties = decode_properties::<IncludeProperties>(original, "PROG")?;
-        encode_properties(merge_include_properties(&properties, edited)?, "PROG")
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MetadataDiscriminator {
-    format_version: String,
-    #[serde(default)]
-    general_information: Option<ProgramInformationDiscriminator>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ProgramInformationDiscriminator {
-    #[serde(default)]
-    program_type: Option<String>,
-}
-
-/// The AFF v1 metadata shared by programs and standalone includes.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+/// Program and standalone Include properties represented by the AFF v1 JSON document.
+///
+/// # Document Layout
+///
+/// ```text
+/// AFF block           Program ADT storage             Include ADT storage
+/// ---------           -------------------             -------------------
+/// formatVersion       No backing field, constant "1"  No backing field, constant "1"
+/// header              ProgramProperties               IncludeProperties
+/// generalInformation  ProgramProperties               IncludeProperties and fixed AFF values
+/// logicalDatabase     No implemented backing          No implemented backing
+/// ```
+///
+/// Both families expose description and original language through [`ProgramHeader`].
+/// The supported general fields differ between them, as documented on
+/// [`ProgramGeneralInformation`]. [`LogicalDatabase`] describes valid AFF fields
+/// with no implemented ADT mapping.
+///
+/// The object name, package, links, users, timestamps, and other unrepresented
+/// ADT metadata are not supplied by this document. They remain in the original
+/// properties when represented fields are edited.
+///
+/// Source text belongs to the separate `.prog.abap` file. Language-dependent
+/// text, heading, and selection `.properties` files are listed in the format
+/// declaration but are not implemented.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, Validate)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct AffProgram {
+pub struct ProjectedProgramProperties {
+    #[garde(custom(one_of([PROGRAM_FORMAT.version()])))]
     pub format_version: String,
-    pub header: AffProgramHeader,
+
+    #[garde(dive)]
+    pub header: ProgramHeader,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub general_information: Option<AffProgramGeneralInformation>,
+    #[garde(dive)]
+    pub general_information: Option<ProgramGeneralInformation>,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub logical_database: Option<AffLogicalDatabase>,
+    #[garde(dive)]
+    pub logical_database: Option<LogicalDatabase>,
 }
 
 /// Common AFF Program header fields.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+///
+/// # Field Mapping
+///
+/// Both columns refer to top-level fields on the corresponding ADT model.
+///
+/// ```text
+/// AFF field                ProgramProperties field  IncludeProperties field
+/// ---------                -----------------------  -----------------------
+/// header.description       description              description
+/// header.originalLanguage  master_language          master_language
+/// ```
+///
+/// Description text is copied directly. Original language is converted between
+/// SAP codes in ADT and BCP47 tags in AFF, for example `EN` and `en`. Unsupported
+/// codes or tags are rejected.
+///
+/// This AFF header has no `abapLanguageVersion` field. It does not change any
+/// ABAP language-version value retained in the ADT properties.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, Validate)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct AffProgramHeader {
+#[garde(allow_unvalidated)]
+pub struct ProgramHeader {
+    #[garde(length(chars, max = 70))]
     pub description: String,
+
     pub original_language: String,
 }
 
 /// General Program attributes represented by AFF v1.
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+///
+/// # Supported Fields
+///
+/// All AFF paths below are inside `generalInformation`.
+///
+/// ```text
+/// AFF field           ProgramProperties field  IncludeProperties field
+/// ---------           -----------------------  -----------------------
+/// programType         program_type             No field, fixed to "include"
+/// fixPointArithmetic  fix_point_arithmetic     fix_point_arithmetic
+/// editLocked          locked_by_editor         No implemented backing
+/// ```
+///
+/// Program type uses the spellings documented on [`ProgramType`]. A Program
+/// cannot be changed into a standalone Include through this field, and an
+/// Include must keep `include` as its type.
+///
+/// The arithmetic flag is copied directly for both families. It does not change
+/// the separate ADT `unicode_check_active` field. `editLocked` is copied to
+/// `locked_by_editor` for Programs. It is an object property, not an ADT session
+/// lock handle. Includes accept only false for this AFF field.
+///
+/// # Fields Without An Implemented Mapping
+///
+/// ```text
+/// AFF field           Accepted value  ADT backing
+/// ---------           --------------  -----------
+/// programStatus       unknown         Not implemented
+/// startsUsingVariant  false           Not implemented
+/// authorizationGroup  Empty string    Not implemented
+/// application         Empty string    Not implemented
+/// ```
+///
+/// These values are omitted from generated JSON. Supplying their defaults
+/// explicitly is accepted, but nondefault edits are rejected rather than ignored.
+/// This does not imply that every SAP endpoint lacks these fields, only that
+/// this projection does not map them.
+///
+/// # Omitted Values
+///
+/// The default program type is `executableProgram`. Boolean fields default to
+/// false and strings to empty. A Program with only default values omits the
+/// whole block. An Include always includes the block because `include` is not
+/// the default type.
+///
+/// Removing a supported Program field applies its AFF default. For example,
+/// removing a true `editLocked` value writes false to ADT `locked_by_editor`.
+/// Removing the whole block from an Include is rejected because the resulting
+/// default type would be `executableProgram`, not `include`.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, Validate)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct AffProgramGeneralInformation {
-    #[serde(default, skip_serializing_if = "AffProgramType::is_default")]
-    pub program_type: AffProgramType,
-    #[serde(default, skip_serializing_if = "AffProgramStatus::is_default")]
-    pub program_status: AffProgramStatus,
+#[garde(allow_unvalidated)]
+pub struct ProgramGeneralInformation {
+    #[serde(default, skip_serializing_if = "ProgramType::is_default")]
+    pub program_type: ProgramType,
+
+    #[serde(default, skip_serializing_if = "ProgramStatus::is_default")]
+    pub program_status: ProgramStatus,
+
     #[serde(default, skip_serializing_if = "is_false")]
     pub fix_point_arithmetic: bool,
+
     #[serde(default, skip_serializing_if = "is_false")]
     pub edit_locked: bool,
+
     #[serde(default, skip_serializing_if = "is_false")]
     pub starts_using_variant: bool,
+
     #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[garde(length(chars, max = 8))]
     pub authorization_group: String,
+
     #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[garde(length(chars, max = 1))]
     pub application: String,
 }
 
-impl AffProgramGeneralInformation {
+impl ProgramGeneralInformation {
     fn is_empty(&self) -> bool {
         self.program_type.is_default()
             && self.program_status.is_default()
@@ -204,8 +266,29 @@ impl AffProgramGeneralInformation {
 }
 
 /// The AFF Program kind, including the standalone Include discriminator.
+///
+/// # Program Type Mapping
+///
+/// These spellings map directly between AFF `generalInformation.programType`
+/// and ADT `ProgramProperties.program_type`.
+///
+/// ```text
+/// AFF value          ADT program_type
+/// ---------          ----------------
+/// executableProgram  executableProgram
+/// modulePool         modulePool
+/// subroutinePool     subroutinePool
+/// include            include
+/// ```
+///
+/// The conversion recognizes all four spellings, but writes remain constrained
+/// by object family. A Program edit cannot select `include`. A standalone
+/// Include uses a fixed AFF `include` value rather than reading an ADT field,
+/// and edits must retain that value.
+///
+/// `executableProgram` is the default and is omitted from AFF JSON.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub enum AffProgramType {
+pub enum ProgramType {
     #[default]
     #[serde(rename = "executableProgram")]
     ExecutableProgram,
@@ -217,17 +300,17 @@ pub enum AffProgramType {
     Include,
 }
 
-impl AffProgramType {
+impl ProgramType {
     fn from_adt(value: &str) -> Result<Self, ProjectionError> {
         match value {
             "executableProgram" => Ok(Self::ExecutableProgram),
             "modulePool" => Ok(Self::ModulePool),
             "subroutinePool" => Ok(Self::SubroutinePool),
             "include" => Ok(Self::Include),
-            value => Err(invalid(
-                "generalInformation.programType",
-                format!("unsupported ADT program type `{value}`"),
-            )),
+            value => Err(ProjectionError::InvalidAffField {
+                field: "generalInformation.programType",
+                message: format!("unsupported ADT program type `{value}`"),
+            }),
         }
     }
 
@@ -245,9 +328,25 @@ impl AffProgramType {
     }
 }
 
-/// AFF's Program status vocabulary.
+/// Program status vocabulary in AFF.
+///
+/// `generalInformation.programStatus` has no implemented ADT backing for either
+/// family. The model represents the AFF vocabulary, but only `unknown` is
+/// accepted by the mapping.
+///
+/// ```text
+/// AFF value                  Mapping support
+/// ---------                  ---------------
+/// sapProductionProgram       Unsupported
+/// customerProductionProgram  Unsupported
+/// systemProgram              Unsupported
+/// testProgram                Unsupported
+/// unknown                    Accepted default, no ADT field is changed
+/// ```
+///
+/// Generated documents omit the default `unknown` value.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub enum AffProgramStatus {
+pub enum ProgramStatus {
     #[serde(rename = "sapProductionProgram")]
     SapProductionProgram,
     #[serde(rename = "customerProductionProgram")]
@@ -261,126 +360,125 @@ pub enum AffProgramStatus {
     Unknown,
 }
 
-impl AffProgramStatus {
+impl ProgramStatus {
     const fn is_default(&self) -> bool {
         matches!(self, Self::Unknown)
     }
 }
 
 /// AFF logical-database assignment for an executable Program.
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+///
+/// # Field Mapping
+///
+/// ```text
+/// AFF field                        ADT backing
+/// ---------                        -----------
+/// logicalDatabase.name             Not implemented
+/// logicalDatabase.selectionScreen  Not implemented
+/// ```
+///
+/// Neither Program nor Include projections currently supply these values.
+/// The block is omitted from generated JSON. An absent block or a block with
+/// both strings empty is accepted. A nonempty name or selection screen is
+/// rejected, even if it passes AFF schema validation.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, Validate)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct AffLogicalDatabase {
+pub struct LogicalDatabase {
     #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[garde(length(chars, max = 20))]
     pub name: String,
+
     #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[garde(length(chars, max = 3))]
     pub selection_screen: String,
 }
 
-impl AffLogicalDatabase {
+impl LogicalDatabase {
     fn is_empty(&self) -> bool {
         self.name.is_empty() && self.selection_screen.is_empty()
     }
 }
 
-pub(crate) fn render_program_properties(
-    properties: &ProgramProperties,
-) -> Result<String, ProjectionError> {
-    render(&<AffProgram as PropertyProjection<ProgramProperties>>::project(properties)?)
-}
-
+/// Maps AFF header and supported general-information fields to [`ProgramProperties`].
 pub(crate) fn merge_program_properties(
     original: &ProgramProperties,
     edited: &str,
 ) -> Result<ProgramProperties, ProjectionError> {
     let edited = parse(edited)?;
-    let edited_general = edited.general_information.clone().unwrap_or_default();
+    let edited_general = edited.general_information.unwrap_or_default();
     validate_program_fields(&edited_general, edited.logical_database.as_ref())?;
-    if edited_general.program_type == AffProgramType::Include {
-        return Err(invalid(
-            "generalInformation.programType",
-            "a Program cannot be changed into a standalone Include",
-        ));
+    if edited_general.program_type == ProgramType::Include {
+        return Err(ProjectionError::InvalidAffField {
+            field: "generalInformation.programType",
+            message: "a Program cannot be changed into a standalone Include".to_owned(),
+        });
     }
 
-    let original_document =
-        <AffProgram as PropertyProjection<ProgramProperties>>::project(original)?;
-    let original_general = original_document.general_information.unwrap_or_default();
+    // Reject unprojectable baselines before replacing their represented fields.
+    ProjectedProgramProperties::from_program(original)?;
     let mut merged = original.clone();
-    let properties = &mut merged;
-    if edited.header.description != original_document.header.description {
-        properties.description = edited.header.description;
-    }
-    if edited.header.original_language != original_document.header.original_language {
-        properties.master_language =
-            language::to_adt(&edited.header.original_language, "header.originalLanguage")?;
-    }
-    if edited_general.program_type != original_general.program_type {
-        properties.program_type = edited_general.program_type.adt_value().to_owned();
-    }
-    if edited_general.fix_point_arithmetic != original_general.fix_point_arithmetic {
-        properties.fix_point_arithmetic = edited_general.fix_point_arithmetic;
-    }
-    if edited_general.edit_locked != original_general.edit_locked {
-        properties.locked_by_editor = edited_general.edit_locked;
-    }
+    // AFF header.description      -> ADT description
+    // AFF header.originalLanguage -> ADT master_language, with language-code conversion
+    merged.description = edited.header.description;
+    merged.master_language =
+        language_to_adt(&edited.header.original_language, "header.originalLanguage")?;
+    // Within AFF generalInformation:
+    //
+    //   programType         -> ADT program_type
+    //   fixPointArithmetic  -> ADT fix_point_arithmetic
+    //   editLocked          -> ADT locked_by_editor
+    merged.program_type = edited_general.program_type.adt_value().to_owned();
+    merged.fix_point_arithmetic = edited_general.fix_point_arithmetic;
+    merged.locked_by_editor = edited_general.edit_locked;
     Ok(merged)
 }
 
-pub(crate) fn render_include_properties(
-    properties: &IncludeProperties,
-) -> Result<String, ProjectionError> {
-    render(&<AffProgram as PropertyProjection<IncludeProperties>>::project(properties)?)
-}
-
+/// Maps AFF description, original language, and arithmetic to [`IncludeProperties`].
 pub(crate) fn merge_include_properties(
     original: &IncludeProperties,
     edited: &str,
 ) -> Result<IncludeProperties, ProjectionError> {
     let edited = parse(edited)?;
-    let edited_general = edited.general_information.clone().unwrap_or_default();
+    let edited_general = edited.general_information.unwrap_or_default();
     validate_program_fields(&edited_general, edited.logical_database.as_ref())?;
-    if edited_general.program_type != AffProgramType::Include {
-        return Err(invalid(
-            "generalInformation.programType",
-            "a standalone Include must use program type `include`",
-        ));
+    if edited_general.program_type != ProgramType::Include {
+        return Err(ProjectionError::InvalidAffField {
+            field: "generalInformation.programType",
+            message: "a standalone Include must use program type `include`".to_owned(),
+        });
     }
     if edited_general.edit_locked {
-        return Err(unsupported("PROG", "generalInformation.editLocked"));
+        return Err(unsupported("generalInformation.editLocked"));
     }
 
-    let original_document =
-        <AffProgram as PropertyProjection<IncludeProperties>>::project(original)?;
-    let original_general = original_document.general_information.unwrap_or_default();
+    ProjectedProgramProperties::from_include(original)?;
     let mut merged = original.clone();
-    let properties = &mut merged;
-    if edited.header.description != original_document.header.description {
-        properties.description = edited.header.description;
-    }
-    if edited.header.original_language != original_document.header.original_language {
-        properties.master_language =
-            language::to_adt(&edited.header.original_language, "header.originalLanguage")?;
-    }
-    if edited_general.fix_point_arithmetic != original_general.fix_point_arithmetic {
-        properties.fix_point_arithmetic = edited_general.fix_point_arithmetic;
-    }
+    // AFF header.description      -> ADT description
+    // AFF header.originalLanguage -> ADT master_language, with language-code conversion
+    merged.description = edited.header.description;
+    merged.master_language =
+        language_to_adt(&edited.header.original_language, "header.originalLanguage")?;
+    // AFF generalInformation.fixPointArithmetic -> ADT fix_point_arithmetic.
+    // Program type is fixed to include and editLocked has no backing here.
+    merged.fix_point_arithmetic = edited_general.fix_point_arithmetic;
     Ok(merged)
 }
 
-impl PropertyProjection<ProgramProperties> for AffProgram {
-    fn project(properties: &ProgramProperties) -> Result<Self, ProjectionError> {
-        let general = AffProgramGeneralInformation {
-            program_type: AffProgramType::from_adt(&properties.program_type)?,
+impl ProjectedProgramProperties {
+    fn from_program(properties: &ProgramProperties) -> Result<Self, ProjectionError> {
+        // Only these three general-information fields have Program ADT backings.
+        // The other AFF fields retain defaults, not values inferred from source text.
+        let general = ProgramGeneralInformation {
+            program_type: ProgramType::from_adt(&properties.program_type)?,
             fix_point_arithmetic: properties.fix_point_arithmetic,
             edit_locked: properties.locked_by_editor,
             ..Default::default()
         };
         let document = Self {
             format_version: PROGRAM_FORMAT.version().to_owned(),
-            header: AffProgramHeader {
+            header: ProgramHeader {
                 description: properties.description.clone(),
-                original_language: language::from_adt(
+                original_language: language_from_adt(
                     &properties.master_language,
                     "header.originalLanguage",
                 )?,
@@ -391,20 +489,20 @@ impl PropertyProjection<ProgramProperties> for AffProgram {
         document.validate()?;
         Ok(document)
     }
-}
 
-impl PropertyProjection<IncludeProperties> for AffProgram {
-    fn project(properties: &IncludeProperties) -> Result<Self, ProjectionError> {
-        let general = AffProgramGeneralInformation {
-            program_type: AffProgramType::Include,
+    fn from_include(properties: &IncludeProperties) -> Result<Self, ProjectionError> {
+        // IncludeProperties supplies arithmetic but no program-type field.
+        // The fixed include value identifies the family in the shared AFF format.
+        let general = ProgramGeneralInformation {
+            program_type: ProgramType::Include,
             fix_point_arithmetic: properties.fix_point_arithmetic,
             ..Default::default()
         };
         let document = Self {
             format_version: PROGRAM_FORMAT.version().to_owned(),
-            header: AffProgramHeader {
+            header: ProgramHeader {
                 description: properties.description.clone(),
-                original_language: language::from_adt(
+                original_language: language_from_adt(
                     &properties.master_language,
                     "header.originalLanguage",
                 )?,
@@ -417,142 +515,83 @@ impl PropertyProjection<IncludeProperties> for AffProgram {
     }
 }
 
-fn parse(content: &str) -> Result<AffProgram, ProjectionError> {
-    let document: AffProgram =
-        serde_json::from_str(content).map_err(ProjectionError::InvalidProgramDocument)?;
+fn parse(content: &str) -> Result<ProjectedProgramProperties, ProjectionError> {
+    let document: ProjectedProgramProperties = serde_json::from_str(content)?;
     document.validate()?;
     Ok(document)
 }
 
-fn render(document: &AffProgram) -> Result<String, ProjectionError> {
-    let mut content =
-        serde_json::to_string_pretty(document).map_err(ProjectionError::InvalidProgramDocument)?;
-    content.push('\n');
-    Ok(content)
-}
-
-impl AffProgram {
-    fn validate(&self) -> Result<(), ProjectionError> {
-        if self.format_version != PROGRAM_FORMAT.version() {
-            return Err(invalid(
-                "formatVersion",
-                format!("expected `{}`", PROGRAM_FORMAT.version()),
-            ));
-        }
-        max_length("header.description", &self.header.description, 70)?;
-        language::to_adt(&self.header.original_language, "header.originalLanguage")?;
-        if let Some(general) = &self.general_information {
-            max_length(
-                "generalInformation.authorizationGroup",
-                &general.authorization_group,
-                8,
-            )?;
-            max_length("generalInformation.application", &general.application, 1)?;
-        }
-        if let Some(database) = &self.logical_database {
-            max_length("logicalDatabase.name", &database.name, 20)?;
-            max_length(
-                "logicalDatabase.selectionScreen",
-                &database.selection_screen,
-                3,
-            )?;
-        }
-        Ok(())
-    }
-}
-
 fn validate_program_fields(
-    general: &AffProgramGeneralInformation,
-    database: Option<&AffLogicalDatabase>,
+    general: &ProgramGeneralInformation,
+    database: Option<&LogicalDatabase>,
 ) -> Result<(), ProjectionError> {
     if !general.program_status.is_default() {
-        return Err(unsupported("PROG", "generalInformation.programStatus"));
+        return Err(unsupported("generalInformation.programStatus"));
     }
     if general.starts_using_variant {
-        return Err(unsupported("PROG", "generalInformation.startsUsingVariant"));
+        return Err(unsupported("generalInformation.startsUsingVariant"));
     }
     if !general.authorization_group.is_empty() {
-        return Err(unsupported("PROG", "generalInformation.authorizationGroup"));
+        return Err(unsupported("generalInformation.authorizationGroup"));
     }
     if !general.application.is_empty() {
-        return Err(unsupported("PROG", "generalInformation.application"));
+        return Err(unsupported("generalInformation.application"));
     }
     if database.is_some_and(|database| !database.is_empty()) {
-        return Err(unsupported("PROG", "logicalDatabase"));
+        return Err(unsupported("logicalDatabase"));
     }
     Ok(())
 }
 
-fn max_length(field: &'static str, value: &str, maximum: usize) -> Result<(), ProjectionError> {
-    let length = value.chars().count();
-    if length > maximum {
-        return Err(invalid(
-            field,
-            format!("length {length} exceeds maximum {maximum}"),
-        ));
-    }
-    Ok(())
-}
-
-fn invalid(field: &'static str, message: impl Into<String>) -> ProjectionError {
-    ProjectionError::InvalidAffField {
+fn unsupported(field: &'static str) -> ProjectionError {
+    ProjectionError::UnsupportedAffProperty {
+        object_type: "PROG",
         field,
-        message: message.into(),
     }
-}
-
-fn unsupported(object_type: &'static str, field: &'static str) -> ProjectionError {
-    ProjectionError::UnsupportedAffProperty { object_type, field }
-}
-
-fn is_false(value: &bool) -> bool {
-    !value
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::Value;
-    use zadt::{Include, IncludeProperties, MediaTyped, Program, ProgramProperties};
+    use zadt::{Include, IncludeProperties, Program, ProgramProperties};
 
     use super::*;
 
     const PROGRAM_XML: &[u8] = include_bytes!("../../../zadt/tests/fixtures/program-z-test.xml");
     const INCLUDE_XML: &[u8] = include_bytes!("../../../zadt/tests/fixtures/include-ztest.xml");
 
-    fn program() -> ProgramProperties {
+    fn program() -> ObjectSnapshot<()> {
         let reference = crate::test_support::reference::<Program>(
             "Z_TEST",
             "/sap/bc/adt/programs/programs/z_test",
         );
         crate::test_support::properties(
             &reference,
-            ProgramProperties::MEDIA_TYPES[0],
+            Program::MEDIA_TYPES[0],
             "program-etag",
             PROGRAM_XML,
         )
-        .properties()
-        .clone()
+        .into_erased()
     }
 
-    fn include() -> IncludeProperties {
+    fn include() -> ObjectSnapshot<()> {
         let reference = crate::test_support::reference::<Include>(
             "ZTEST",
             "/sap/bc/adt/programs/includes/ztest",
         );
         crate::test_support::properties(
             &reference,
-            IncludeProperties::MEDIA_TYPES[0],
+            Include::MEDIA_TYPES[0],
             "include-etag",
             INCLUDE_XML,
         )
-        .properties()
-        .clone()
+        .into_erased()
     }
 
     #[test]
     fn renders_program_and_include_metadata_as_aff_v1() {
         let program = program();
-        let program_json = render_program_properties(&program).unwrap();
+        let program_json = render(&program).unwrap();
         let program_document: Value = serde_json::from_str(&program_json).unwrap();
 
         assert_eq!(program_document["formatVersion"], "1");
@@ -570,7 +609,7 @@ mod tests {
         assert!(program_document.get("logicalDatabase").is_none());
 
         let include = include();
-        let include_json = render_include_properties(&include).unwrap();
+        let include_json = render(&include).unwrap();
         let include_document: Value = serde_json::from_str(&include_json).unwrap();
         assert_eq!(
             include_document["generalInformation"]["programType"],
@@ -579,19 +618,38 @@ mod tests {
     }
 
     #[test]
+    fn no_op_program_merge_returns_no_payload() {
+        let original = program();
+        let content = render(&original).unwrap();
+        assert_eq!(merge(&original, &content).unwrap(), None);
+    }
+
+    #[test]
+    fn no_op_include_merge_returns_no_payload() {
+        let original = include();
+        let content = render(&original).unwrap();
+        assert_eq!(merge(&original, &content).unwrap(), None);
+    }
+
+    #[test]
     fn merges_program_edits_without_losing_the_adt_envelope() {
         let original = program();
-        let mut edited: AffProgram =
-            serde_json::from_str(&render_program_properties(&original).unwrap()).unwrap();
+        let mut edited: ProjectedProgramProperties =
+            serde_json::from_str(&render(&original).unwrap()).unwrap();
         edited.header.description = "Updated program".to_owned();
         edited.header.original_language = "de-CH".to_owned();
         let general = edited.general_information.get_or_insert_default();
-        general.program_type = AffProgramType::ModulePool;
+        general.program_type = ProgramType::ModulePool;
         general.fix_point_arithmetic = false;
         general.edit_locked = true;
 
-        let merged =
-            merge_program_properties(&original, &serde_json::to_string(&edited).unwrap()).unwrap();
+        let merged: ProgramProperties = serde_json::from_value(
+            merge(&original, &serde_json::to_string(&edited).unwrap())
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        let original = original.typed_properties::<Program>().unwrap();
 
         assert_eq!(merged.description, "Updated program");
         assert_eq!(merged.master_language, "4G");
@@ -604,10 +662,29 @@ mod tests {
     }
 
     #[test]
+    fn rejects_changing_program_into_include() {
+        let original = program();
+        let mut edited: ProjectedProgramProperties =
+            serde_json::from_str(&render(&original).unwrap()).unwrap();
+        edited
+            .general_information
+            .get_or_insert_default()
+            .program_type = ProgramType::Include;
+
+        assert!(matches!(
+            merge(&original, &serde_json::to_string(&edited).unwrap()),
+            Err(ProjectionError::InvalidAffField {
+                field: "generalInformation.programType",
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn merges_include_edits_and_requires_the_include_discriminator() {
         let original = include();
-        let mut edited: AffProgram =
-            serde_json::from_str(&render_include_properties(&original).unwrap()).unwrap();
+        let mut edited: ProjectedProgramProperties =
+            serde_json::from_str(&render(&original).unwrap()).unwrap();
         edited.header.description = "Updated include".to_owned();
         edited.header.original_language = "zh-Hant".to_owned();
         edited
@@ -616,17 +693,23 @@ mod tests {
             .unwrap()
             .fix_point_arithmetic = true;
 
-        let merged =
-            merge_include_properties(&original, &serde_json::to_string(&edited).unwrap()).unwrap();
+        let merged: IncludeProperties = serde_json::from_value(
+            merge(&original, &serde_json::to_string(&edited).unwrap())
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
         assert_eq!(merged.description, "Updated include");
         assert_eq!(merged.master_language, "ZF");
         assert!(merged.fix_point_arithmetic);
-        assert_eq!(merged.links, original.links);
+        assert_eq!(
+            merged.links,
+            original.typed_properties::<Include>().unwrap().links
+        );
 
-        edited.general_information.as_mut().unwrap().program_type =
-            AffProgramType::ExecutableProgram;
+        edited.general_information.as_mut().unwrap().program_type = ProgramType::ExecutableProgram;
         assert!(matches!(
-            merge_include_properties(&original, &serde_json::to_string(&edited).unwrap()),
+            merge(&original, &serde_json::to_string(&edited).unwrap()),
             Err(ProjectionError::InvalidAffField {
                 field: "generalInformation.programType",
                 ..
@@ -637,15 +720,15 @@ mod tests {
     #[test]
     fn rejects_program_fields_not_available_from_adt_properties() {
         let original = program();
-        let mut edited: AffProgram =
-            serde_json::from_str(&render_program_properties(&original).unwrap()).unwrap();
+        let mut edited: ProjectedProgramProperties =
+            serde_json::from_str(&render(&original).unwrap()).unwrap();
         edited
             .general_information
             .get_or_insert_default()
-            .program_status = AffProgramStatus::CustomerProductionProgram;
+            .program_status = ProgramStatus::CustomerProductionProgram;
 
         assert!(matches!(
-            merge_program_properties(&original, &serde_json::to_string(&edited).unwrap()),
+            merge(&original, &serde_json::to_string(&edited).unwrap()),
             Err(ProjectionError::UnsupportedAffProperty {
                 field: "generalInformation.programStatus",
                 ..

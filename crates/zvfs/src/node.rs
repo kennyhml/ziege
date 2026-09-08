@@ -96,7 +96,8 @@ pub enum MountKind {
 pub struct ObjectNode {
     pub name: String,
     pub package: String,
-    pub object_type: GlobalWorkbenchType,
+    #[serde(rename = "objectType")]
+    pub workbench_type: GlobalWorkbenchType,
     pub uri: AdtUri,
     pub virtual_workbench_uri: Option<String>,
     pub version: Option<String>,

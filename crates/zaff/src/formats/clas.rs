@@ -1,213 +1,311 @@
+//! Class mapping between ADT properties and an AFF `.clas.json` document.
+//!
+//! General metadata comes from [`ClassProperties`]. AFF groups the description
+//! and language settings under `header`, while category, arithmetic, and message
+//! class remain at the document root. Component descriptions are part of the
+//! AFF model but have no implemented ADT backing here.
+//!
+//! The mapping tables use AFF JSON paths and ADT Rust field names, not XML
+//! attribute names. ABAP source files are bound separately through the advertised
+//! main source and named Class components in the format declaration below.
+use garde::Validate;
 use serde::{Deserialize, Serialize};
 use zadt::{
-    AbapLanguageVersion, AdvertisedObjectReference, Class, ClassCategory, ClassProperties,
-    GlobalWorkbenchType, ObjectSnapshot, ObjectType,
+    AdvertisedObjectReference, Class, ClassCategory as AdtClassCategory, ClassProperties,
+    ObjectSnapshot, ObjectType,
 };
 
 use crate::{
-    Cardinality, ComponentId, FileBacking, FileSpec, ObjectFormat, ProjectionError,
-    format::{
-        FileDescriptor, FormatDescriptor, PropertiesCodec, PropertyProjection,
-        SourceFileDescriptor, UnbackedFileDescriptor, decode_properties, encode_properties,
-    },
-    language,
+    AbapLanguageVersion, Cardinality, FileSpec, ObjectFormat, ProjectionError,
+    formats::{Mapping, PropertiesMapping},
+    helpers::is_false,
+    models::{language_from_adt, language_to_adt},
+    validate::{one_of, unique_items},
 };
 
-pub const CLASS_FORMAT: ObjectFormat = ObjectFormat::new("CLAS", "1");
-
-#[derive(Debug)]
-pub(crate) struct ClassDescriptor;
-
-#[derive(Debug)]
-struct ClassMetadata;
-
-static CLASS_FILES: &[FileSpec] = &[
-    FileSpec::new("<name>.clas.json", Cardinality::One, &ClassMetadata),
-    FileSpec::new(
-        "<name>.clas.abap",
-        Cardinality::One,
-        &SourceFileDescriptor::main(ComponentId::new("source/main")),
-    ),
-    FileSpec::new(
-        "<name>.clas.definitions.abap",
-        Cardinality::ZeroOrOne,
-        &SourceFileDescriptor::named(ComponentId::new("source/definitions"), "definitions"),
-    ),
-    FileSpec::new(
-        "<name>.clas.implementations.abap",
-        Cardinality::ZeroOrOne,
-        &SourceFileDescriptor::named(
-            ComponentId::new("source/implementations"),
-            "implementations",
+pub(crate) static CLASS_FORMAT: ObjectFormat = ObjectFormat {
+    object_type: "CLAS",
+    version: "1",
+    workbench_types: &[Class::WORKBENCH_TYPE],
+    files: &[
+        FileSpec::new(
+            "<name>.clas.json",
+            Cardinality::One,
+            Mapping::Properties(PropertiesMapping { render, merge }),
         ),
-    ),
-    FileSpec::new(
-        "<name>.clas.macros.abap",
-        Cardinality::ZeroOrOne,
-        &SourceFileDescriptor::named(ComponentId::new("source/macros"), "macros"),
-    ),
-    FileSpec::new(
-        "<name>.clas.testclasses.abap",
-        Cardinality::ZeroOrOne,
-        &SourceFileDescriptor::named(ComponentId::new("source/testclasses"), "testclasses"),
-    ),
-    FileSpec::new(
-        "<name>.clas.locals.abap",
-        Cardinality::ZeroOrOne,
-        &SourceFileDescriptor::named(ComponentId::new("source/localtypes"), "localtypes"),
-    ),
-    FileSpec::new(
-        "<name>.clas.texts.<lang>.properties",
-        Cardinality::ZeroOrMore,
-        &UnbackedFileDescriptor::new(ComponentId::new("text/texts")),
-    ),
-];
+        FileSpec::new(
+            "<name>.clas.abap",
+            Cardinality::One,
+            Mapping::Source { component: None },
+        ),
+        FileSpec::new(
+            "<name>.clas.definitions.abap",
+            Cardinality::ZeroOrOne,
+            Mapping::Source {
+                component: Some("definitions"),
+            },
+        ),
+        FileSpec::new(
+            "<name>.clas.implementations.abap",
+            Cardinality::ZeroOrOne,
+            Mapping::Source {
+                component: Some("implementations"),
+            },
+        ),
+        FileSpec::new(
+            "<name>.clas.macros.abap",
+            Cardinality::ZeroOrOne,
+            Mapping::Source {
+                component: Some("macros"),
+            },
+        ),
+        FileSpec::new(
+            "<name>.clas.testclasses.abap",
+            Cardinality::ZeroOrOne,
+            Mapping::Source {
+                component: Some("testclasses"),
+            },
+        ),
+        FileSpec::new(
+            "<name>.clas.locals.abap",
+            Cardinality::ZeroOrOne,
+            Mapping::Source {
+                component: Some("localtypes"),
+            },
+        ),
+        FileSpec::new(
+            "<name>.clas.texts.<lang>.properties",
+            Cardinality::ZeroOrMore,
+            Mapping::Unavailable,
+        ),
+    ],
+};
 
-impl FormatDescriptor for ClassDescriptor {
-    fn format(&self) -> ObjectFormat {
-        CLASS_FORMAT
-    }
+/// Renders ADT [`ClassProperties`] as pretty-printed AFF JSON with a trailing newline.
+fn render(obj: &ObjectSnapshot<()>) -> Result<String, ProjectionError> {
+    let properties = obj.typed_properties::<Class>()?;
 
-    fn repository_types(&self) -> &'static [GlobalWorkbenchType] {
-        const TYPES: &[GlobalWorkbenchType] = &[Class::WORKBENCH_TYPE];
-        TYPES
-    }
+    let document = ProjectedClassProperties::from_adt(properties)?;
+    let mut content = serde_json::to_string_pretty(&document)?;
+    content.push('\n');
 
-    fn files(&self) -> &'static [FileSpec] {
-        CLASS_FILES
-    }
-
-    fn repository_type_from_metadata(
-        &self,
-        metadata: &[u8],
-    ) -> Result<GlobalWorkbenchType, ProjectionError> {
-        let metadata: MetadataDiscriminator = serde_json::from_slice(metadata)?;
-        if metadata.format_version != CLASS_FORMAT.version() {
-            return Err(ProjectionError::UnsupportedFormatVersion {
-                object_type: CLASS_FORMAT.object_type(),
-                version: metadata.format_version,
-            });
-        }
-        Ok(Class::WORKBENCH_TYPE)
-    }
+    Ok(content)
 }
 
-impl FileDescriptor for ClassMetadata {
-    fn component(&self) -> ComponentId {
-        ComponentId::new("metadata")
+/// Validates edited AFF JSON and applies its changes to a copy of the original
+/// [`ClassProperties`], preserving unaffected ADT fields and their wire representations.
+/// Returns ADT wire-shaped JSON only when the merged properties differ.
+fn merge(
+    obj: &ObjectSnapshot<()>,
+    edited: &str,
+) -> Result<Option<serde_json::Value>, ProjectionError> {
+    let original = obj.typed_properties::<Class>()?;
+    let edited: ProjectedClassProperties = serde_json::from_str(edited)?;
+    edited.validate()?;
+
+    // AFF header.originalLanguage uses BCP47. ADT master_language uses SAP
+    // language codes, for example "en" maps to "EN".
+    let language = language_to_adt(&edited.header.original_language, "header.originalLanguage")?;
+
+    // AFF descriptions contains SE80 component descriptions, not ABAP source
+    // or ABAP Doc. This mapping has no ADT backing for those entries, so a
+    // nonempty block is rejected rather than silently discarded.
+    if edited.descriptions.as_ref().is_some_and(|v| !v.is_empty()) {
+        return Err(ProjectionError::UnsupportedAffProperty {
+            object_type: "CLAS",
+            field: "descriptions",
+        });
     }
 
-    fn bind(
-        &self,
-        object: &dyn crate::format::ProjectionObject,
-        _language: Option<&str>,
-    ) -> Result<Option<FileBacking>, ProjectionError> {
-        if object.object_type() != &Class::WORKBENCH_TYPE {
-            return Err(ProjectionError::UnsupportedFileComponent {
-                object_type: object.object_type().clone(),
-                component: self.component(),
-            });
-        }
-        Ok(Some(FileBacking::Properties(object.reference())))
+    let mut merged = original.clone();
+    let previous = ProjectedClassProperties::from_adt(original)?;
+
+    // Direct field mappings:
+    //
+    //   AFF header.description       -> ADT description
+    //   AFF fixPointArithmetic       -> ADT fix_point_arithmetic
+    //   AFF header.originalLanguage  -> ADT master_language (converted above)
+    merged.description = edited.header.description;
+    merged.fix_point_arithmetic = edited.fix_point_arithmetic;
+    merged.master_language = language;
+
+    // AFF header.abapLanguageVersion -> ADT abap_language_version.
+    // Several ADT spellings mean Standard in AFF. Keep the original spelling
+    // unless the language version changed. A new Standard value uses "X".
+    if edited.header.abap_language_version != previous.header.abap_language_version {
+        merged.abap_language_version = Some(edited.header.abap_language_version.to_adt_reps());
     }
 
-    fn properties_codec(&self) -> Option<&dyn PropertiesCodec> {
-        Some(self)
+    // AFF category -> ADT category, using the ClassCategory spelling table.
+    // Preserve accepted alternate ADT spellings when the AFF category is unchanged.
+    if edited.category != previous.category {
+        merged.category = edited.category.adt_value();
     }
+
+    // AFF messageClass -> ADT message_class.name.
+    // The ADT reference also carries URI, type, and description metadata that
+    // AFF cannot express. Keep the complete reference for an unchanged name.
+    // A different name gets a new name-only reference. An empty name removes it.
+    if edited.message_class != previous.message_class {
+        let empty = edited.message_class.is_empty();
+        merged.message_class = (!empty).then(|| AdvertisedObjectReference {
+            name: Some(edited.message_class),
+            ..Default::default()
+        });
+    }
+
+    if merged == *original {
+        return Ok(None);
+    }
+    serde_json::to_value(merged).map(Some).map_err(Into::into)
 }
 
-impl PropertiesCodec for ClassMetadata {
-    fn render(&self, properties: &ObjectSnapshot<()>) -> Result<String, ProjectionError> {
-        render_class_properties(&decode_properties::<ClassProperties>(properties, "CLAS")?)
-    }
-
-    fn merge(
-        &self,
-        original: &ObjectSnapshot<()>,
-        edited: &str,
-    ) -> Result<serde_json::Value, ProjectionError> {
-        let properties = decode_properties::<ClassProperties>(original, "CLAS")?;
-        encode_properties(merge_class_properties(&properties, edited)?, "CLAS")
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MetadataDiscriminator {
-    format_version: String,
-}
-
-/// The AFF v1 metadata representation of an ABAP Class.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+/// Class properties represented by the AFF v1 JSON document.
+///
+/// # Field Mapping
+///
+/// ADT fields below are on [`ClassProperties`].
+///
+/// ```text
+/// AFF field                   ADT field
+/// ---------                   ---------
+/// formatVersion               No backing field, this format supplies "1"
+/// header.description          description
+/// header.originalLanguage     master_language
+/// header.abapLanguageVersion  abap_language_version
+/// category                    category
+/// fixPointArithmetic          fix_point_arithmetic
+/// messageClass                message_class.name
+/// descriptions                No implemented ADT backing
+/// ```
+///
+/// See [`ClassHeader`] for language conversions and [`ClassCategory`] for the
+/// category spellings. `fixPointArithmetic` is copied as a boolean and omitted
+/// from AFF JSON when false. It does not change the ADT `unicode_check_active` field.
+///
+/// # Message Class
+///
+/// AFF stores only a message-class name. ADT stores an optional
+/// [`AdvertisedObjectReference`] in `message_class`, with a name and additional
+/// URI, type, and description metadata.
+///
+/// An absent reference or absent name produces an empty AFF name, which is
+/// omitted from the JSON. If the AFF name is unchanged, the complete original
+/// reference is preserved. Changing the name creates a new reference with only
+/// that name. Clearing the name removes the reference.
+///
+/// For example, changing only the Class description leaves the message-class
+/// URI intact. Changing `messageClass` from `Z_OLD` to `Z_NEW` must not retain a
+/// URI that still points to `Z_OLD`.
+///
+/// # Component Descriptions
+///
+/// The `descriptions` block has no implemented ADT mapping. It is omitted from
+/// generated documents. Missing or empty blocks are accepted, but nonempty
+/// entries are rejected. See [`ClassDescriptions`] for the AFF field layout.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, Validate)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct AffClass {
+#[garde(allow_unvalidated)]
+pub struct ProjectedClassProperties {
+    #[garde(custom(one_of([CLASS_FORMAT.version()])))]
     pub format_version: String,
-    pub header: AffClassHeader,
-    #[serde(default, skip_serializing_if = "AffClassCategory::is_default")]
-    pub category: AffClassCategory,
+
+    #[garde(dive)]
+    pub header: ClassHeader,
+
+    #[serde(default, skip_serializing_if = "ClassCategory::is_default")]
+    pub category: ClassCategory,
+
     #[serde(default, skip_serializing_if = "is_false")]
     pub fix_point_arithmetic: bool,
+
     #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[garde(length(chars, max = 20))]
     pub message_class: String,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub descriptions: Option<AffClassDescriptions>,
+    #[garde(dive)]
+    pub descriptions: Option<ClassDescriptions>,
 }
 
 /// Common AFF Class header fields.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+///
+/// # Field Mapping
+///
+/// ```text
+/// AFF field                   ADT ClassProperties field
+/// ---------                   -------------------------
+/// header.description          description
+/// header.originalLanguage     master_language
+/// header.abapLanguageVersion  abap_language_version
+/// ```
+///
+/// Description text is copied directly. Original language is converted between
+/// SAP codes in ADT and BCP47 tags in AFF, for example `EN` and `en`.
+/// Unsupported language codes or tags are rejected.
+///
+/// # Language Versions
+///
+/// ```text
+/// AFF value         Accepted ADT value on render  ADT value written for an edit
+/// ---------         ----------------------------  -----------------------------
+/// standard          Absent, "", " ", or "X"       "X"
+/// keyUser           "2"                           "2"
+/// cloudDevelopment  "5"                           "5"
+/// ```
+///
+/// Standard is omitted from AFF JSON. An unchanged Standard value keeps the
+/// original absent, blank, or `"X"` ADT representation. Class uses the REPS
+/// Standard encoding `"X"`, unlike the DTEL encoding `"0"`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, Validate)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct AffClassHeader {
+#[garde(allow_unvalidated)]
+pub struct ClassHeader {
+    #[garde(length(chars, max = 60))]
     pub description: String,
+
     pub original_language: String,
-    #[serde(
-        default,
-        skip_serializing_if = "AffClassAbapLanguageVersion::is_default"
-    )]
-    pub abap_language_version: AffClassAbapLanguageVersion,
+
+    #[serde(default, skip_serializing_if = "AbapLanguageVersion::is_standard")]
+    pub abap_language_version: AbapLanguageVersion,
 }
 
-/// AFF's ABAP language-version vocabulary for Classes.
+/// Semantic Class categories in AFF.
+///
+/// # Category Mapping
+///
+/// ```text
+/// AFF category                  ADT category written for an edit
+/// ------------                  --------------------------------
+/// generalObjectType             generalObjectType
+/// exitClass                     exitClass
+/// testclassAbapUnit             testClass
+/// behaviorClass                 behaviorPool
+/// entityEventHandler            entityEventHandler
+/// persistentClass               persistentClass
+/// factoryForPersistentClass     factoryForPersistentClass
+/// statusClassForPersistClass    statusClassForPersistClass
+/// rfcProxyClass                 rfcProxyClass
+/// communicationConnectionClass  communicationConnectionClass
+/// exceptionClass                exceptionClass
+/// areaClassSharedObjects        areaClass
+/// businessClass                 businessClass
+/// bspApplicationClass           bspClass
+/// basisClassBspElementHdlr      basisClassBspElementHdlr
+/// webDynproRuntimeObject        webDynproRuntimeObject
+/// ```
+///
+/// `generalObjectType` is the default and is omitted from AFF JSON.
+/// The existing ADT string mappings also accept the AFF spellings in the left
+/// column. An unchanged category keeps the original ADT spelling. For example,
+/// ADT `testClass` and `testclassAbapUnit` both appear as AFF `testclassAbapUnit`,
+/// but an unrelated edit does not normalize one spelling to the other.
+///
+/// Categories without a named variant in the ZADT model use its `Other` string
+/// variant. This table describes the implemented mapping, not a guarantee that
+/// every backend supports every category.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub enum AffClassAbapLanguageVersion {
-    #[default]
-    #[serde(rename = "standard")]
-    Standard,
-    #[serde(rename = "keyUser")]
-    KeyUser,
-    #[serde(rename = "cloudDevelopment")]
-    CloudDevelopment,
-}
-
-impl AffClassAbapLanguageVersion {
-    fn from_adt(value: Option<&AbapLanguageVersion>) -> Result<Self, ProjectionError> {
-        match value.map(AbapLanguageVersion::as_str) {
-            None | Some("" | " " | "X") => Ok(Self::Standard),
-            Some("2") => Ok(Self::KeyUser),
-            Some("5") => Ok(Self::CloudDevelopment),
-            Some(value) => Err(invalid(
-                "header.abapLanguageVersion",
-                format!("unsupported ADT value `{value}`"),
-            )),
-        }
-    }
-
-    fn adt_value(self, original: Option<&AbapLanguageVersion>) -> Option<AbapLanguageVersion> {
-        match self {
-            Self::Standard if original.is_none() => None,
-            Self::Standard => Some(AbapLanguageVersion::StandardX),
-            Self::KeyUser => Some(AbapLanguageVersion::KeyUser),
-            Self::CloudDevelopment => Some(AbapLanguageVersion::CloudDevelopment),
-        }
-    }
-
-    const fn is_default(&self) -> bool {
-        matches!(self, Self::Standard)
-    }
-}
-
-/// AFF's semantic Class categories.
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub enum AffClassCategory {
+pub enum ClassCategory {
     #[default]
     #[serde(rename = "generalObjectType")]
     GeneralObjectType,
@@ -243,50 +341,70 @@ pub enum AffClassCategory {
     WebDynproRuntimeObject,
 }
 
-impl AffClassCategory {
-    fn from_adt(value: &str) -> Result<Self, ProjectionError> {
+impl ClassCategory {
+    fn from_adt(value: &AdtClassCategory) -> Result<Self, ProjectionError> {
         match value {
-            "generalObjectType" => Ok(Self::GeneralObjectType),
-            "exitClass" => Ok(Self::ExitClass),
-            "testclassAbapUnit" => Ok(Self::TestclassAbapUnit),
-            "behaviorClass" => Ok(Self::BehaviorClass),
-            "entityEventHandler" => Ok(Self::EntityEventHandler),
-            "persistentClass" => Ok(Self::PersistentClass),
-            "factoryForPersistentClass" => Ok(Self::FactoryForPersistentClass),
-            "statusClassForPersistClass" => Ok(Self::StatusClassForPersistClass),
-            "rfcProxyClass" => Ok(Self::RfcProxyClass),
-            "communicationConnectionClass" => Ok(Self::CommunicationConnectionClass),
-            "exceptionClass" => Ok(Self::ExceptionClass),
-            "areaClassSharedObjects" => Ok(Self::AreaClassSharedObjects),
-            "businessClass" => Ok(Self::BusinessClass),
-            "bspApplicationClass" => Ok(Self::BspApplicationClass),
-            "basisClassBspElementHdlr" => Ok(Self::BasisClassBspElementHandler),
-            "webDynproRuntimeObject" => Ok(Self::WebDynproRuntimeObject),
-            value => Err(invalid(
-                "category",
-                format!("unsupported ADT Class category `{value}`"),
-            )),
+            AdtClassCategory::GeneralObjectType => Ok(Self::GeneralObjectType),
+            AdtClassCategory::ExceptionClass => Ok(Self::ExceptionClass),
+            AdtClassCategory::TestClass => Ok(Self::TestclassAbapUnit),
+            AdtClassCategory::AreaClass => Ok(Self::AreaClassSharedObjects),
+            AdtClassCategory::BspClass => Ok(Self::BspApplicationClass),
+            AdtClassCategory::BehaviorPool => Ok(Self::BehaviorClass),
+            AdtClassCategory::RfcProxyClass => Ok(Self::RfcProxyClass),
+            // Retain the existing string mappings for categories not modeled by zadt.
+            AdtClassCategory::Other(value) => match value.as_str() {
+                "generalObjectType" => Ok(Self::GeneralObjectType),
+                "exitClass" => Ok(Self::ExitClass),
+                "testclassAbapUnit" => Ok(Self::TestclassAbapUnit),
+                "behaviorClass" => Ok(Self::BehaviorClass),
+                "entityEventHandler" => Ok(Self::EntityEventHandler),
+                "persistentClass" => Ok(Self::PersistentClass),
+                "factoryForPersistentClass" => Ok(Self::FactoryForPersistentClass),
+                "statusClassForPersistClass" => Ok(Self::StatusClassForPersistClass),
+                "rfcProxyClass" => Ok(Self::RfcProxyClass),
+                "communicationConnectionClass" => Ok(Self::CommunicationConnectionClass),
+                "exceptionClass" => Ok(Self::ExceptionClass),
+                "areaClassSharedObjects" => Ok(Self::AreaClassSharedObjects),
+                "businessClass" => Ok(Self::BusinessClass),
+                "bspApplicationClass" => Ok(Self::BspApplicationClass),
+                "basisClassBspElementHdlr" => Ok(Self::BasisClassBspElementHandler),
+                "webDynproRuntimeObject" => Ok(Self::WebDynproRuntimeObject),
+                value => Err(ProjectionError::InvalidAffField {
+                    field: "category",
+                    message: format!("unsupported ADT Class category `{value}`"),
+                }),
+            },
         }
     }
 
-    const fn adt_value(self) -> &'static str {
+    fn adt_value(self) -> AdtClassCategory {
         match self {
-            Self::GeneralObjectType => "generalObjectType",
-            Self::ExitClass => "exitClass",
-            Self::TestclassAbapUnit => "testclassAbapUnit",
-            Self::BehaviorClass => "behaviorClass",
-            Self::EntityEventHandler => "entityEventHandler",
-            Self::PersistentClass => "persistentClass",
-            Self::FactoryForPersistentClass => "factoryForPersistentClass",
-            Self::StatusClassForPersistClass => "statusClassForPersistClass",
-            Self::RfcProxyClass => "rfcProxyClass",
-            Self::CommunicationConnectionClass => "communicationConnectionClass",
-            Self::ExceptionClass => "exceptionClass",
-            Self::AreaClassSharedObjects => "areaClassSharedObjects",
-            Self::BusinessClass => "businessClass",
-            Self::BspApplicationClass => "bspApplicationClass",
-            Self::BasisClassBspElementHandler => "basisClassBspElementHdlr",
-            Self::WebDynproRuntimeObject => "webDynproRuntimeObject",
+            Self::GeneralObjectType => AdtClassCategory::GeneralObjectType,
+            Self::TestclassAbapUnit => AdtClassCategory::TestClass,
+            Self::BehaviorClass => AdtClassCategory::BehaviorPool,
+            Self::RfcProxyClass => AdtClassCategory::RfcProxyClass,
+            Self::ExceptionClass => AdtClassCategory::ExceptionClass,
+            Self::AreaClassSharedObjects => AdtClassCategory::AreaClass,
+            Self::BspApplicationClass => AdtClassCategory::BspClass,
+            Self::ExitClass => AdtClassCategory::Other("exitClass".to_owned()),
+            Self::EntityEventHandler => AdtClassCategory::Other("entityEventHandler".to_owned()),
+            Self::PersistentClass => AdtClassCategory::Other("persistentClass".to_owned()),
+            Self::FactoryForPersistentClass => {
+                AdtClassCategory::Other("factoryForPersistentClass".to_owned())
+            }
+            Self::StatusClassForPersistClass => {
+                AdtClassCategory::Other("statusClassForPersistClass".to_owned())
+            }
+            Self::CommunicationConnectionClass => {
+                AdtClassCategory::Other("communicationConnectionClass".to_owned())
+            }
+            Self::BusinessClass => AdtClassCategory::Other("businessClass".to_owned()),
+            Self::BasisClassBspElementHandler => {
+                AdtClassCategory::Other("basisClassBspElementHdlr".to_owned())
+            }
+            Self::WebDynproRuntimeObject => {
+                AdtClassCategory::Other("webDynproRuntimeObject".to_owned())
+            }
         }
     }
 
@@ -296,20 +414,48 @@ impl AffClassCategory {
 }
 
 /// Optional SE80 descriptions represented by the Class AFF schema.
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+///
+/// # AFF Fields
+///
+/// These are component descriptions, not declarations or ABAP Doc comments.
+/// All paths below are inside the `descriptions` block.
+///
+/// ```text
+/// AFF field   Contents                           ADT backing
+/// ---------   --------                           -----------
+/// types       Type names and descriptions        Not implemented
+/// attributes  Attribute names and descriptions   Not implemented
+/// events      Event descriptions and parameters  Not implemented
+/// methods     Method descriptions and members    Not implemented
+/// ```
+///
+/// Events contain `parameters`. Methods contain `parameters` and `exceptions`.
+/// Each entry identifies the component by `name` and supplies a `description`.
+///
+/// Empty arrays are omitted. The whole block is accepted only when all four
+/// arrays are empty. Nonempty edits are rejected because there is no implemented
+/// ADT backing. Duplicate complete entries are rejected by schema validation.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, Validate)]
 #[serde(deny_unknown_fields)]
-pub struct AffClassDescriptions {
+pub struct ClassDescriptions {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub types: Vec<AffNameDescription>,
+    #[garde(dive, custom(unique_items))]
+    pub types: Vec<NameDescription>,
+
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub attributes: Vec<AffNameDescription>,
+    #[garde(dive, custom(unique_items))]
+    pub attributes: Vec<NameDescription>,
+
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub events: Vec<AffEventDescription>,
+    #[garde(dive, custom(unique_items))]
+    pub events: Vec<EventDescription>,
+
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub methods: Vec<AffMethodDescription>,
+    #[garde(dive, custom(unique_items))]
+    pub methods: Vec<MethodDescription>,
 }
 
-impl AffClassDescriptions {
+impl ClassDescriptions {
     fn is_empty(&self) -> bool {
         self.types.is_empty()
             && self.attributes.is_empty()
@@ -319,117 +465,112 @@ impl AffClassDescriptions {
 }
 
 /// A named Class component description.
-#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+///
+/// Used by `descriptions.types`, `descriptions.attributes`, event parameters,
+/// method parameters, and method exceptions.
+///
+/// ```text
+/// AFF field    Meaning                          ADT backing
+/// ---------    -------                          -----------
+/// name         Name of the described component  Not implemented
+/// description  SE80 description text            Not implemented
+/// ```
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, Validate)]
 #[serde(deny_unknown_fields)]
-pub struct AffNameDescription {
+pub struct NameDescription {
+    #[garde(length(chars, max = 30))]
     pub name: String,
+
+    #[garde(length(chars, max = 60))]
     pub description: String,
 }
 
 /// A Class event description and its parameter descriptions.
-#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+///
+/// Paths below are relative to an entry in `descriptions.events`.
+///
+/// ```text
+/// AFF field    Meaning                       ADT backing
+/// ---------    -------                       -----------
+/// name         Event name                    Not implemented
+/// description  Event description             Not implemented
+/// parameters   Named parameter descriptions  Not implemented
+/// ```
+///
+/// Parameter entries use [`NameDescription`]. Even an event with no parameters
+/// is a nonempty component-description edit and is rejected by this mapping.
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, Validate)]
 #[serde(deny_unknown_fields)]
-pub struct AffEventDescription {
+pub struct EventDescription {
+    #[garde(length(chars, max = 30))]
     pub name: String,
+
+    #[garde(length(chars, max = 60))]
     pub description: String,
+
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub parameters: Vec<AffNameDescription>,
+    #[garde(dive, custom(unique_items))]
+    pub parameters: Vec<NameDescription>,
 }
 
 /// A Class method description and its parameter and exception descriptions.
-#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+///
+/// Paths below are relative to an entry in `descriptions.methods`.
+///
+/// ```text
+/// AFF field    Meaning                       ADT backing
+/// ---------    -------                       -----------
+/// name         Method name                   Not implemented
+/// description  Method description            Not implemented
+/// parameters   Named parameter descriptions  Not implemented
+/// exceptions   Named exception descriptions  Not implemented
+/// ```
+///
+/// Parameter and exception entries use [`NameDescription`]. These fields have
+/// no implemented ADT backing, so nonempty method entries are rejected.
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, Validate)]
 #[serde(deny_unknown_fields)]
-pub struct AffMethodDescription {
+pub struct MethodDescription {
+    #[garde(length(chars, max = 30))]
     pub name: String,
+
+    #[garde(length(chars, max = 60))]
     pub description: String,
+
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub parameters: Vec<AffNameDescription>,
+    #[garde(dive, custom(unique_items))]
+    pub parameters: Vec<NameDescription>,
+
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub exceptions: Vec<AffNameDescription>,
+    #[garde(dive, custom(unique_items))]
+    pub exceptions: Vec<NameDescription>,
 }
 
-pub(crate) fn render_class_properties(
-    properties: &ClassProperties,
-) -> Result<String, ProjectionError> {
-    let document = <AffClass as PropertyProjection<ClassProperties>>::project(properties)?;
-    let mut content =
-        serde_json::to_string_pretty(&document).map_err(ProjectionError::InvalidClassDocument)?;
-    content.push('\n');
-    Ok(content)
-}
-
-pub(crate) fn merge_class_properties(
-    original: &ClassProperties,
-    edited: &str,
-) -> Result<ClassProperties, ProjectionError> {
-    let edited: AffClass =
-        serde_json::from_str(edited).map_err(ProjectionError::InvalidClassDocument)?;
-    edited.validate()?;
-    if edited
-        .descriptions
-        .as_ref()
-        .is_some_and(|descriptions| !descriptions.is_empty())
-    {
-        return Err(ProjectionError::UnsupportedAffProperty {
-            object_type: "CLAS",
-            field: "descriptions",
-        });
-    }
-
-    let original_document = AffClass::project(original)?;
-    let original_language_version = original.abap_language_version.clone();
-    let mut merged = original.clone();
-    let properties = &mut merged;
-    if edited.header.description != original_document.header.description {
-        properties.description = edited.header.description;
-    }
-    if edited.header.original_language != original_document.header.original_language {
-        properties.master_language =
-            language::to_adt(&edited.header.original_language, "header.originalLanguage")?;
-    }
-    if edited.header.abap_language_version != original_document.header.abap_language_version {
-        properties.abap_language_version = edited
-            .header
-            .abap_language_version
-            .adt_value(original_language_version.as_ref());
-    }
-    if edited.category != original_document.category {
-        properties.category = ClassCategory::from(edited.category.adt_value());
-    }
-    if edited.fix_point_arithmetic != original_document.fix_point_arithmetic {
-        properties.fix_point_arithmetic = edited.fix_point_arithmetic;
-    }
-    if edited.message_class != original_document.message_class {
-        properties.message_class =
-            (!edited.message_class.is_empty()).then(|| AdvertisedObjectReference {
-                name: Some(edited.message_class),
-                ..Default::default()
-            });
-    }
-    Ok(merged)
-}
-
-impl PropertyProjection<ClassProperties> for AffClass {
-    fn project(properties: &ClassProperties) -> Result<Self, ProjectionError> {
+impl ProjectedClassProperties {
+    fn from_adt(properties: &ClassProperties) -> Result<Self, ProjectionError> {
         let document = Self {
             format_version: CLASS_FORMAT.version().to_owned(),
-            header: AffClassHeader {
+            header: ClassHeader {
                 description: properties.description.clone(),
-                original_language: language::from_adt(
+                original_language: language_from_adt(
                     &properties.master_language,
                     "header.originalLanguage",
                 )?,
-                abap_language_version: AffClassAbapLanguageVersion::from_adt(
+                abap_language_version: AbapLanguageVersion::from_adt(
                     properties.abap_language_version.as_ref(),
-                )?,
+                    "X",
+                )
+                .map_err(|value| ProjectionError::InvalidAffField {
+                    field: "header.abapLanguageVersion",
+                    message: format!("unsupported ADT value `{value}`"),
+                })?,
             },
-            category: AffClassCategory::from_adt(properties.category.as_str())?,
+            category: ClassCategory::from_adt(&properties.category)?,
             fix_point_arithmetic: properties.fix_point_arithmetic,
             message_class: properties
                 .message_class
                 .as_ref()
                 .and_then(|reference| reference.name.clone())
-                .filter(|name| !name.is_empty())
                 .unwrap_or_default(),
             descriptions: None,
         };
@@ -438,132 +579,264 @@ impl PropertyProjection<ClassProperties> for AffClass {
     }
 }
 
-impl AffClass {
-    fn validate(&self) -> Result<(), ProjectionError> {
-        if self.format_version != CLASS_FORMAT.version() {
-            return Err(invalid(
-                "formatVersion",
-                format!("expected `{}`", CLASS_FORMAT.version()),
-            ));
-        }
-        max_length("header.description", &self.header.description, 60)?;
-        language::to_adt(&self.header.original_language, "header.originalLanguage")?;
-        max_length("messageClass", &self.message_class, 20)?;
-        if let Some(descriptions) = &self.descriptions {
-            validate_named("descriptions.types", &descriptions.types)?;
-            validate_named("descriptions.attributes", &descriptions.attributes)?;
-            validate_events("descriptions.events", &descriptions.events)?;
-            validate_methods("descriptions.methods", &descriptions.methods)?;
-        }
-        Ok(())
-    }
-}
-
-fn validate_named(
-    field: &'static str,
-    descriptions: &[AffNameDescription],
-) -> Result<(), ProjectionError> {
-    for (index, description) in descriptions.iter().enumerate() {
-        max_length(field, &description.name, 30)?;
-        max_length(field, &description.description, 60)?;
-        if descriptions[..index].contains(description) {
-            return Err(invalid(
-                field,
-                format!("duplicate description for `{}`", description.name),
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn validate_events(
-    field: &'static str,
-    descriptions: &[AffEventDescription],
-) -> Result<(), ProjectionError> {
-    for (index, description) in descriptions.iter().enumerate() {
-        max_length(field, &description.name, 30)?;
-        max_length(field, &description.description, 60)?;
-        validate_named("descriptions.events.parameters", &description.parameters)?;
-        if descriptions[..index].contains(description) {
-            return Err(invalid(
-                field,
-                format!("duplicate description for `{}`", description.name),
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn validate_methods(
-    field: &'static str,
-    descriptions: &[AffMethodDescription],
-) -> Result<(), ProjectionError> {
-    for (index, description) in descriptions.iter().enumerate() {
-        max_length(field, &description.name, 30)?;
-        max_length(field, &description.description, 60)?;
-        validate_named("descriptions.methods.parameters", &description.parameters)?;
-        validate_named("descriptions.methods.exceptions", &description.exceptions)?;
-        if descriptions[..index].contains(description) {
-            return Err(invalid(
-                field,
-                format!("duplicate description for `{}`", description.name),
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn max_length(field: &'static str, value: &str, maximum: usize) -> Result<(), ProjectionError> {
-    let length = value.chars().count();
-    if length > maximum {
-        return Err(invalid(
-            field,
-            format!("length {length} exceeds maximum {maximum}"),
-        ));
-    }
-    Ok(())
-}
-
-fn invalid(field: &'static str, message: impl Into<String>) -> ProjectionError {
-    ProjectionError::InvalidAffField {
-        field,
-        message: message.into(),
-    }
-}
-
-fn is_false(value: &bool) -> bool {
-    !value
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
-    use zadt::{Class, ClassProperties, MediaTyped};
+    use zadt::{
+        AbapLanguageVersion as AdtAbapLanguageVersion, Class, ClassProperties, ObjectSnapshot,
+        ToXml,
+    };
 
     use super::*;
 
     const CLASS_XML: &[u8] =
         include_bytes!("../../../zadt/tests/fixtures/class-cl-adt-uri-mapper-v4.xml");
 
+    const MODELED_CATEGORIES: &[(AdtClassCategory, &str, ClassCategory, &str)] = &[
+        (
+            AdtClassCategory::GeneralObjectType,
+            "generalObjectType",
+            ClassCategory::GeneralObjectType,
+            "generalObjectType",
+        ),
+        (
+            AdtClassCategory::ExceptionClass,
+            "exceptionClass",
+            ClassCategory::ExceptionClass,
+            "exceptionClass",
+        ),
+        (
+            AdtClassCategory::TestClass,
+            "testClass",
+            ClassCategory::TestclassAbapUnit,
+            "testclassAbapUnit",
+        ),
+        (
+            AdtClassCategory::AreaClass,
+            "areaClass",
+            ClassCategory::AreaClassSharedObjects,
+            "areaClassSharedObjects",
+        ),
+        (
+            AdtClassCategory::BspClass,
+            "bspClass",
+            ClassCategory::BspApplicationClass,
+            "bspApplicationClass",
+        ),
+        (
+            AdtClassCategory::BehaviorPool,
+            "behaviorPool",
+            ClassCategory::BehaviorClass,
+            "behaviorClass",
+        ),
+        (
+            AdtClassCategory::RfcProxyClass,
+            "rfcProxyClass",
+            ClassCategory::RfcProxyClass,
+            "rfcProxyClass",
+        ),
+    ];
+
     fn class() -> ClassProperties {
+        class_snapshot(CLASS_XML).properties().clone()
+    }
+
+    fn class_snapshot(xml: &[u8]) -> ObjectSnapshot<Class> {
         let reference = crate::test_support::reference::<Class>(
             "CL_ADT_URI_MAPPER",
             "/sap/bc/adt/oo/classes/cl_adt_uri_mapper",
         );
-        crate::test_support::properties(
-            &reference,
-            ClassProperties::MEDIA_TYPES[0],
-            "class-etag",
-            CLASS_XML,
-        )
-        .properties()
-        .clone()
+        crate::test_support::properties(&reference, Class::MEDIA_TYPES[0], "class-etag", xml)
+    }
+
+    fn snapshot(properties: &ClassProperties) -> ObjectSnapshot<()> {
+        class_snapshot(&properties.to_xml().unwrap()).into_erased()
+    }
+
+    #[test]
+    fn modeled_categories_render_and_merge_without_wire_changes() {
+        for (adt, adt_wire, aff, aff_wire) in MODELED_CATEGORIES {
+            let xml = std::str::from_utf8(CLASS_XML).unwrap().replace(
+                "class:category=\"generalObjectType\"",
+                &format!("class:category=\"{adt_wire}\""),
+            );
+            let snapshot = class_snapshot(xml.as_bytes());
+            assert_eq!(&snapshot.properties().category, adt);
+            let projection = crate::project(snapshot.into_erased()).unwrap();
+            let crate::FileBacking::Properties(properties) = projection
+                .file("cl_adt_uri_mapper.clas.json")
+                .unwrap()
+                .backing()
+            else {
+                panic!("class JSON must have a properties backing");
+            };
+            let content = properties.render().unwrap();
+            let document: ProjectedClassProperties = serde_json::from_str(&content).unwrap();
+            assert_eq!(&document.category, aff);
+            let document: Value = serde_json::from_str(&content).unwrap();
+            if aff.is_default() {
+                assert!(document.get("category").is_none());
+            } else {
+                assert_eq!(document["category"], *aff_wire);
+            }
+            assert_eq!(properties.merge(&content).unwrap(), None);
+        }
+    }
+
+    #[test]
+    fn modeled_category_edits_roundtrip_using_adt_wire_values() {
+        for (original_category, _, _, _) in MODELED_CATEGORIES {
+            let mut original = class();
+            original.category = original_category.clone();
+            let snapshot = snapshot(&original);
+            for (adt, adt_wire, aff, _) in MODELED_CATEGORIES {
+                let mut edited = ProjectedClassProperties::from_adt(&original).unwrap();
+                edited.category = *aff;
+                let payload = merge(&snapshot, &serde_json::to_string(&edited).unwrap()).unwrap();
+                let mut expected = original.clone();
+                expected.category = adt.clone();
+                assert_eq!(
+                    payload,
+                    (expected != original).then(|| serde_json::to_value(&expected).unwrap())
+                );
+                let merged = payload.unwrap_or_else(|| snapshot.properties().unwrap());
+                assert_eq!(merged["@class:category"], *adt_wire);
+                let merged: ClassProperties = serde_json::from_value(merged).unwrap();
+                let rendered = ProjectedClassProperties::from_adt(&merged).unwrap();
+                assert_eq!(rendered, edited);
+            }
+        }
+    }
+
+    #[test]
+    fn class_render_merge_preserves_language_encoding_and_message_reference_wire_fields() {
+        for language_version in [None, Some(""), Some(" "), Some("X"), Some("2"), Some("5")] {
+            let attribute = language_version
+                .map(|value| format!("adtcore:abapLanguageVersion=\"{value}\""))
+                .unwrap_or_default();
+            let xml = std::str::from_utf8(CLASS_XML).unwrap()
+                .replace("adtcore:abapLanguageVersion=\"X\"", &attribute)
+                .replace(
+                    "</class:abapClass>",
+                    r#"<class:messageClassRef adtcore:name="Z_MESSAGES" adtcore:type="MSAG/N" adtcore:uri="/sap/bc/adt/messageclass/z_messages" adtcore:description="Messages"/>
+                    </class:abapClass>"#,
+                );
+            let snapshot = class_snapshot(xml.as_bytes()).into_erased();
+            let original = snapshot.properties().unwrap();
+            let projection = crate::project(snapshot).unwrap();
+            let crate::FileBacking::Properties(properties) = projection
+                .file("cl_adt_uri_mapper.clas.json")
+                .unwrap()
+                .backing()
+            else {
+                panic!("class JSON must have a properties backing");
+            };
+            let content = properties.render().unwrap();
+            let document: Value = serde_json::from_str(&content).unwrap();
+            assert_eq!(document["messageClass"], "Z_MESSAGES");
+            assert_eq!(document["header"]["originalLanguage"], "en");
+            assert_eq!(properties.merge(&content).unwrap(), None);
+            assert_eq!(properties.subject().properties().unwrap(), original);
+
+            let mut edited = document;
+            edited["header"]["description"] = json!("Updated class");
+            let mut expected = original;
+            expected["@adtcore:description"] = json!("Updated class");
+            assert_eq!(
+                properties.merge(&edited.to_string()).unwrap(),
+                Some(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn language_version_edits_preserve_unchanged_encodings() {
+        for original_version in [
+            None,
+            Some(AdtAbapLanguageVersion::Other(String::new())),
+            Some(AdtAbapLanguageVersion::Other(" ".to_owned())),
+            Some(AdtAbapLanguageVersion::StandardX),
+            Some(AdtAbapLanguageVersion::KeyUser),
+            Some(AdtAbapLanguageVersion::CloudDevelopment),
+        ] {
+            let mut original = class();
+            original.abap_language_version = original_version;
+            let snapshot = snapshot(&original);
+            let baseline = ProjectedClassProperties::from_adt(&original).unwrap();
+            for (aff, adt) in [
+                (
+                    AbapLanguageVersion::Standard,
+                    AdtAbapLanguageVersion::StandardX,
+                ),
+                (
+                    AbapLanguageVersion::KeyUser,
+                    AdtAbapLanguageVersion::KeyUser,
+                ),
+                (
+                    AbapLanguageVersion::CloudDevelopment,
+                    AdtAbapLanguageVersion::CloudDevelopment,
+                ),
+            ] {
+                let mut edited = baseline.clone();
+                edited.header.description = "Updated class".to_owned();
+                edited.header.abap_language_version = aff;
+                let mut expected = original.clone();
+                expected.description = edited.header.description.clone();
+                if aff != baseline.header.abap_language_version {
+                    expected.abap_language_version = Some(adt);
+                }
+                let merged = merge(&snapshot, &serde_json::to_string(&edited).unwrap())
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(merged, serde_json::to_value(expected).unwrap());
+                let merged: ClassProperties = serde_json::from_value(merged).unwrap();
+                assert_eq!(ProjectedClassProperties::from_adt(&merged).unwrap(), edited);
+            }
+        }
+    }
+
+    #[test]
+    fn preserves_existing_unmodeled_category_mappings_and_rejects_unknown_values() {
+        for value in [
+            "exitClass",
+            "testclassAbapUnit",
+            "behaviorClass",
+            "entityEventHandler",
+            "persistentClass",
+            "factoryForPersistentClass",
+            "statusClassForPersistClass",
+            "communicationConnectionClass",
+            "areaClassSharedObjects",
+            "businessClass",
+            "bspApplicationClass",
+            "basisClassBspElementHdlr",
+            "webDynproRuntimeObject",
+        ] {
+            let mut original = class();
+            original.category = AdtClassCategory::Other(value.to_owned());
+            let snapshot = snapshot(&original);
+            let content = render(&snapshot).unwrap();
+            let document: Value = serde_json::from_str(&content).unwrap();
+            assert_eq!(document["category"], value);
+            assert_eq!(merge(&snapshot, &content).unwrap(), None);
+        }
+        for value in ["00", "backendSpecific"] {
+            let mut original = class();
+            original.category = AdtClassCategory::Other(value.to_owned());
+            assert!(matches!(
+                render(&snapshot(&original)),
+                Err(ProjectionError::InvalidAffField {
+                    field: "category",
+                    ..
+                })
+            ));
+        }
     }
 
     #[test]
     fn renders_class_properties_as_canonical_aff_v1() {
-        let properties = class();
-        let content = render_class_properties(&properties).unwrap();
+        let properties = class_snapshot(CLASS_XML).into_erased();
+        let content = render(&properties).unwrap();
         let document: Value = serde_json::from_str(&content).unwrap();
 
         assert!(content.ends_with('\n'));
@@ -580,23 +853,26 @@ mod tests {
     #[test]
     fn merges_class_edits_without_losing_adt_only_properties() {
         let original = class();
-        let mut edited: AffClass =
-            serde_json::from_str(&render_class_properties(&original).unwrap()).unwrap();
+        let snapshot = snapshot(&original);
+        let mut edited: ProjectedClassProperties =
+            serde_json::from_str(&render(&snapshot).unwrap()).unwrap();
         edited.header.description = "Updated class".to_owned();
         edited.header.original_language = "en-GB".to_owned();
-        edited.header.abap_language_version = AffClassAbapLanguageVersion::KeyUser;
-        edited.category = AffClassCategory::BusinessClass;
+        edited.header.abap_language_version = AbapLanguageVersion::KeyUser;
+        edited.category = ClassCategory::BusinessClass;
         edited.fix_point_arithmetic = false;
         edited.message_class = "Z_MESSAGES".to_owned();
 
-        let merged =
-            merge_class_properties(&original, &serde_json::to_string(&edited).unwrap()).unwrap();
+        let merged = merge(&snapshot, &serde_json::to_string(&edited).unwrap())
+            .unwrap()
+            .unwrap();
+        let merged: ClassProperties = serde_json::from_value(merged).unwrap();
 
         assert_eq!(merged.description, "Updated class");
         assert_eq!(merged.master_language, "6N");
         assert_eq!(
             merged.abap_language_version,
-            Some(AbapLanguageVersion::KeyUser)
+            Some(AdtAbapLanguageVersion::KeyUser)
         );
         assert_eq!(merged.category.as_str(), "businessClass");
         assert!(!merged.fix_point_arithmetic);
@@ -615,11 +891,11 @@ mod tests {
 
     #[test]
     fn rejects_class_descriptions_until_an_adt_backing_is_available() {
-        let original = class();
-        let mut edited: AffClass =
-            serde_json::from_str(&render_class_properties(&original).unwrap()).unwrap();
-        edited.descriptions = Some(AffClassDescriptions {
-            methods: vec![AffMethodDescription {
+        let original = class_snapshot(CLASS_XML).into_erased();
+        let mut edited: ProjectedClassProperties =
+            serde_json::from_str(&render(&original).unwrap()).unwrap();
+        edited.descriptions = Some(ClassDescriptions {
+            methods: vec![MethodDescription {
                 name: "RUN".to_owned(),
                 description: "Runs the class".to_owned(),
                 parameters: Vec::new(),
@@ -629,7 +905,7 @@ mod tests {
         });
 
         assert!(matches!(
-            merge_class_properties(&original, &serde_json::to_string(&edited).unwrap()),
+            merge(&original, &serde_json::to_string(&edited).unwrap()),
             Err(ProjectionError::UnsupportedAffProperty {
                 field: "descriptions",
                 ..
@@ -639,22 +915,22 @@ mod tests {
 
     #[test]
     fn validates_class_schema_fields_and_unique_description_names() {
-        let original = class();
-        let content = render_class_properties(&original).unwrap();
+        let original = class_snapshot(CLASS_XML).into_erased();
+        let content = render(&original).unwrap();
         let unknown = content.replacen('{', "{\n  \"unknown\": true,", 1);
         assert!(matches!(
-            merge_class_properties(&original, &unknown),
-            Err(ProjectionError::InvalidClassDocument(_))
+            merge(&original, &unknown),
+            Err(ProjectionError::Json(_))
         ));
 
-        let mut duplicate: AffClass = serde_json::from_str(&content).unwrap();
-        duplicate.descriptions = Some(AffClassDescriptions {
+        let mut duplicate: ProjectedClassProperties = serde_json::from_str(&content).unwrap();
+        duplicate.descriptions = Some(ClassDescriptions {
             types: vec![
-                AffNameDescription {
+                NameDescription {
                     name: "TYPE".to_owned(),
                     description: "First".to_owned(),
                 },
-                AffNameDescription {
+                NameDescription {
                     name: "TYPE".to_owned(),
                     description: "First".to_owned(),
                 },
@@ -663,21 +939,18 @@ mod tests {
         });
         let duplicate = serde_json::to_string(&duplicate).unwrap();
         assert!(matches!(
-            merge_class_properties(&original, &duplicate),
-            Err(ProjectionError::InvalidAffField {
-                field: "descriptions.types",
-                ..
-            })
+            merge(&original, &duplicate),
+            Err(ProjectionError::Validation(_))
         ));
 
-        let mut same_name: AffClass = serde_json::from_str(&content).unwrap();
-        same_name.descriptions = Some(AffClassDescriptions {
+        let mut same_name: ProjectedClassProperties = serde_json::from_str(&content).unwrap();
+        same_name.descriptions = Some(ClassDescriptions {
             types: vec![
-                AffNameDescription {
+                NameDescription {
                     name: "TYPE".to_owned(),
                     description: "First".to_owned(),
                 },
-                AffNameDescription {
+                NameDescription {
                     name: "TYPE".to_owned(),
                     description: "Second".to_owned(),
                 },
@@ -685,7 +958,7 @@ mod tests {
             ..Default::default()
         });
         assert!(matches!(
-            merge_class_properties(&original, &serde_json::to_string(&same_name).unwrap()),
+            merge(&original, &serde_json::to_string(&same_name).unwrap()),
             Err(ProjectionError::UnsupportedAffProperty {
                 field: "descriptions",
                 ..
@@ -695,7 +968,7 @@ mod tests {
         let mut invalid_language: Value = serde_json::from_str(&content).unwrap();
         invalid_language["header"]["originalLanguage"] = json!("not-supported");
         assert!(matches!(
-            merge_class_properties(&original, &invalid_language.to_string()),
+            merge(&original, &invalid_language.to_string()),
             Err(ProjectionError::InvalidAffField {
                 field: "header.originalLanguage",
                 ..

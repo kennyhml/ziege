@@ -7,10 +7,14 @@ description = "ABAP file-format projection for the Ziege tooling framework"
 repository = "https://github.com/kennyhml/ziege"
 
 [dependencies]
+garde = { version = "0.23", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
 zadt = { version = "0.1.0", path = "../zadt", default-features = false }
 
 [dev-dependencies]
+async-trait = "0.1.88"
 http = "1.0"
+tokio = { version = "1", features = ["macros", "rt"] }
+zvfs = { version = "0.1.0", path = "../zvfs" }

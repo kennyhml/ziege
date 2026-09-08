@@ -60,9 +60,11 @@ fn expand_object_type_item(
     let ObjectTypeArguments {
         properties: model,
         workbench_type,
+        media_types,
         collection,
         subobjects,
         capabilities,
+        resources,
     } = arguments;
     let conditional_attrs = attrs
         .iter()
@@ -81,21 +83,45 @@ fn expand_object_type_item(
             #(#conditional_attrs)*
             impl crate::objects::Create for #object {
                 type Payload = #properties;
+
+                #[doc(hidden)]
+                fn prepare_payload<T>(
+                    payload: &mut Self::Payload,
+                    reference: &crate::objects::ObjectRef<T>,
+                ) {
+                    payload.assign_reference(reference);
+                }
             }
         }
     });
-    let source_impl = capabilities.source.as_ref().and_then(|source| {
-        source.uri.as_ref().map(|uri| {
-            quote! {
-                #(#conditional_attrs)*
-                impl crate::objects::Source for #object {
-                    fn source_uri(properties: &Self::Properties) -> Option<&str> {
-                        Some((#uri).as_str())
-                    }
-                }
-            }
-        })
+    let source_impl = capabilities.source.is_some().then(|| {
+        quote! {
+            #(#conditional_attrs)*
+            impl crate::objects::Source for #object {}
+        }
     });
+    let source_components_impl = capabilities.source_components.is_some().then(|| {
+        quote! {
+            #(#conditional_attrs)*
+            impl crate::objects::SourceComponents for #object {}
+        }
+    });
+    let extraction = if let Some(extractor) = resources {
+        quote! { (#extractor)(properties) }
+    } else if let Some(uri) = capabilities
+        .source
+        .as_ref()
+        .and_then(|source| source.uri.as_ref())
+    {
+        quote! {
+            crate::ResourceView::new(&properties.links)
+                .with_main((#uri).as_str())
+        }
+    } else {
+        quote! {
+            crate::ResourceView::new(&properties.links)
+        }
+    };
     let runtime_create = if capabilities.create.is_some() {
         quote! {
             Some(crate::objects::descriptors::CreateCodec::for_type::<#object>())
@@ -110,31 +136,9 @@ fn expand_object_type_item(
     } else {
         quote!(None)
     };
-    let runtime_source = if capabilities.source.is_some() {
-        quote! {
-            Some(crate::objects::descriptors::RuntimeCapabilities::source_adapter::<#object>)
-        }
-    } else {
-        quote!(None)
-    };
-    let runtime_source_component = if capabilities.source_components.is_some() {
-        quote! {
-            Some(
-                crate::objects::descriptors::RuntimeCapabilities::source_component_adapter::<#object>
-            )
-        }
-    } else {
-        quote!(None)
-    };
-    let runtime_object_structure = if capabilities.structure.is_some() {
-        quote! {
-            Some(
-                crate::objects::descriptors::RuntimeCapabilities::object_structure_adapter::<#object>
-            )
-        }
-    } else {
-        quote!(None)
-    };
+    let runtime_source = capabilities.source.is_some();
+    let runtime_source_component = capabilities.source_components.is_some();
+    let runtime_object_structure = capabilities.structure.is_some();
     let structure_impl = capabilities.structure.is_some().then(|| {
         quote! {
             #(#conditional_attrs)*
@@ -204,31 +208,21 @@ fn expand_object_type_item(
         impl crate::objects::private::Sealed for #object {}
 
         #(#conditional_attrs)*
-        impl crate::objects::Links for #model {
-            fn links(&self) -> &[crate::AdvertisedLink] {
-                &self.links
+        impl crate::Resources for #model {
+            fn resources(&self) -> crate::ResourceView<'_> {
+                let properties = self;
+                #extraction
             }
         }
 
         #(#conditional_attrs)*
-        impl crate::objects::ObjectIdentity for #model {
+        impl crate::objects::Identity for #model {
             fn object_name(&self) -> &str {
                 &self.name
             }
 
-            fn object_type(&self) -> &crate::objects::GlobalWorkbenchType {
-                &self.object_type
-            }
-        }
-
-        #(#conditional_attrs)*
-        impl crate::objects::AssignObjectIdentity for #model {
-            fn assign_identity(
-                &mut self,
-                identity: &impl crate::objects::ObjectIdentity,
-            ) {
-                self.name = identity.object_name().to_owned();
-                self.object_type = identity.object_type().clone();
+            fn workbench_type(&self) -> &crate::objects::GlobalWorkbenchType {
+                &self.workbench_type
             }
         }
 
@@ -238,12 +232,14 @@ fn expand_object_type_item(
 
             const WORKBENCH_TYPE: crate::objects::GlobalWorkbenchType =
                 crate::objects::GlobalWorkbenchType::new(#workbench_type);
+            const MEDIA_TYPES: crate::MediaTypes = #media_types;
         }
 
         #addressing_impl
 
         #create_impl
         #source_impl
+        #source_components_impl
         #structure_impl
 
         #(#conditional_attrs)*
@@ -268,9 +264,11 @@ fn expand_object_type_item(
 struct ObjectTypeArguments {
     properties: Type,
     workbench_type: LitStr,
+    media_types: Expr,
     collection: Option<(LitStr, LitStr)>,
     subobjects: Vec<SubObjectArgument>,
     capabilities: Capabilities,
+    resources: Option<Expr>,
 }
 
 struct SubObjectArgument {
@@ -283,10 +281,12 @@ impl Parse for ObjectTypeArguments {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let mut properties = None;
         let mut workbench_type = None;
+        let mut media_types = None;
         let mut collection = None;
         let mut subobject = None;
         let mut subobjects = None;
         let mut capabilities = None;
+        let mut resources = None;
 
         while !input.is_empty() {
             let key = input.parse::<Ident>()?;
@@ -298,6 +298,10 @@ impl Parse for ObjectTypeArguments {
                 reject_duplicate(&workbench_type, &key, "workbench_type")?;
                 input.parse::<Token![=]>()?;
                 workbench_type = Some(input.parse::<LitStr>()?);
+            } else if key == "media_types" {
+                reject_duplicate(&media_types, &key, "media_types")?;
+                input.parse::<Token![=]>()?;
+                media_types = Some(input.parse::<Expr>()?);
             } else if key == "collection" {
                 reject_duplicate(&collection, &key, "collection")?;
                 collection = Some(parse_collection(input)?);
@@ -310,6 +314,10 @@ impl Parse for ObjectTypeArguments {
             } else if key == "capabilities" {
                 reject_duplicate(&capabilities, &key, "capabilities")?;
                 capabilities = Some(parse_capabilities(input)?);
+            } else if key == "resources" {
+                reject_duplicate(&resources, &key, "resources")?;
+                input.parse::<Token![=]>()?;
+                resources = Some(input.parse::<Expr>()?);
             } else {
                 return Err(Error::new(
                     key.span(),
@@ -331,6 +339,9 @@ impl Parse for ObjectTypeArguments {
                 Span::call_site(),
                 "missing required `workbench_type` argument",
             )
+        })?;
+        let media_types = media_types.ok_or_else(|| {
+            Error::new(Span::call_site(), "missing required `media_types` argument")
         })?;
         let capabilities = capabilities.ok_or_else(|| {
             Error::new(
@@ -373,9 +384,11 @@ impl Parse for ObjectTypeArguments {
         Ok(Self {
             properties,
             workbench_type,
+            media_types,
             collection,
             subobjects,
             capabilities,
+            resources,
         })
     }
 }
@@ -682,7 +695,7 @@ fn expand_create_properties(input: DeriveInput) -> Result<TokenStream2> {
     let mut generated_fields = Vec::new();
     let mut default_helpers = Vec::new();
     let mut name_identity = None;
-    let mut object_type_identity = None;
+    let mut workbench_type_identity = None;
     let mut parent_context = None;
 
     for (field_index, field) in fields.into_iter().enumerate() {
@@ -711,10 +724,13 @@ fn expand_create_properties(input: DeriveInput) -> Result<TokenStream2> {
                         "duplicate `name` identity field",
                     ));
                 }
-            } else if object_type_identity.replace(field_name.clone()).is_some() {
+            } else if workbench_type_identity
+                .replace(field_name.clone())
+                .is_some()
+            {
                 return Err(Error::new(
                     field_name.span(),
-                    "duplicate `object_type` identity field",
+                    "duplicate `workbench_type` identity field",
                 ));
             }
         }
@@ -803,22 +819,16 @@ fn expand_create_properties(input: DeriveInput) -> Result<TokenStream2> {
             "`CreateProperties` requires an `identity` field named `name`",
         )
     })?;
-    let object_type_identity = object_type_identity.ok_or_else(|| {
+    let workbench_type_identity = workbench_type_identity.ok_or_else(|| {
         Error::new(
             generated_name.span(),
-            "`CreateProperties` requires an `identity` field named `object_type`",
+            "`CreateProperties` requires an `identity` field named `workbench_type`",
         )
     })?;
-    let assign_reference = parent_context.map(|parent| {
+    let assign_parent = parent_context.map(|parent| {
         quote! {
-            fn assign_reference<T>(
-                &mut self,
-                reference: &crate::objects::ObjectRef<T>,
-            ) {
-                self.assign_identity(reference);
-                if let Some(parent) = reference.parent_reference() {
-                    self.#parent = parent;
-                }
+            if let Some(parent) = reference.parent_reference() {
+                self.#parent = parent;
             }
         }
     });
@@ -845,28 +855,15 @@ fn expand_create_properties(input: DeriveInput) -> Result<TokenStream2> {
             pub fn builder() -> #builder_name {
                 #builder_name::default()
             }
-        }
 
-        impl crate::objects::ObjectIdentity for #generated_name {
-            fn object_name(&self) -> &str {
-                &self.#name_identity
-            }
-
-            fn object_type(&self) -> &crate::objects::GlobalWorkbenchType {
-                &self.#object_type_identity
-            }
-        }
-
-        impl crate::objects::AssignObjectIdentity for #generated_name {
-            fn assign_identity(
+            pub(crate) fn assign_reference<T>(
                 &mut self,
-                identity: &impl crate::objects::ObjectIdentity,
+                reference: &crate::objects::ObjectRef<T>,
             ) {
-                self.#name_identity = identity.object_name().to_owned();
-                self.#object_type_identity = identity.object_type().clone();
+                self.#name_identity = reference.name().to_owned();
+                self.#workbench_type_identity = reference.workbench_type().clone();
+                #assign_parent
             }
-
-            #assign_reference
         }
     })
 }
@@ -1026,10 +1023,10 @@ fn validate_field_options(field: &Ident, ty: &Type, options: &FieldOptions) -> R
         ));
     }
     if let Some(span) = options.identity {
-        if field != "name" && field != "object_type" {
+        if field != "name" && field != "workbench_type" {
             return Err(Error::new(
                 span,
-                "`identity` is only valid on fields named `name` or `object_type`",
+                "`identity` is only valid on fields named `name` or `workbench_type`",
             ));
         }
         if options.default.is_none() {
@@ -1156,6 +1153,7 @@ mod tests {
         quote! {
             properties = ClassProperties,
             workbench_type = "CLAS/OC",
+            media_types = MediaTypes::new(&["application/test+xml"]),
             collection(scheme = "category", term = "classes"),
             capabilities(#capabilities)
         }
@@ -1179,8 +1177,39 @@ mod tests {
 
         assert!(expanded.contains("pub struct Class"));
         assert!(expanded.contains("impl crate :: objects :: ObjectType for Class"));
-        assert!(expanded.contains("impl crate :: objects :: Links for ClassProperties"));
-        assert!(expanded.contains("impl crate :: objects :: ObjectIdentity for ClassProperties"));
+        let media_types = quote! {
+            const MEDIA_TYPES: crate::MediaTypes = MediaTypes::new(&["application/test+xml"]);
+        }
+        .to_string();
+        assert!(expanded.contains(&media_types));
+        assert!(!expanded.contains("impl crate :: objects :: Links"));
+        assert!(expanded.contains("impl crate :: objects :: private :: Sealed for Class { }"));
+        assert!(expanded.contains("impl crate :: Resources for ClassProperties"));
+        let signature = quote! {
+            fn resources(&self) -> crate::ResourceView<'_>
+        }
+        .to_string();
+        assert!(expanded.contains(&signature));
+        assert!(expanded.contains("let properties = self ;"));
+        assert!(expanded.contains("crate :: ResourceView :: new (& properties . links)"));
+        assert!(!expanded.contains("base"));
+        assert!(!expanded.contains("AdtUri"));
+        assert!(!expanded.contains("SnapshotResources"));
+        assert!(!expanded.contains("with_main"));
+        assert!(!expanded.contains("let mut resources"));
+        assert!(expanded.contains("impl crate :: objects :: Identity for ClassProperties"));
+        let identity_accessor = quote! {
+            fn workbench_type(&self) -> &crate::objects::GlobalWorkbenchType {
+                &self.workbench_type
+            }
+        }
+        .to_string();
+        assert!(expanded.contains(&identity_accessor));
+        assert!(!expanded.contains("fn object_type"));
+        assert!(!expanded.contains("AssignObjectIdentity"));
+        assert!(!expanded.contains("assign_identity"));
+        assert!(!expanded.contains("assign_reference"));
+        assert!(!expanded.contains("& mut"));
         assert!(expanded.contains("impl crate :: objects :: PrimaryObjectType for Class"));
         assert!(expanded.contains("impl crate :: objects :: private :: PrimaryMetadata for Class"));
         assert!(expanded.contains("type Properties = ClassProperties"));
@@ -1188,7 +1217,9 @@ mod tests {
         assert!(!expanded.contains("AdtObject"));
         assert!(expanded.contains("ObjectTypeDescriptor :: new"));
         assert!(expanded.contains("PropertiesCodec :: for_type :: < Self >"));
-        assert!(expanded.contains("RuntimeCapabilities :: new"));
+        assert!(
+            expanded.contains("RuntimeCapabilities :: new (None , None , false , false , false")
+        );
         assert!(!expanded.contains("RuntimeObjectType"));
         assert!(!expanded.contains("impl crate :: objects :: Create for Class"));
     }
@@ -1212,19 +1243,109 @@ mod tests {
 
         assert!(expanded.contains("impl crate :: objects :: Create for Class"));
         assert!(expanded.contains("type Payload = ClassCreateProperties"));
+        let prepare_payload = quote! {
+            #[doc(hidden)]
+            fn prepare_payload<T>(
+                payload: &mut Self::Payload,
+                reference: &crate::objects::ObjectRef<T>,
+            ) {
+                payload.assign_reference(reference);
+            }
+        }
+        .to_string();
+        assert!(expanded.contains(&prepare_payload));
         assert!(expanded.contains("impl crate :: objects :: ToXml for ClassCreateProperties"));
         assert!(!expanded.contains("fn set_identity"));
+        assert!(!expanded.contains("AssignObjectIdentity"));
+        assert!(!expanded.contains("assign_identity"));
+        assert!(!expanded.contains("& mut self"));
+        assert!(!expanded.contains("self . name ="));
+        assert!(!expanded.contains("self . workbench_type ="));
         assert!(expanded.contains("CreateCodec :: for_type :: < Class >"));
         assert!(
             expanded.contains("< ClassProperties as crate :: objects :: ToXml > :: XML_NAMESPACES")
         );
-        assert!(expanded.contains("impl crate :: objects :: Source for Class"));
+        assert!(expanded.contains("impl crate :: objects :: Source for Class { }"));
+        assert!(expanded.contains("impl crate :: objects :: SourceComponents for Class { }"));
         assert!(expanded.contains("impl crate :: objects :: Structure for Class"));
-        assert!(expanded.contains("RuntimeCapabilities :: source_adapter :: < Class >"));
-        assert!(expanded.contains("RuntimeCapabilities :: source_component_adapter :: < Class >"));
-        assert!(expanded.contains("RuntimeCapabilities :: object_structure_adapter :: < Class >"));
-        assert!(expanded.contains("properties . source_uri"));
+        assert!(!expanded.contains("_adapter"));
+        assert!(!expanded.contains("source_parts"));
+        assert!(expanded.contains("true , true , true"));
+        assert!(expanded.contains(
+            "crate :: ResourceView :: new (& properties . links) . with_main ((properties . source_uri) . as_str ())"
+        ));
         assert!(expanded.contains("crate :: objects :: ImmediateRun > :: RUN"));
+    }
+
+    #[test]
+    fn object_type_custom_resources_override_default_extraction() {
+        for extractor in [
+            quote!(family::resources),
+            quote!(|properties: &ClassProperties| -> crate::ResourceView<'_> {
+                extract(properties)
+            }),
+        ] {
+            for source in [quote!(Source), quote!(Source(properties.source_uri))] {
+                let arguments = object_arguments(quote!(#source, SourceComponents));
+                let expanded = expand_object_type(
+                    quote!(#arguments, resources = #extractor),
+                    quote!(
+                        pub struct Class;
+                    ),
+                )
+                .unwrap()
+                .to_string();
+
+                let call = quote!((#extractor)(properties)).to_string();
+                assert!(expanded.contains(&call));
+                assert!(expanded.contains("impl crate :: Resources for ClassProperties"));
+                assert!(
+                    expanded.contains("impl crate :: objects :: private :: Sealed for Class { }")
+                );
+                assert!(!expanded.contains("base"));
+                assert!(!expanded.contains("AdtUri"));
+                assert!(expanded.contains("impl crate :: objects :: Source for Class { }"));
+                assert!(
+                    expanded.contains("impl crate :: objects :: SourceComponents for Class { }")
+                );
+                assert!(!expanded.contains("ResourceView :: new"));
+                assert!(!expanded.contains("SnapshotResources"));
+                assert!(!expanded.contains("with_main"));
+                assert!(!expanded.contains("impl crate :: objects :: Links"));
+            }
+        }
+
+        let arguments = object_arguments(quote!());
+        let error = syn::parse2::<ObjectTypeArguments>(quote! {
+            #arguments, resources = first, resources = second
+        })
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(error.contains("duplicate `object_type` argument `resources`"));
+    }
+
+    #[test]
+    fn object_type_requires_media_types_and_rejects_duplicates() {
+        let missing = syn::parse2::<ObjectTypeArguments>(quote! {
+            properties = ClassProperties,
+            workbench_type = "CLAS/OC",
+            collection(scheme = "category", term = "classes"),
+            capabilities()
+        })
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(missing.contains("missing required `media_types` argument"));
+
+        let arguments = object_arguments(quote!());
+        let duplicate = syn::parse2::<ObjectTypeArguments>(quote! {
+            #arguments, media_types = OTHER_MEDIA_TYPES
+        })
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(duplicate.contains("duplicate `object_type` argument `media_types`"));
     }
 
     #[test]
@@ -1260,6 +1381,7 @@ mod tests {
             quote! {
                 properties = FunctionGroupProperties,
                 workbench_type = "FUGR/F",
+                media_types = MediaTypes::new(&["application/test+xml"]),
                 collection(scheme = "functions", term = "groups"),
                 subobjects(
                     FunctionModule(
@@ -1299,6 +1421,7 @@ mod tests {
             quote! {
                 properties = FunctionModuleProperties,
                 workbench_type = "FUGR/FF",
+                media_types = MediaTypes::new(&["application/test+xml"]),
                 subobject,
                 capabilities(Create(FunctionModuleCreateProperties), Source(properties.source_uri))
             },
@@ -1319,6 +1442,7 @@ mod tests {
         let missing = syn::parse2::<ObjectTypeArguments>(quote! {
             properties = Properties,
             workbench_type = "TEST/X",
+            media_types = MediaTypes::new(&["application/test+xml"]),
             capabilities()
         })
         .err()
@@ -1329,6 +1453,7 @@ mod tests {
         let ambiguous = syn::parse2::<ObjectTypeArguments>(quote! {
             properties = Properties,
             workbench_type = "TEST/X",
+            media_types = MediaTypes::new(&["application/test+xml"]),
             collection(scheme = "test", term = "objects"),
             subobject,
             capabilities()
@@ -1341,6 +1466,7 @@ mod tests {
         let empty_relation = syn::parse2::<ObjectTypeArguments>(quote! {
             properties = Properties,
             workbench_type = "TEST/X",
+            media_types = MediaTypes::new(&["application/test+xml"]),
             collection(scheme = "test", term = "objects"),
             subobjects(Child(relation = "", parent_variable = "parent")),
             capabilities()
@@ -1360,9 +1486,10 @@ mod tests {
             pub struct ClassProperties {
                 #[for_create(identity, default)]
                 #[serde(rename = "@adtcore:name")]
-                pub name: String,
+                pub(crate) name: String,
                 #[for_create(identity, default = <Class as ObjectType>::WORKBENCH_TYPE)]
-                pub object_type: GlobalWorkbenchType,
+                #[serde(rename = "@adtcore:type")]
+                pub(crate) workbench_type: GlobalWorkbenchType,
                 #[for_create]
                 pub description: String,
                 #[for_create(optional, doc = "Creation language.")]
@@ -1392,33 +1519,103 @@ mod tests {
         assert!(expanded.contains("skip_serializing_if = \"Option::is_none\""));
         assert!(expanded.contains("setter (each (name = \"source\"))"));
         assert!(expanded.contains("serde (with = \"wire\")"));
-        assert!(expanded.contains("self . name = identity . object_name () . to_owned ()"));
+        assert!(expanded.contains("self . name = reference . name () . to_owned ()"));
+        assert!(
+            expanded.contains("self . workbench_type = reference . workbench_type () . clone ()")
+        );
+        assert!(expanded.contains("pub (crate) name : String"));
+        assert!(expanded.contains("pub (crate) workbench_type : GlobalWorkbenchType"));
+        assert!(expanded.contains("serde (rename = \"@adtcore:type\")"));
+        assert!(!expanded.contains("object_type"));
         assert!(!expanded.contains("ignored"));
-        assert!(
-            expanded.contains("impl crate :: objects :: ObjectIdentity for ClassCreateProperties")
-        );
-        assert!(
-            expanded.contains(
-                "impl crate :: objects :: AssignObjectIdentity for ClassCreateProperties"
-            )
-        );
-        assert!(expanded.contains("fn assign_identity"));
-        assert!(expanded.contains("fn assign_reference"));
+        assert!(expanded.contains("impl ClassCreateProperties"));
+        assert!(expanded.contains("pub fn builder () -> ClassCreatePropertiesBuilder"));
+        assert!(expanded.contains("builder (default , setter (skip))"));
+        assert_eq!(expanded.matches("setter (skip)").count(), 3);
+        assert!(!expanded.contains("impl crate :: objects :: Identity"));
+        assert!(!expanded.contains("assign_identity"));
+        assert!(expanded.contains("pub (crate) fn assign_reference < T >"));
         assert!(expanded.contains("reference : & crate :: objects :: ObjectRef < T >"));
-        assert!(expanded.contains("reference . parent_reference ()"));
-        assert!(expanded.contains("self . container = parent"));
+        let assign_parent = quote! {
+            if let Some(parent) = reference.parent_reference() {
+                self.container = parent;
+            }
+        }
+        .to_string();
+        assert!(expanded.contains(&assign_parent));
         assert!(!expanded.contains("impl crate :: objects :: PropertyModel"));
     }
 
     #[test]
+    fn create_properties_assigns_reference_without_parent_field() {
+        let expanded = expand_derive(quote! {
+            #[create_properties(name = ClassCreateProperties)]
+            pub struct ClassProperties {
+                #[for_create(identity, default)]
+                pub name: String,
+                #[for_create(identity, default)]
+                pub workbench_type: GlobalWorkbenchType,
+            }
+        })
+        .unwrap();
+
+        let assign_reference = quote! {
+            pub(crate) fn assign_reference<T>(
+                &mut self,
+                reference: &crate::objects::ObjectRef<T>,
+            ) {
+                self.name = reference.name().to_owned();
+                self.workbench_type = reference.workbench_type().clone();
+            }
+        }
+        .to_string();
+        assert!(expanded.contains(&assign_reference));
+        assert!(expanded.contains("pub fn builder () -> ClassCreatePropertiesBuilder"));
+        assert!(!expanded.contains("parent_reference"));
+        assert!(!expanded.contains("impl crate :: objects :: Identity"));
+        assert!(!expanded.contains("assign_identity"));
+        assert!(!expanded.contains("impl ClassProperties"));
+    }
+
+    #[test]
     fn create_properties_rejects_invalid_field_options() {
+        let old_identity_name = expand_derive(quote! {
+            #[create_properties(name = Create)]
+            struct Properties {
+                #[for_create(identity, default)]
+                name: String,
+                #[for_create(identity, default)]
+                object_type: GlobalWorkbenchType,
+            }
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(
+            old_identity_name
+                .contains("`identity` is only valid on fields named `name` or `workbench_type`")
+        );
+
+        let missing_workbench_type = expand_derive(quote! {
+            #[create_properties(name = Create)]
+            struct Properties {
+                #[for_create(identity, default)]
+                name: String,
+            }
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(
+            missing_workbench_type
+                .contains("`CreateProperties` requires an `identity` field named `workbench_type`")
+        );
+
         let optional_identity = expand_derive(quote! {
             #[create_properties(name = Create)]
             struct Properties {
                 #[for_create(identity, default, optional)]
                 name: String,
                 #[for_create(identity, default)]
-                object_type: Type,
+                workbench_type: Type,
             }
         })
         .unwrap_err()
@@ -1431,7 +1628,7 @@ mod tests {
                 #[for_create(identity, default)]
                 name: String,
                 #[for_create(identity, default)]
-                object_type: Type,
+                workbench_type: Type,
                 #[for_create(each = "value")]
                 value: String,
             }
@@ -1449,7 +1646,7 @@ mod tests {
                 #[for_create(identity, default)]
                 name: String,
                 #[for_create(identity, default)]
-                object_type: Type,
+                workbench_type: Type,
                 #[for_create(optional)]
                 #[serde(skip_serializing_if = "custom")]
                 value: Option<String>,

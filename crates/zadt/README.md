@@ -142,6 +142,10 @@ converting between typed and erased snapshots preserves the location and known
 parent metadata. Follow-up queries and property updates retain that location
 rather than deriving it again from the logical key.
 
+Erased snapshots expose `typed_properties::<Class>()` to borrow the concrete
+properties without copying. The family is checked at runtime; `properties()`
+remains available for exporting owned wire-shaped JSON.
+
 Property updates are read-modify-write operations: clone the loaded typed
 properties, or edit the owned JSON returned by an erased snapshot, preserving
 fields that are not being changed. Updates reject a mismatched object name or

@@ -678,6 +678,7 @@ async fn traverses_packages_groups_types_and_objects() {
     assert_eq!(objects[0].label, "ZCL_DEMO");
     assert!(!objects[0].is_directory());
     let object = objects[0].clone();
+    assert_eq!(object.object().unwrap().workbench_type.as_str(), "CLAS/OC");
     assert_eq!(
         vfs.object_entry(objects[0].id).unwrap().uri().as_str(),
         "/sap/bc/adt/oo/classes/zcl_demo"
@@ -694,6 +695,7 @@ async fn traverses_packages_groups_types_and_objects() {
     let json = serde_json::to_string(&objects[0]).unwrap();
     let serialized: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!(serialized["object"]["objectType"], "CLAS/OC");
+    assert!(serialized["object"].get("workbenchType").is_none());
     assert_eq!(
         serialized["object"]["uri"],
         "/sap/bc/adt/oo/classes/zcl_demo"

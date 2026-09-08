@@ -2,40 +2,25 @@ use zadt::GlobalWorkbenchType;
 
 use crate::{
     ProjectionError,
-    format::{FormatDescriptor, ObjectFormat},
-    formats::{ClassDescriptor, DataElementDescriptor, ProgramDescriptor},
+    formats::{ObjectFormat, clas, dtel, prog},
 };
 
-static FORMATS: &[&dyn FormatDescriptor] =
-    &[&ProgramDescriptor, &ClassDescriptor, &DataElementDescriptor];
+static FORMATS: &[&ObjectFormat] = &[
+    &prog::PROGRAM_FORMAT,
+    &clas::CLASS_FORMAT,
+    &dtel::DATA_ELEMENT_FORMAT,
+];
 
 pub(crate) fn for_workbench_type(
-    object_type: &GlobalWorkbenchType,
-) -> Result<&'static dyn FormatDescriptor, ProjectionError> {
+    workbench_type: &GlobalWorkbenchType,
+) -> Result<&'static ObjectFormat, ProjectionError> {
     FORMATS
         .iter()
         .copied()
-        .find(|descriptor| descriptor.repository_types().contains(object_type))
+        .find(|format| format.workbench_types().contains(workbench_type))
         .ok_or_else(|| ProjectionError::UnsupportedRepositoryType {
-            object_type: object_type.clone(),
+            workbench_type: workbench_type.clone(),
         })
-}
-
-pub(crate) fn by_format(format: ObjectFormat) -> &'static dyn FormatDescriptor {
-    FORMATS
-        .iter()
-        .copied()
-        .find(|descriptor| descriptor.format() == format)
-        .expect("public AFF formats are registered")
-}
-
-pub(crate) fn descriptors() -> &'static [&'static dyn FormatDescriptor] {
-    FORMATS
-}
-
-/// Returns every registered AFF family.
-pub fn formats() -> impl ExactSizeIterator<Item = ObjectFormat> {
-    FORMATS.iter().map(|descriptor| descriptor.format())
 }
 
 #[cfg(test)]
@@ -43,44 +28,54 @@ mod tests {
     use super::*;
 
     #[test]
+    fn lookups_return_the_registered_static_format() {
+        for &format in FORMATS {
+            for workbench_type in format.workbench_types() {
+                assert!(std::ptr::eq(
+                    for_workbench_type(workbench_type).unwrap(),
+                    format
+                ));
+            }
+        }
+    }
+
+    #[test]
     fn registered_formats_have_unique_identities() {
-        for (index, descriptor) in FORMATS.iter().enumerate() {
+        for (index, format) in FORMATS.iter().enumerate() {
             assert!(
-                FORMATS[index + 1..]
-                    .iter()
-                    .all(|other| other.format() != descriptor.format()),
+                FORMATS[index + 1..].iter().all(|other| other != format),
                 "registered {:?} more than once",
-                descriptor.format()
+                format
             );
         }
     }
 
     #[test]
     fn registered_formats_have_unique_repository_types() {
-        for (index, descriptor) in FORMATS.iter().enumerate() {
-            for object_type in descriptor.repository_types() {
+        for (index, format) in FORMATS.iter().enumerate() {
+            for workbench_type in format.workbench_types() {
                 assert!(
                     FORMATS[index + 1..]
                         .iter()
-                        .all(|other| !other.repository_types().contains(object_type)),
-                    "registered `{object_type}` for more than one AFF format"
+                        .all(|other| !other.workbench_types().contains(workbench_type)),
+                    "registered `{workbench_type}` for more than one AFF format"
                 );
             }
         }
     }
 
     #[test]
-    fn registered_formats_have_unique_file_components() {
-        for descriptor in FORMATS {
-            let files = descriptor.files();
+    fn registered_formats_have_unique_file_templates() {
+        for format in FORMATS {
+            let files = format.files();
             for (index, file) in files.iter().enumerate() {
                 assert!(
                     files[index + 1..]
                         .iter()
-                        .all(|other| other.component() != file.component()),
-                    "registered component `{}` more than once for {:?}",
-                    file.component(),
-                    descriptor.format()
+                        .all(|other| other.template() != file.template()),
+                    "registered file template `{}` more than once for {:?}",
+                    file.template(),
+                    format
                 );
             }
         }
