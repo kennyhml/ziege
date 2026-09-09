@@ -267,7 +267,7 @@ mod test_support {
 #[cfg(test)]
 mod tests {
     use zadt::{
-        Class, ClassProperties, DataElement, Domain, EntityTag, Include, ObjectType,
+        Class, ClassProperties, DataElement, EntityTag, Include, ObjectType,
         Operation, Program, ToXml, WorkbenchVersion, XmlCodec,
     };
 
@@ -317,26 +317,6 @@ mod tests {
                 error.to_string(),
                 format!("JSON conversion failed: {message}")
             );
-        }
-    }
-
-    #[test]
-    fn unsupported_snapshot_families_fail_projection() {
-        for snapshots in [
-            fixture_snapshots::<Domain>(
-                "XFELD",
-                "/sap/bc/adt/ddic/domains/xfeld",
-                include_bytes!("../../zadt/tests/fixtures/domain-xfeld.xml"),
-            ),
-        ] {
-            for snapshot in snapshots {
-                let expected = snapshot.reference().workbench_type().clone();
-                assert!(matches!(
-                    project(snapshot),
-                    Err(ProjectionError::UnsupportedRepositoryType { workbench_type })
-                        if workbench_type == expected
-                ));
-            }
         }
     }
 

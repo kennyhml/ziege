@@ -957,7 +957,7 @@ fn apply_label(
     }
 }
 
-const DATA_TYPES: &[&str] = &[
+pub(super) const DATA_TYPES: &[&str] = &[
     "ACCP",
     "CHAR",
     "CLNT",
