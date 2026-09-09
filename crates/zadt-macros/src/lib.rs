@@ -65,6 +65,7 @@ fn expand_object_type_item(
         subobjects,
         capabilities,
         resources,
+        container,
     } = arguments;
     let conditional_attrs = attrs
         .iter()
@@ -122,6 +123,14 @@ fn expand_object_type_item(
             crate::ResourceView::new(&properties.links)
         }
     };
+    let container_impl = container.map(|container| {
+        quote! {
+            fn container(&self) -> Option<&crate::objects::AdvertisedObjectReference> {
+                let properties = self;
+                #container
+            }
+        }
+    });
     let runtime_create = if capabilities.create.is_some() {
         quote! {
             Some(crate::objects::descriptors::CreateCodec::for_type::<#object>())
@@ -224,6 +233,8 @@ fn expand_object_type_item(
             fn workbench_type(&self) -> &crate::objects::GlobalWorkbenchType {
                 &self.workbench_type
             }
+
+            #container_impl
         }
 
         #(#conditional_attrs)*
@@ -269,6 +280,7 @@ struct ObjectTypeArguments {
     subobjects: Vec<SubObjectArgument>,
     capabilities: Capabilities,
     resources: Option<Expr>,
+    container: Option<Expr>,
 }
 
 struct SubObjectArgument {
@@ -287,6 +299,7 @@ impl Parse for ObjectTypeArguments {
         let mut subobjects = None;
         let mut capabilities = None;
         let mut resources = None;
+        let mut container = None;
 
         while !input.is_empty() {
             let key = input.parse::<Ident>()?;
@@ -318,6 +331,10 @@ impl Parse for ObjectTypeArguments {
                 reject_duplicate(&resources, &key, "resources")?;
                 input.parse::<Token![=]>()?;
                 resources = Some(input.parse::<Expr>()?);
+            } else if key == "container" {
+                reject_duplicate(&container, &key, "container")?;
+                input.parse::<Token![=]>()?;
+                container = Some(input.parse::<Expr>()?);
             } else {
                 return Err(Error::new(
                     key.span(),
@@ -389,6 +406,7 @@ impl Parse for ObjectTypeArguments {
             subobjects,
             capabilities,
             resources,
+            container,
         })
     }
 }
@@ -1206,6 +1224,7 @@ mod tests {
         .to_string();
         assert!(expanded.contains(&identity_accessor));
         assert!(!expanded.contains("fn object_type"));
+        assert!(!expanded.contains("fn container"));
         assert!(!expanded.contains("AssignObjectIdentity"));
         assert!(!expanded.contains("assign_identity"));
         assert!(!expanded.contains("assign_reference"));
@@ -1323,6 +1342,39 @@ mod tests {
         .unwrap()
         .to_string();
         assert!(error.contains("duplicate `object_type` argument `resources`"));
+    }
+
+    #[test]
+    fn object_type_exposes_the_configured_borrowed_container() {
+        let arguments = object_arguments(quote!());
+        for container in [
+            quote!(Some(&properties.container)),
+            quote!(properties.owner.as_ref()),
+        ] {
+            let expanded = expand_object_type(
+                quote!(#arguments, container = #container),
+                quote!(
+                    pub struct Class;
+                ),
+            )
+            .unwrap()
+            .to_string();
+            let accessor = quote! {
+                fn container(&self) -> Option<&crate::objects::AdvertisedObjectReference> {
+                    let properties = self;
+                    #container
+                }
+            }
+            .to_string();
+            assert!(expanded.contains(&accessor));
+        }
+        let error = syn::parse2::<ObjectTypeArguments>(quote! {
+            #arguments, container = None, container = None
+        })
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(error.contains("duplicate `object_type` argument `container`"));
     }
 
     #[test]

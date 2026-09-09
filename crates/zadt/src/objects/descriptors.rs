@@ -1,8 +1,8 @@
 use super::{
-    AccessControl, AnnotationDefinition, Class, Create, DataDefinition, DataElement, Domain,
-    ErasedProperties, FunctionGroup, FunctionGroupInclude, FunctionModule, GlobalWorkbenchType,
-    Identity, Include, Interface, MetadataExtension, ObjectKey, ObjectRef, ObjectType, Package,
-    Program, Resources, RunCapability, ServiceDefinition, ToXml, XmlCodec,
+    AccessControl, AdvertisedObjectReference, AnnotationDefinition, Class, Create, DataDefinition,
+    DataElement, Domain, ErasedProperties, FunctionGroup, FunctionGroupInclude, FunctionModule,
+    GlobalWorkbenchType, Identity, Include, Interface, MetadataExtension, ObjectKey, ObjectRef,
+    ObjectType, Package, Program, Resources, RunCapability, ServiceDefinition, ToXml, XmlCodec,
 };
 use crate::{CategoryId, ResourceView, compatibility::MediaTypes, error::ObjectError};
 
@@ -115,6 +115,13 @@ impl ObjectTypeDescriptor {
         (self.properties.resources)(properties)
     }
 
+    pub(crate) fn container<'a>(
+        &self,
+        properties: &'a ErasedProperties,
+    ) -> Option<&'a AdvertisedObjectReference> {
+        (self.properties.container)(properties)
+    }
+
     pub(crate) fn properties_from_xml(
         &self,
         object: &ObjectKey<()>,
@@ -158,6 +165,7 @@ type EncodeXmlFn = fn(&ObjectKey, &ErasedProperties) -> Result<Vec<u8>, ObjectEr
 type EncodeJsonFn = fn(&ObjectKey, &ErasedProperties) -> Result<serde_json::Value, ObjectError>;
 type EncodeCreationFn = fn(&ObjectRef, serde_json::Value) -> Result<Vec<u8>, ObjectError>;
 type ResourcesFn = for<'a> fn(&'a ErasedProperties) -> ResourceView<'a>;
+type ContainerFn = fn(&ErasedProperties) -> Option<&AdvertisedObjectReference>;
 
 /// Type-erased codecs and resource extraction for one complete properties representation.
 #[derive(Clone, Copy, Debug)]
@@ -168,6 +176,7 @@ pub(crate) struct PropertiesCodec {
     encode_xml: EncodeXmlFn,
     encode_json: EncodeJsonFn,
     resources: ResourcesFn,
+    container: ContainerFn,
 }
 
 impl PropertiesCodec {
@@ -179,6 +188,7 @@ impl PropertiesCodec {
             encode_xml: Self::encode_xml::<T>,
             encode_json: Self::encode_json::<T>,
             resources: Self::resources::<T>,
+            container: Self::container::<T>,
         }
     }
 
@@ -224,6 +234,12 @@ impl PropertiesCodec {
 
     fn resources<T: ObjectType>(properties: &ErasedProperties) -> ResourceView<'_> {
         Self::properties::<T>(properties).resources()
+    }
+
+    fn container<T: ObjectType>(
+        properties: &ErasedProperties,
+    ) -> Option<&AdvertisedObjectReference> {
+        Self::properties::<T>(properties).container()
     }
 
     fn properties<T: ObjectType>(properties: &ErasedProperties) -> &T::Properties {
@@ -340,6 +356,20 @@ pub(crate) fn object_type_descriptor(
 
 pub(crate) fn requires_parent(workbench_type: &GlobalWorkbenchType) -> bool {
     object_type_descriptor(workbench_type).is_some_and(|descriptor| descriptor.category().is_none())
+}
+
+pub(crate) fn parent_type(
+    child_type: &GlobalWorkbenchType,
+) -> Option<&'static GlobalWorkbenchType> {
+    OBJECT_TYPES
+        .iter()
+        .find(|parent| {
+            parent
+                .subobjects()
+                .iter()
+                .any(|child| child.workbench_type() == child_type)
+        })
+        .map(|parent| parent.workbench_type())
 }
 
 pub(crate) fn supports_subobject(

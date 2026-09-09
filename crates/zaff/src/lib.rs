@@ -3,16 +3,120 @@
 use std::sync::Arc;
 
 use thiserror::Error;
-use zadt::{GlobalWorkbenchType, ObjectSnapshot};
+use zadt::{GlobalWorkbenchType, ObjectSnapshot, SourceRef};
 
+mod filename;
 mod formats;
 mod helpers;
 mod models;
 mod registry;
 mod validate;
 
+pub use filename::encode_object_name;
 pub use formats::*;
 pub use models::AbapLanguageVersion;
+
+/// The available AFF files derived from one immutable, loaded ADT snapshot.
+///
+/// The snapshot is shared with its properties files. Source text, dirty buffers,
+/// cache invalidation, and save orchestration belong to the caller.
+#[derive(Clone, Debug)]
+pub struct Projection {
+    snapshot: Arc<ObjectSnapshot<()>>,
+    format: &'static ObjectFormat,
+    files: Vec<FileProjection>,
+}
+
+impl Projection {
+    /// The original loaded ADT object represented by this projection.
+    /// This observation is immutable and is not automatically refreshed.
+    pub fn subject(&self) -> &ObjectSnapshot<()> {
+        &self.snapshot
+    }
+
+    pub const fn format(&self) -> &'static ObjectFormat {
+        self.format
+    }
+
+    pub fn files(&self) -> &[FileProjection] {
+        &self.files
+    }
+
+    /// Finds an available file by its canonical AFF filename, not a filesystem path.
+    pub fn file(&self, name: &str) -> Option<&FileProjection> {
+        self.files.iter().find(|file| file.name() == name)
+    }
+}
+
+/// One concrete AFF filename bound to its ADT source or properties mapping.
+///
+/// This is not a loaded editor document. Source text remains unfetched, and
+/// rendering properties can fail if their values cannot be represented in AFF.
+#[derive(Clone, Debug)]
+pub struct FileProjection {
+    name: String,
+    specification: &'static FileSpec,
+    backing: FileBacking,
+}
+
+impl FileProjection {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub const fn specification(&self) -> &'static FileSpec {
+        self.specification
+    }
+
+    /// Returns the operations available for this file's kind of backing.
+    pub fn backing(&self) -> &FileBacking {
+        &self.backing
+    }
+}
+
+/// An AFF properties mapping bound to the snapshot from which it was projected.
+///
+/// Rendering and merging always use the same immutable baseline. Cloning this
+/// value shares that baseline; it does not clone the complete ADT properties.
+#[derive(Clone, Debug)]
+pub struct PropertiesProjection {
+    snapshot: Arc<ObjectSnapshot<()>>,
+    mapping: &'static PropertiesMapping,
+}
+
+impl PropertiesProjection {
+    /// The original loaded ADT object, including its properties and update validator.
+    /// This observation is immutable and is not automatically refreshed.
+    pub fn subject(&self) -> &ObjectSnapshot<()> {
+        &self.snapshot
+    }
+
+    /// Renders the represented AFF fields as canonical JSON with a trailing newline.
+    pub fn render(&self) -> Result<String, ProjectionError> {
+        (self.mapping.render)(&self.snapshot)
+    }
+
+    /// Validates edited AFF JSON and merges its changes into the complete ADT properties.
+    ///
+    /// Returns `None` if the validated result equals the retained baseline, otherwise
+    /// `Some` ADT wire-shaped JSON, not AFF JSON. Submit the changed properties through
+    /// `self.subject().update_if_match(...)` or `update_with_lock(...)`.
+    /// A no-op does not establish that the backend still matches this observation.
+    /// Neither this method nor a successful save advances the retained baseline;
+    /// obtain a fresh snapshot and project it again after saving.
+    pub fn merge(&self, edited: &str) -> Result<Option<serde_json::Value>, ProjectionError> {
+        (self.mapping.merge)(&self.snapshot, edited)
+    }
+}
+
+/// How to read or edit a projected file.
+#[derive(Clone, Debug)]
+pub enum FileBacking {
+    /// Text is fetched through this advertised reference.
+    Source(SourceRef),
+    /// AFF JSON is rendered and merged against the retained properties baseline.
+    Properties(PropertiesProjection),
+}
 
 /// Projects a loaded ADT snapshot into its currently available AFF files without I/O.
 ///
@@ -36,66 +140,6 @@ pub fn project(snapshot: ObjectSnapshot<()>) -> Result<Projection, ProjectionErr
         format,
         files,
     })
-}
-
-/// Encodes an ABAP object name for use in an AFF filename.
-///
-/// ASCII letters are lowercased. A namespace written as `/NAMESPACE/NAME`
-/// becomes `(namespace)name`. The result is only the encoded object name,
-/// without a format suffix such as `.clas.json`.
-///
-/// # Examples
-///
-/// ```
-/// use zaff::encode_object_name;
-///
-/// assert_eq!(encode_object_name("Z_MY_CLASS")?, "z_my_class");
-/// assert_eq!(encode_object_name("/ACME/MY_CLASS")?, "(acme)my_class");
-/// # Ok::<(), zaff::ProjectionError>(())
-/// ```
-///
-/// # Errors
-///
-/// Returns [`ProjectionError::InvalidObjectName`] for empty names, leading or
-/// trailing whitespace, control characters, backslashes, angle brackets, or
-/// the names `.` and `..`. Namespace components must be nonempty. Slashes are
-/// only accepted as the two namespace separators, and parentheses are rejected.
-/// Already encoded AFF names such as `(acme)my_class` are not valid inputs.
-///
-/// This is a filename conversion, not a complete check of SAP object naming
-/// rules or a URI encoder. It preserves non-ASCII characters without case conversion.
-pub fn encode_object_name(object_name: &str) -> Result<String, ProjectionError> {
-    validate::validate_object_name(object_name)?;
-    if let Some(namespaced) = object_name.strip_prefix('/') {
-        let (namespace, local_name) =
-            namespaced
-                .split_once('/')
-                .ok_or_else(|| ProjectionError::InvalidObjectName {
-                    object_name: object_name.to_owned(),
-                })?;
-
-        if namespace.is_empty()
-            || local_name.is_empty()
-            || local_name.contains(['/', '(', ')'])
-            || namespace.contains(['(', ')'])
-        {
-            return Err(ProjectionError::InvalidObjectName {
-                object_name: object_name.to_owned(),
-            });
-        }
-
-        Ok(format!(
-            "({}){}",
-            namespace.to_ascii_lowercase(),
-            local_name.to_ascii_lowercase()
-        ))
-    } else if object_name.contains(['/', '(', ')']) {
-        Err(ProjectionError::InvalidObjectName {
-            object_name: object_name.to_owned(),
-        })
-    } else {
-        Ok(object_name.to_ascii_lowercase())
-    }
 }
 
 /// An error mapping between ADT repository objects and AFF files.
@@ -228,7 +272,9 @@ mod tests {
     };
 
     use super::*;
+    use crate::filename::encode_object_name;
     use crate::formats::{clas::CLASS_FORMAT, dtel::DATA_ELEMENT_FORMAT, prog::PROGRAM_FORMAT};
+    use crate::prog::{ProgramType, ProjectedProgramProperties};
 
     const CLASS_XML: &[u8] =
         include_bytes!("../../zadt/tests/fixtures/class-cl-adt-uri-mapper-v4.xml");
@@ -336,7 +382,7 @@ mod tests {
                 assert!(specification.template().starts_with("<name>"));
                 for (name, encoded) in [("Z_EXAMPLE", "z_example"), ("/ACME/DEMO", "(acme)demo")] {
                     assert_eq!(
-                        specification.filename(name, language).unwrap(),
+                        specification.filename(name, None, language).unwrap(),
                         specification
                             .template()
                             .replace("<name>", encoded)
@@ -381,15 +427,15 @@ mod tests {
             .unwrap();
 
         assert!(matches!(
-            text.filename("ZCL_EXAMPLE", None),
+            text.filename("ZCL_EXAMPLE", None, None),
             Err(ProjectionError::MissingLanguage { .. })
         ));
         assert!(matches!(
-            source.filename("ZCL_EXAMPLE", Some("en")),
+            source.filename("ZCL_EXAMPLE", None, Some("en")),
             Err(ProjectionError::UnexpectedLanguage { .. })
         ));
         assert!(matches!(
-            text.filename("ZCL_EXAMPLE", Some("en--GB")),
+            text.filename("ZCL_EXAMPLE", None, Some("en--GB")),
             Err(ProjectionError::InvalidLanguage { .. })
         ));
     }
@@ -467,7 +513,7 @@ mod tests {
                     assert!(!specification.is_supported());
                     assert_eq!(specification.cardinality(), Cardinality::ZeroOrMore);
                     let name = specification
-                        .filename(projection.subject().reference().name(), Some("en-GB"))
+                        .filename(projection.subject().reference().name(), None, Some("en-GB"))
                         .unwrap();
                     assert!(projection.file(&name).is_none());
                     assert!(
@@ -863,7 +909,7 @@ mod tests {
                     );
                     assert_eq!(
                         specification
-                            .filename(projection.subject().reference().name(), None)
+                            .filename(projection.subject().reference().name(), None, None)
                             .unwrap(),
                         file.name()
                     );
@@ -1000,7 +1046,7 @@ mod tests {
                     "/ACME/Z<lang>",
                 ] {
                     assert!(matches!(
-                        specification.filename(name, language),
+                        specification.filename(name, None, language),
                         Err(ProjectionError::InvalidObjectName { .. })
                     ));
                 }

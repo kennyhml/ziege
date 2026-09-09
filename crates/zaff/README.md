@@ -61,14 +61,31 @@ dirty buffers, locks, conflicts, or cache refreshes.
 | Class | `.clas.json`, main source, and advertised includes |
 | Program / standalone Include | `.prog.json` and main source |
 | Data Element | `.dtel.json` |
+| Function Group | `.fugr.json`, main-program `.reps.json` and `.reps.abap` |
+| Function Group Include | Parent-prefixed `.reps.json` and `.reps.abap` |
+| Function Module | Parent-prefixed `.func.json` and `.func.abap` |
 
-Each module in `src/formats/` declares one static `ObjectFormat` containing its
-Workbench types and file mappings, alongside its AFF models and validation.
+Each module in `src/formats/` declares one or more static `ObjectFormat`s for a
+family, containing Workbench types and file mappings, alongside its AFF models
+and validation.
 The registry enumerates these formats; projections hold a reference to one.
 
 Missing sources are omitted; invalid advertised locations are errors.
 Language-dependent `.properties` files are recognized specifications but are
 not implemented. Unsupported AFF edits are rejected rather than silently lost.
+
+Function groups and their children are projected from separate snapshots. The
+caller discovers children and places their files in a group folder. Child names
+use the logical parent or advertised container name, not a guessed URI segment.
+Missing or conflicting parent names are errors. REPS metadata for the main
+program shares the group snapshot, including the description also in `.fugr.json`.
+
+FUNC `includeNumber` is temporarily rendered as `"00"` because ZADT does not expose
+the actual value. This is a placeholder, not a real include assignment or an AFF
+default, and edits are rejected. Other unmapped FUNC settings are also restricted.
+These projections are not yet a complete round-trip Function Group export. Source
+text is passed through without conversion to AFF pseudo syntax. Group discovery,
+ZVFS container expansion, dynpros, and text-element mappings are outside this layer.
 
 ## Integration
 

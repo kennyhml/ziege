@@ -142,7 +142,7 @@ impl HttpSecuritySession {
     /// Uses the [`Logon`] operation with a `preflight_logon` purpose to
     /// issue a session reconnect.
     ///
-    /// This flow must bypass the regular execution flow of [`Transport::send`]
+    /// This flow must bypass the regular execution flow of [`crate::Transport::send`]
     /// as that would cause a deadlock.
     async fn reconnect(
         &self,

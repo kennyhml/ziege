@@ -19,7 +19,9 @@ use zadt::{
     RepositoryContentOperation, RepositoryContentQuery, RepositoryPreselection, ToXml, Transport,
     TransportError, WorkbenchVersion, XmlCodec,
 };
-use zaff::{FileBacking, ProjectedProgramProperties, Projection, PropertiesProjection, project};
+use zaff::{
+    FileBacking, Projection, PropertiesProjection, prog::ProjectedProgramProperties, project,
+};
 use zvfs::{FacetPolicy, Mount, VirtualRepositoryTree};
 
 // Deliberately not the location derived from Program's discovery collection/name.

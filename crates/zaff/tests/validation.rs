@@ -2,8 +2,8 @@ use garde::{Report, Validate};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use zaff::{
-    ProjectedClassProperties, ProjectedDataElementProperties, ProjectedProgramProperties,
-    ProjectionError,
+    ProjectionError, clas::ProjectedClassProperties, dtel::ProjectedDataElementProperties,
+    prog::ProjectedProgramProperties,
 };
 
 fn class() -> Value {

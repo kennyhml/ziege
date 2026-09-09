@@ -5,6 +5,7 @@ use crate::{AdtUri, CategoryId, Discovery, MediaTypes, ObjectError, ResolveError
 mod capabilities;
 pub(crate) mod descriptors;
 mod key;
+mod name;
 mod reference;
 mod snapshot;
 mod types;
@@ -14,6 +15,7 @@ pub use capabilities::{Create, Source, SourceComponents, Structure};
 pub(crate) use capabilities::{ImmediateRun, RunCapability};
 pub use descriptors::SubObjectDescriptor;
 pub use key::ObjectKey;
+pub use name::{InvalidObjectName, ObjectName};
 pub use reference::{AdvertisedObjectReference, ObjectRef, ObjectReferences};
 pub(crate) use snapshot::ErasedProperties;
 pub use snapshot::ObjectSnapshot;
@@ -179,6 +181,11 @@ pub trait Identity {
     fn object_name(&self) -> &str;
 
     fn workbench_type(&self) -> &GlobalWorkbenchType;
+
+    /// The raw container advertised in a properties payload, when modeled.
+    fn container(&self) -> Option<&AdvertisedObjectReference> {
+        None
+    }
 
     fn validate_for(&self, expected: &impl Identity) -> Result<(), ObjectError> {
         if self.workbench_type() != expected.workbench_type() {

@@ -1,7 +1,8 @@
 use std::{any::Any, fmt, sync::Arc};
 
 use super::{
-    Identity, ObjectKey, ObjectRef, ObjectType, Resources, SnapshotKind, WorkbenchVersion,
+    AdvertisedObjectReference, Identity, ObjectKey, ObjectRef, ObjectType, Resources, SnapshotKind,
+    WorkbenchVersion, descriptors,
 };
 use crate::{AdtUri, EntityTag, ObjectError, SnapshotResources};
 
@@ -65,6 +66,41 @@ impl<T: SnapshotKind> ObjectSnapshot<T> {
     pub fn etag(&self) -> Option<&EntityTag> {
         self.etag.as_ref()
     }
+
+    fn resolve_parent_name<'a>(
+        &'a self,
+        container: Option<&'a AdvertisedObjectReference>,
+    ) -> Result<Option<&'a str>, ObjectError> {
+        let parent = self.key().parent();
+        if let Some(expected) = descriptors::parent_type(self.key().workbench_type()) {
+            for actual in container
+                .and_then(|container| container.workbench_type.as_ref())
+                .into_iter()
+                .chain(parent.map(ObjectKey::workbench_type))
+            {
+                if actual != expected {
+                    return Err(ObjectError::UnexpectedObjectType {
+                        expected: expected.clone(),
+                        actual: actual.clone(),
+                    });
+                }
+            }
+        }
+        let advertised_name = container
+            .and_then(|container| container.name.as_deref())
+            .filter(|name| !name.is_empty());
+        if let Some(parent) = parent {
+            if advertised_name.is_some_and(|name| !name.eq_ignore_ascii_case(parent.name())) {
+                return Err(ObjectError::InvalidParentObject {
+                    workbench_type: self.key().workbench_type().clone(),
+                    reason: "logical parent and advertised container names disagree".to_owned(),
+                });
+            }
+            Ok(Some(parent.name()))
+        } else {
+            Ok(advertised_name)
+        }
+    }
 }
 
 impl<T: ObjectType> ObjectSnapshot<T> {
@@ -88,6 +124,13 @@ impl<T: ObjectType> ObjectSnapshot<T> {
     /// Returns the immutable properties in this snapshot.
     pub fn properties(&self) -> &T::Properties {
         &self.properties
+    }
+
+    /// Borrows the logical parent name, falling back to the advertised container.
+    /// Checks declared parent types and rejects conflicting names. URI-only metadata
+    /// returns None. No I/O or changes to the snapshot identity are performed.
+    pub fn parent_name(&self) -> Result<Option<&str>, ObjectError> {
+        self.resolve_parent_name(self.properties.container())
     }
 
     /// Returns a borrowed resource view bound to this snapshot's URI.
@@ -182,6 +225,17 @@ impl ObjectSnapshot<()> {
             .expect("registered descriptor must retain its concrete property type"))
     }
 
+    /// Borrows the logical parent name, falling back to the advertised container.
+    /// Checks declared parent types and rejects conflicting names. URI-only metadata
+    /// returns None. No I/O or changes to the snapshot identity are performed.
+    pub fn parent_name(&self) -> Result<Option<&str>, ObjectError> {
+        let container = self
+            .reference
+            .require_descriptor()?
+            .container(&self.properties);
+        self.resolve_parent_name(container)
+    }
+
     /// Returns a borrowed resource view bound to this snapshot's URI.
     ///
     /// Derived on demand from the properties; resource targets are validated when used.
@@ -267,7 +321,181 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{FunctionGroup, FunctionModule, XmlCodec};
+    use crate::{FunctionGroup, FunctionGroupInclude, FunctionModule, Program, XmlCodec};
+
+    #[test]
+    fn parent_names_borrow_without_changing_identity_or_wire_properties() {
+        for (parent, advertised, expected) in [
+            (None, Some("Z_TEST_GROUP"), Some("Z_TEST_GROUP")),
+            (
+                Some("Z_TEST_GROUP"),
+                Some("z_test_group"),
+                Some("Z_TEST_GROUP"),
+            ),
+            (Some("Z_TEST_GROUP"), None, Some("Z_TEST_GROUP")),
+            (Some("Z_TEST_GROUP"), Some(""), Some("Z_TEST_GROUP")),
+            (None, Some("/ACME/GROUP"), Some("/ACME/GROUP")),
+            (None, None, None),
+            (None, Some(""), None),
+        ] {
+            let mut properties = <FunctionModule as ObjectType>::Properties::from_xml(
+                include_bytes!("../../tests/fixtures/function-module-zzzzfunc.xml"),
+            )
+            .unwrap();
+            properties.container.name = advertised.map(str::to_owned);
+            properties.container.workbench_type = None;
+            // Parent names do not depend on parsing or validating an advertised URI.
+            properties.container.uri = Some("https://unusable.invalid/group".to_owned());
+            assert!(std::ptr::eq(
+                properties.container().unwrap(),
+                &properties.container
+            ));
+            let reference = ObjectRef::new(
+                ObjectKey::<FunctionModule>::from_parts(
+                    "ZZZZFUNC".to_owned(),
+                    FunctionModule::WORKBENCH_TYPE,
+                    parent.map(|name| Box::new(ObjectKey::<FunctionGroup>::new(name).erase())),
+                ),
+                AdtUri::parse("advertised/module").unwrap(),
+            )
+            .with_parent_uri(AdtUri::parse("advertised/group").unwrap());
+            let snapshot = ObjectSnapshot::new(
+                reference.clone(),
+                WorkbenchVersion::Inactive,
+                FunctionModule::MEDIA_TYPES[0],
+                None,
+                properties,
+            );
+            let original = serde_json::to_value(snapshot.properties()).unwrap();
+            let name = snapshot.parent_name().unwrap();
+            assert_eq!(name, expected);
+            let stored = snapshot.key().parent().map(ObjectKey::name).or(snapshot
+                .properties()
+                .container
+                .name
+                .as_deref()
+                .filter(|name| !name.is_empty()));
+            assert_eq!(name.map(str::as_ptr), stored.map(str::as_ptr));
+
+            let erased = snapshot.into_erased();
+            assert_eq!(erased.parent_name().unwrap(), expected);
+            let shared = erased.clone();
+            if parent.is_none() {
+                assert_eq!(
+                    erased.parent_name().unwrap().map(str::as_ptr),
+                    shared.parent_name().unwrap().map(str::as_ptr)
+                );
+            }
+            assert_eq!(Arc::strong_count(&erased.properties), 2);
+            assert_eq!(erased.properties().unwrap(), original);
+            assert_eq!(erased.key(), reference.key());
+            assert_eq!(erased.reference().parent_uri(), reference.parent_uri());
+            let restored = shared.try_into_typed::<FunctionModule>().unwrap();
+            assert_eq!(restored.parent_name().unwrap(), expected);
+            assert_eq!(
+                serde_json::to_value(restored.properties()).unwrap(),
+                original
+            );
+            assert_eq!(restored.key(), reference.key());
+        }
+    }
+
+    #[test]
+    fn parent_names_reject_conflicting_names_and_declared_types() {
+        for invalid in ["name", "container_type", "logical_type"] {
+            let mut properties = <FunctionModule as ObjectType>::Properties::from_xml(
+                include_bytes!("../../tests/fixtures/function-module-zzzzfunc.xml"),
+            )
+            .unwrap();
+            let mut parent = ObjectKey::<FunctionGroup>::new("Z_TEST_GROUP").erase();
+            match invalid {
+                "name" => properties.container.name = Some("Z_OTHER".to_owned()),
+                "container_type" => {
+                    properties.container.workbench_type = Some(Program::WORKBENCH_TYPE)
+                }
+                _ => parent = ObjectKey::<Program>::new("Z_TEST_GROUP").erase(),
+            }
+            let snapshot = ObjectSnapshot::new(
+                ObjectRef::new(
+                    ObjectKey::<FunctionModule>::from_parts(
+                        "ZZZZFUNC".to_owned(),
+                        FunctionModule::WORKBENCH_TYPE,
+                        Some(Box::new(parent)),
+                    ),
+                    AdtUri::parse("advertised/module").unwrap(),
+                ),
+                WorkbenchVersion::Inactive,
+                FunctionModule::MEDIA_TYPES[0],
+                None,
+                properties,
+            );
+            let typed_error = snapshot.parent_name().unwrap_err();
+            let erased = snapshot.into_erased();
+            for error in [typed_error, erased.parent_name().unwrap_err()] {
+                if invalid == "name" {
+                    assert!(
+                        matches!(error, ObjectError::InvalidParentObject { workbench_type, .. }
+                        if workbench_type == FunctionModule::WORKBENCH_TYPE)
+                    );
+                } else {
+                    assert!(
+                        matches!(error, ObjectError::UnexpectedObjectType { expected, actual }
+                        if expected == FunctionGroup::WORKBENCH_TYPE && actual == Program::WORKBENCH_TYPE)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn groups_have_no_container_and_includes_expose_their_borrowed_container() {
+        let properties = <FunctionGroup as ObjectType>::Properties::from_xml(include_bytes!(
+            "../../tests/fixtures/function-group-z-test-group.xml"
+        ))
+        .unwrap();
+        assert!(properties.container().is_none());
+        let snapshot = ObjectSnapshot::new(
+            ObjectRef::new(
+                ObjectKey::<FunctionGroup>::new("Z_TEST_GROUP"),
+                AdtUri::parse("advertised/group").unwrap(),
+            ),
+            WorkbenchVersion::Active,
+            FunctionGroup::MEDIA_TYPES[0],
+            None,
+            properties,
+        );
+        assert_eq!(snapshot.parent_name().unwrap(), None);
+        assert_eq!(snapshot.into_erased().parent_name().unwrap(), None);
+
+        let properties = <FunctionGroupInclude as ObjectType>::Properties::from_xml(
+            include_bytes!("../../tests/fixtures/function-group-include-lz-test-grouptop.xml"),
+        )
+        .unwrap();
+        assert!(std::ptr::eq(
+            properties.container().unwrap(),
+            &properties.container
+        ));
+        let name = properties.container.name.as_deref().unwrap().as_ptr();
+        let snapshot = ObjectSnapshot::new(
+            ObjectRef::new(
+                ObjectKey::<FunctionGroupInclude>::from_parts(
+                    "LZ_TEST_GROUPTOP".to_owned(),
+                    FunctionGroupInclude::WORKBENCH_TYPE,
+                    None,
+                ),
+                AdtUri::parse("advertised/include").unwrap(),
+            ),
+            WorkbenchVersion::Active,
+            FunctionGroupInclude::MEDIA_TYPES[0],
+            None,
+            properties,
+        );
+        assert_eq!(snapshot.parent_name().unwrap().unwrap().as_ptr(), name);
+        let erased = snapshot.into_erased();
+        assert_eq!(erased.parent_name().unwrap(), Some("Z_TEST_GROUP"));
+        assert_eq!(erased.parent_name().unwrap().unwrap().as_ptr(), name);
+        assert!(erased.key().parent().is_none());
+    }
 
     #[test]
     fn typed_properties_borrow_shared_storage_and_reject_a_different_family() {

@@ -146,6 +146,15 @@ Erased snapshots expose `typed_properties::<Class>()` to borrow the concrete
 properties without copying. The family is checked at runtime; `properties()`
 remains available for exporting owned wire-shaped JSON.
 
+Typed and erased snapshots expose `parent_name()` to borrow the logical parent
+name or fall back to an advertised container. Conflicting names and incorrect
+parent types are errors. URI-only metadata returns `None`, without changing the
+stored key or reference and without performing I/O.
+
+`ObjectName::parse(name)` provides a validated borrowed view with `namespace()`
+and `local_name()` accessors. It preserves spelling and checks name structure,
+not object-family-specific naming rules. Keys and properties still store strings.
+
 Property updates are read-modify-write operations: clone the loaded typed
 properties, or edit the owned JSON returned by an erased snapshot, preserving
 fields that are not being changed. Updates reject a mismatched object name or

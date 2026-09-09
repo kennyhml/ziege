@@ -43,6 +43,7 @@ pub struct FunctionGroup;
     media_types = MediaTypes::new(&["application/vnd.sap.adt.functions.fmodules.v3+xml"]),
     workbench_type = "FUGR/FF",
     subobject,
+    container = Some(&properties.container),
     capabilities(
         Create(FunctionModuleCreateProperties),
         Source(properties.source_uri),
@@ -56,6 +57,7 @@ pub struct FunctionModule;
     media_types = MediaTypes::new(&["application/vnd.sap.adt.functions.fincludes.v2+xml"]),
     workbench_type = "FUGR/I",
     subobject,
+    container = Some(&properties.container),
     capabilities(
         Create(FunctionGroupIncludeCreateProperties),
         Source(properties.source_uri),
