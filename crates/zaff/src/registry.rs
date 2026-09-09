@@ -2,7 +2,7 @@ use zadt::GlobalWorkbenchType;
 
 use crate::{
     ProjectionError,
-    formats::{ObjectFormat, clas, dcls, ddla, ddls, ddlx, dtel, fugr, intf, prog},
+    formats::{ObjectFormat, clas, dcls, ddla, ddls, ddlx, dtel, fugr, intf, prog, srvd},
 };
 
 static FORMATS: &[&ObjectFormat] = &[
@@ -13,6 +13,7 @@ static FORMATS: &[&ObjectFormat] = &[
     &ddla::ANNOTATION_DEFINITION_FORMAT,
     &dcls::ACCESS_CONTROL_FORMAT,
     &ddls::DATA_DEFINITION_FORMAT,
+    &srvd::SERVICE_DEFINITION_FORMAT,
     &dtel::DATA_ELEMENT_FORMAT,
     &fugr::FUNCTION_GROUP_FORMAT,
     &fugr::FUNCTION_MODULE_FORMAT,

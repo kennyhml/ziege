@@ -17,6 +17,7 @@ pub mod dtel;
 pub mod fugr;
 pub mod intf;
 pub mod prog;
+pub mod srvd;
 
 /// A registered AFF format, including its supported objects and file mappings.
 ///
