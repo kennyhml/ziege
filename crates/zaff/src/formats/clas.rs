@@ -456,7 +456,7 @@ pub struct ClassDescriptions {
 }
 
 impl ClassDescriptions {
-    fn is_empty(&self) -> bool {
+    pub(super) fn is_empty(&self) -> bool {
         self.types.is_empty()
             && self.attributes.is_empty()
             && self.events.is_empty()

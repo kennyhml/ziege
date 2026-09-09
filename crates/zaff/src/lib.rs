@@ -267,7 +267,7 @@ mod test_support {
 #[cfg(test)]
 mod tests {
     use zadt::{
-        Class, ClassProperties, DataElement, Domain, EntityTag, Include, Interface, ObjectType,
+        Class, ClassProperties, DataElement, Domain, EntityTag, Include, ObjectType,
         Operation, Program, ToXml, WorkbenchVersion, XmlCodec,
     };
 
@@ -323,11 +323,6 @@ mod tests {
     #[test]
     fn unsupported_snapshot_families_fail_projection() {
         for snapshots in [
-            fixture_snapshots::<Interface>(
-                "IF_ADT_URI_MAPPER",
-                "/sap/bc/adt/oo/interfaces/if_adt_uri_mapper",
-                include_bytes!("../../zadt/tests/fixtures/interface-if-adt-uri-mapper-v5.xml"),
-            ),
             fixture_snapshots::<Domain>(
                 "XFELD",
                 "/sap/bc/adt/ddic/domains/xfeld",

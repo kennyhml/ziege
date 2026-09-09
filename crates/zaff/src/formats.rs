@@ -11,6 +11,7 @@ use crate::{
 pub mod clas;
 pub mod dtel;
 pub mod fugr;
+pub mod intf;
 pub mod prog;
 
 /// A registered AFF format, including its supported objects and file mappings.

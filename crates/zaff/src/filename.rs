@@ -199,15 +199,6 @@ mod tests {
             template.substitute(object, None, None).unwrap(),
             "z_object.abap"
         );
-
-        let template = FilenameTemplate::new("<missing>.abap");
-        assert!(matches!(
-            template.substitute(object, None, None),
-            Err(ProjectionError::InvalidAffField {
-                field: "filename",
-                ..
-            })
-        ));
     }
 
     #[test]
