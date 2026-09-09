@@ -3,6 +3,40 @@ use zadt::AbapLanguageVersion as AdtAbapLanguageVersion;
 
 use crate::ProjectionError;
 
+/// Common CDS AFF header: description, original language, and ABAP language version.
+/// ADT uses SAP language codes and DDIC Standard `0`. Unchanged versions retain
+/// their original spelling when merged by each format.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, garde::Validate)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[garde(allow_unvalidated)]
+pub struct CdsHeader {
+    #[garde(length(chars, max = 60))]
+    pub description: String,
+    #[garde(length(chars, min = 2))]
+    pub original_language: String,
+    #[serde(default, skip_serializing_if = "AbapLanguageVersion::is_standard")]
+    pub abap_language_version: AbapLanguageVersion,
+}
+
+impl CdsHeader {
+    pub(crate) fn from_adt(
+        description: &str,
+        language: &str,
+        version: &AdtAbapLanguageVersion,
+    ) -> Result<Self, ProjectionError> {
+        Ok(Self {
+            description: description.to_owned(),
+            original_language: language_from_adt(language, "header.originalLanguage")?,
+            abap_language_version: AbapLanguageVersion::from_adt(Some(version), "0").map_err(
+                |value| ProjectionError::InvalidAffField {
+                    field: "header.abapLanguageVersion",
+                    message: format!("unsupported ADT value `{value}`"),
+                },
+            )?,
+        })
+    }
+}
+
 /// AFF's common ABAP language-version vocabulary.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub enum AbapLanguageVersion {

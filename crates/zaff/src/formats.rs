@@ -9,6 +9,7 @@ use crate::{
 };
 
 pub mod clas;
+pub mod ddlx;
 pub mod dtel;
 pub mod fugr;
 pub mod intf;
