@@ -2,7 +2,9 @@ use zadt::GlobalWorkbenchType;
 
 use crate::{
     ProjectionError,
-    formats::{ObjectFormat, clas, dcls, ddla, ddls, ddlx, doma, dtel, fugr, intf, prog, srvd},
+    formats::{
+        ObjectFormat, clas, dcls, ddla, ddls, ddlx, devc, doma, dtel, fugr, intf, prog, srvd,
+    },
 };
 
 static FORMATS: &[&ObjectFormat] = &[
@@ -16,6 +18,7 @@ static FORMATS: &[&ObjectFormat] = &[
     &srvd::SERVICE_DEFINITION_FORMAT,
     &dtel::DATA_ELEMENT_FORMAT,
     &doma::DOMAIN_FORMAT,
+    &devc::PACKAGE_FORMAT,
     &fugr::FUNCTION_GROUP_FORMAT,
     &fugr::FUNCTION_MODULE_FORMAT,
     &fugr::FUNCTION_GROUP_INCLUDE_FORMAT,
@@ -36,6 +39,13 @@ pub(crate) fn for_workbench_type(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unregistered_repository_types_are_rejected() {
+        let workbench_type = "ZZZZ/X".parse().unwrap();
+        assert!(matches!(for_workbench_type(&workbench_type),
+            Err(ProjectionError::UnsupportedRepositoryType { workbench_type: actual }) if actual == workbench_type));
+    }
 
     #[test]
     fn lookups_return_the_registered_static_format() {

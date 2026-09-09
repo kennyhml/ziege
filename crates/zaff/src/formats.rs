@@ -13,6 +13,7 @@ pub mod dcls;
 pub mod ddla;
 pub mod ddls;
 pub mod ddlx;
+pub mod devc;
 pub mod doma;
 pub mod dtel;
 pub mod fugr;

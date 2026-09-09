@@ -59,8 +59,16 @@ dirty buffers, locks, conflicts, or cache refreshes.
 | Family | Files |
 | --- | --- |
 | Class | `.clas.json`, main source, and advertised includes |
+| Interface | `.intf.json` and `.intf.abap` |
 | Program / standalone Include | `.prog.json` and main source |
 | Data Element | `.dtel.json` |
+| Domain | `.doma.json` |
+| Package | `.devc.json` |
+| CDS Data Definition | `.ddls.json` and `.ddls.acds` |
+| CDS Metadata Extension | `.ddlx.json` and `.ddlx.acds` |
+| CDS Annotation Definition | `.ddla.json` and `.ddla.acds` |
+| CDS Access Control | `.dcls.json` and `.dcls.acds` |
+| Service Definition | `.srvd.json` and `.srvd.acds` |
 | Function Group | `.fugr.json`, main-program `.reps.json` and `.reps.abap` |
 | Function Group Include | Parent-prefixed `.reps.json` and `.reps.abap` |
 | Function Module | Parent-prefixed `.func.json` and `.func.abap` |
@@ -73,6 +81,15 @@ The registry enumerates these formats; projections hold a reference to one.
 Missing sources are omitted; invalid advertised locations are errors.
 Language-dependent `.properties` files are recognized specifications but are
 not implemented. Unsupported AFF edits are rejected rather than silently lost.
+
+Interface category, proxy status, and component descriptions have no implemented
+ADT backing; only their default/empty values can be merged. Domain fixed-value
+append names and package switch assignments are likewise not exposed by ZADT.
+
+DDLS metadata renders `sourceType` as `unknown`: the ADT semantic label alone does
+not reliably identify the AFF source syntax category. The original ADT type is
+preserved; non-unknown `sourceType` edits and nonempty `parentName` are rejected.
+Determining these fields from source would require loading and parsing it.
 
 Function groups and their children are projected from separate snapshots. The
 caller discovers children and places their files in a group folder. Child names

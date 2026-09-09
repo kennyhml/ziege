@@ -35,7 +35,7 @@ pub use ddlx::{
 };
 pub use devc::{
     Package, PackageAssignment, PackageAttributes, PackageProperties, PackageTransport,
-    PackageUseAccess,
+    PackageUseAccess, PackageUseAccesses,
 };
 pub use doma::{
     Domain, DomainContent, DomainCreateProperties, DomainCreatePropertiesBuilder,
