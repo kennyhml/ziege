@@ -16,6 +16,7 @@
 //! existing single/interval slots and append new entries after the last position.
 //! Value-table references retain metadata until their names change. The append
 //! flag is preserved, but nonempty AFF append lists cannot be merged.
+//! Optional `.doma.docu.json` documentation is declared but has no implemented backing.
 //! Schema: <https://github.com/SAP/abap-file-formats/blob/main/file-formats/doma/doma-v1.json>.
 
 use crate::{
@@ -36,11 +37,18 @@ pub(crate) static DOMAIN_FORMAT: ObjectFormat = ObjectFormat {
     object_type: "DOMA",
     version: "1",
     workbench_types: &[Domain::WORKBENCH_TYPE],
-    files: &[FileSpec::new(
-        "<name>.doma.json",
-        Cardinality::One,
-        Mapping::Properties(PropertiesMapping { render, merge }),
-    )],
+    files: &[
+        FileSpec::new(
+            "<name>.doma.json",
+            Cardinality::One,
+            Mapping::Properties(PropertiesMapping { render, merge }),
+        ),
+        FileSpec::new(
+            "<name>.doma.docu.json",
+            Cardinality::ZeroOrOne,
+            Mapping::Unavailable,
+        ),
+    ],
 };
 
 /// AFF DOMA v1 metadata, with separate single-value and interval collections.
