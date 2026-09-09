@@ -14,7 +14,11 @@ pub struct CdsHeader {
     pub description: String,
     #[garde(length(chars, min = 2))]
     pub original_language: String,
-    #[serde(default, skip_serializing_if = "AbapLanguageVersion::is_standard")]
+    #[serde(
+        default,
+        deserialize_with = "crate::helpers::string_enum",
+        skip_serializing_if = "AbapLanguageVersion::is_standard"
+    )]
     pub abap_language_version: AbapLanguageVersion,
 }
 

@@ -39,6 +39,7 @@ pub(crate) static ACCESS_CONTROL_FORMAT: ObjectFormat = ObjectFormat {
 pub struct ProjectedAccessControlProperties {
     #[garde(custom(one_of([ACCESS_CONTROL_FORMAT.version()])))]
     pub format_version: String,
+    #[serde(deserialize_with = "crate::helpers::object")]
     #[garde(dive)]
     pub header: CdsHeader,
 }

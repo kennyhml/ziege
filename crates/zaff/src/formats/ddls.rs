@@ -45,9 +45,12 @@ pub(crate) static DATA_DEFINITION_FORMAT: ObjectFormat = ObjectFormat {
 pub struct ProjectedDataDefinitionProperties {
     #[garde(custom(one_of([DATA_DEFINITION_FORMAT.version()])))]
     pub format_version: String,
+    #[serde(deserialize_with = "crate::helpers::object")]
     #[garde(dive)]
     pub header: CdsHeader,
+    #[serde(deserialize_with = "crate::helpers::string_enum")]
     pub source_origin: CdsSourceOrigin,
+    #[serde(deserialize_with = "crate::helpers::string_enum")]
     pub source_type: DataDefinitionSourceType,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     #[garde(length(chars, max = 40))]

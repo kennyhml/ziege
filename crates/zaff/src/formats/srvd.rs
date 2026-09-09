@@ -41,8 +41,10 @@ pub(crate) static SERVICE_DEFINITION_FORMAT: ObjectFormat = ObjectFormat {
 pub struct ProjectedServiceDefinitionProperties {
     #[garde(custom(one_of([SERVICE_DEFINITION_FORMAT.version()])))]
     pub format_version: String,
+    #[serde(deserialize_with = "crate::helpers::object")]
     #[garde(dive)]
     pub header: CdsHeader,
+    #[serde(deserialize_with = "crate::helpers::object")]
     #[garde(dive)]
     pub general_information: ServiceDefinitionGeneralInformation,
 }
@@ -52,7 +54,9 @@ pub struct ProjectedServiceDefinitionProperties {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[garde(allow_unvalidated)]
 pub struct ServiceDefinitionGeneralInformation {
+    #[serde(deserialize_with = "crate::helpers::string_enum")]
     pub source_origin: CdsSourceOrigin,
+    #[serde(deserialize_with = "crate::helpers::string_enum")]
     pub source_type: ServiceDefinitionSourceType,
 }
 

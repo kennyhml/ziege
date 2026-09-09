@@ -51,12 +51,17 @@ pub(crate) static PACKAGE_FORMAT: ObjectFormat = ObjectFormat {
 pub struct ProjectedPackageProperties {
     #[garde(custom(one_of([PACKAGE_FORMAT.version()])))]
     pub format_version: String,
+    #[serde(deserialize_with = "crate::helpers::object")]
     #[garde(dive)]
     pub header: PackageHeader,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::helpers::object")]
     #[garde(dive)]
     pub general_information: PackageGeneralInformation,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "crate::helpers::objects",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     #[garde(dive)]
     pub use_accesses: Vec<PackageUseAccessProjection>,
 }
@@ -75,7 +80,7 @@ pub struct PackageHeader {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[garde(allow_unvalidated)]
 pub struct PackageGeneralInformation {
-    #[serde(rename = "type")]
+    #[serde(rename = "type", deserialize_with = "crate::helpers::string_enum")]
     pub package_type: PackageType,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     #[garde(length(chars, max = 30))]
@@ -98,7 +103,11 @@ pub struct PackageGeneralInformation {
     pub is_adding_objects_not_allowed: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub is_encapsulated: bool,
-    #[serde(default, skip_serializing_if = "AbapLanguageVersion::is_standard")]
+    #[serde(
+        default,
+        deserialize_with = "crate::helpers::string_enum",
+        skip_serializing_if = "AbapLanguageVersion::is_standard"
+    )]
     pub default_abap_language_version: AbapLanguageVersion,
 }
 
@@ -136,7 +145,7 @@ pub struct PackageUseAccessProjection {
     #[serde(default)]
     #[garde(length(chars, max = 30))]
     pub package_interface: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::helpers::string_enum")]
     pub severity: PackageUseAccessSeverity,
 }
 

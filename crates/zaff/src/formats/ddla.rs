@@ -40,6 +40,7 @@ pub(crate) static ANNOTATION_DEFINITION_FORMAT: ObjectFormat = ObjectFormat {
 pub struct ProjectedAnnotationDefinitionProperties {
     #[garde(custom(one_of([ANNOTATION_DEFINITION_FORMAT.version()])))]
     pub format_version: String,
+    #[serde(deserialize_with = "crate::helpers::object")]
     #[garde(dive)]
     pub header: AnnotationDefinitionHeader,
 }

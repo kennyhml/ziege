@@ -83,13 +83,22 @@ fn merge(
 pub struct ProjectedInterfaceProperties {
     #[garde(custom(one_of([INTERFACE_FORMAT.version()])))]
     pub format_version: String,
+    #[serde(deserialize_with = "crate::helpers::object")]
     #[garde(dive)]
     pub header: InterfaceHeader,
-    #[serde(default, skip_serializing_if = "InterfaceCategory::is_default")]
+    #[serde(
+        default,
+        deserialize_with = "crate::helpers::string_enum",
+        skip_serializing_if = "InterfaceCategory::is_default"
+    )]
     pub category: InterfaceCategory,
     #[serde(default, skip_serializing_if = "is_false")]
     pub proxy: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::helpers::optional_object",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[garde(dive)]
     pub descriptions: Option<ClassDescriptions>,
 }
@@ -104,7 +113,11 @@ pub struct InterfaceHeader {
     pub description: String,
     #[garde(length(chars, min = 2))]
     pub original_language: String,
-    #[serde(default, skip_serializing_if = "AbapLanguageVersion::is_standard")]
+    #[serde(
+        default,
+        deserialize_with = "crate::helpers::string_enum",
+        skip_serializing_if = "AbapLanguageVersion::is_standard"
+    )]
     pub abap_language_version: AbapLanguageVersion,
 }
 

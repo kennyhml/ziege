@@ -49,23 +49,41 @@ pub(crate) static DOMAIN_FORMAT: ObjectFormat = ObjectFormat {
 pub struct ProjectedDomainProperties {
     #[garde(custom(one_of([DOMAIN_FORMAT.version()])))]
     pub format_version: String,
+    #[serde(deserialize_with = "crate::helpers::object")]
     #[garde(dive)]
     pub header: CdsHeader,
+    #[serde(deserialize_with = "crate::helpers::object")]
     #[garde(dive)]
     pub format: DomainFormat,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::helpers::object")]
     #[garde(dive)]
     pub output_characteristics: DomainOutputCharacteristics,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "crate::helpers::objects",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     #[garde(dive)]
     pub fixed_values: Vec<DomainSingleValue>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "crate::helpers::objects",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     #[garde(dive)]
     pub fixed_value_intervals: Vec<DomainValueInterval>,
-    #[serde(default, skip_serializing_if = "DomainNamedObject::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "crate::helpers::object",
+        skip_serializing_if = "DomainNamedObject::is_empty"
+    )]
     #[garde(dive)]
     pub value_table: DomainNamedObject,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "crate::helpers::objects",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     #[garde(dive)]
     pub fixed_value_appends: Vec<DomainNamedObject>,
 }
@@ -88,7 +106,7 @@ pub struct DomainFormat {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[garde(allow_unvalidated)]
 pub struct DomainOutputCharacteristics {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::helpers::string_enum")]
     pub style: DomainOutputStyle,
     #[serde(default)]
     #[garde(range(max = 999999))]

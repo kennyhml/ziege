@@ -39,6 +39,7 @@ pub(crate) static METADATA_EXTENSION_FORMAT: ObjectFormat = ObjectFormat {
 pub struct ProjectedMetadataExtensionProperties {
     #[garde(custom(one_of([METADATA_EXTENSION_FORMAT.version()])))]
     pub format_version: String,
+    #[serde(deserialize_with = "crate::helpers::object")]
     #[garde(dive)]
     pub header: CdsHeader,
 }
