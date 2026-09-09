@@ -14,7 +14,7 @@ mod validate;
 
 pub use filename::encode_object_name;
 pub use formats::*;
-pub use models::{AbapLanguageVersion, CdsHeader};
+pub use models::{AbapLanguageVersion, CdsHeader, CdsSourceOrigin};
 
 /// The available AFF files derived from one immutable, loaded ADT snapshot.
 ///

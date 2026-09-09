@@ -11,6 +11,7 @@ use crate::{
 pub mod clas;
 pub mod dcls;
 pub mod ddla;
+pub mod ddls;
 pub mod ddlx;
 pub mod dtel;
 pub mod fugr;

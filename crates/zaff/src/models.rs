@@ -37,6 +37,58 @@ impl CdsHeader {
     }
 }
 
+/// CDS creation tools, mapped to SAP's source-origin codes `0` through `9`.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CdsSourceOrigin {
+    AbapDevelopmentTools,
+    CustomCdsViews,
+    CustomAnalyticalQueries,
+    CustomBusinessObject,
+    CustomCodeList,
+    CustomCdsViewsVariantConfg,
+    CustomFields,
+    ExtensionsForDataSources,
+    CustomSearchModeler,
+    ServiceConsumptionModel,
+}
+
+impl CdsSourceOrigin {
+    pub(crate) fn from_adt(value: &str, field: &'static str) -> Result<Self, ProjectionError> {
+        match value {
+            "0" => Ok(Self::AbapDevelopmentTools),
+            "1" => Ok(Self::CustomCdsViews),
+            "2" => Ok(Self::CustomAnalyticalQueries),
+            "3" => Ok(Self::CustomBusinessObject),
+            "4" => Ok(Self::CustomCodeList),
+            "5" => Ok(Self::CustomCdsViewsVariantConfg),
+            "6" => Ok(Self::CustomFields),
+            "7" => Ok(Self::ExtensionsForDataSources),
+            "8" => Ok(Self::CustomSearchModeler),
+            "9" => Ok(Self::ServiceConsumptionModel),
+            _ => Err(ProjectionError::InvalidAffField {
+                field,
+                message: format!("unsupported ADT value `{value}`"),
+            }),
+        }
+    }
+
+    pub(crate) fn adt_value(self) -> &'static str {
+        match self {
+            Self::AbapDevelopmentTools => "0",
+            Self::CustomCdsViews => "1",
+            Self::CustomAnalyticalQueries => "2",
+            Self::CustomBusinessObject => "3",
+            Self::CustomCodeList => "4",
+            Self::CustomCdsViewsVariantConfg => "5",
+            Self::CustomFields => "6",
+            Self::ExtensionsForDataSources => "7",
+            Self::CustomSearchModeler => "8",
+            Self::ServiceConsumptionModel => "9",
+        }
+    }
+}
+
 /// AFF's common ABAP language-version vocabulary.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub enum AbapLanguageVersion {
