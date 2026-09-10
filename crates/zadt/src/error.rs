@@ -220,6 +220,9 @@ pub enum ObjectError {
     #[error("optimistic object update requires an entity tag")]
     MissingEntityTag,
 
+    #[error("invalid entity tag: {0}")]
+    InvalidEntityTag(#[source] http::header::InvalidHeaderValue),
+
     #[error("object response was not valid UTF-8: {0}")]
     InvalidResponseEncoding(#[from] std::string::FromUtf8Error),
 

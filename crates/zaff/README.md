@@ -58,9 +58,8 @@ async fn read_file(
     }
 }
 ```
-When writing, using optimistic locking for simplification
-(assuming a source `update_if_match` API):
-```rust,ignore
+When writing, using optimistic locking for simplification:
+```rust
 use zadt::{Client, Discovery, Operation, PreconditionResult};
 use zaff::{FileBacking, FileProjection};
 
@@ -121,6 +120,5 @@ Unsupported metadata edits are rejected.
 | [FUGR — Function Group](src/formats/fugr.rs) | Children are projected separately. Group and main-program metadata share the description field. |
 | [REPS — Function Group Include](src/formats/fugr.rs) | Requires the parent group name. Child discovery and folder assembly belong to the caller. |
 | [FUNC — Function Module](src/formats/fugr.rs) | `includeNumber` is temporarily fixed to `"00"`. Source is passed through without AFF pseudo-syntax conversion. |
-
 
 

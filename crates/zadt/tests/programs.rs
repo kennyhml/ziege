@@ -556,7 +556,7 @@ async fn program_lock_and_update_share_one_user_session() {
         .unwrap();
     let updated = source
         .reference
-        .update(&object_lock, source.content.as_str())
+        .update_with_lock(source.content.as_str(), object_lock.clone())
         .unwrap()
         .execute(&session)
         .await

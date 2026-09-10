@@ -807,7 +807,7 @@ async fn source_save_rereads_under_the_lock_and_aborts_on_intervening_changes() 
         let saved = if current.content == baseline.content {
             let update = current
                 .reference
-                .update(&lock, EDITED_SOURCE)
+                .update_with_lock(EDITED_SOURCE, lock.clone())
                 .expect("owning object lock permits source update");
             let other_session = client.create_user_session();
             assert!(matches!(

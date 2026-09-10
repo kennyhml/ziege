@@ -1,18 +1,216 @@
 use http::{Method, StatusCode};
 
 use crate::{
-    AdtRequest, ObjectRef, SnapshotResources,
+    AdtRequest, IfMatch, Locked, ObjectRef, SnapshotResources,
     error::{EncodeError, ObjectError, ResponseError},
     objects::{ObjectSnapshot, Source, SourceComponents},
-    operation::{EncodedOperation, Independent, Operation, OperationResponse, Stateful, Stateless},
+    operation::{EncodedOperation, Independent, Operation, OperationResponse, Stateless},
     protocol::{EntityTag, TEXT_PLAIN_MEDIA_TYPE},
     resource::SourceRef,
 };
 
 use super::{
-    locking::{LOCK_HANDLE_QUERY, ObjectLock},
+    locking::ObjectLock,
     transports::{TRANSPORT_REQUEST_QUERY, TransportNumber},
 };
+
+/// Fetches the source code advertised by a [`SourceRef`].
+///
+/// The reference to the source already contains all information
+/// needed to make the request, as the media type can be assumed
+/// as `text/plain`.
+///
+/// Source queries support if-none-match handling and return an
+/// etag in the response headers.
+#[derive(Debug)]
+pub struct SourceQuery {
+    /// The source resource to fetch.
+    pub source: SourceRef,
+}
+
+impl Operation for SourceQuery {
+    type Response = SourceCode;
+    type Kind = Stateless;
+    type ResolutionRequirement = Independent;
+
+    fn encode(&self, _: &()) -> Result<EncodedOperation, EncodeError> {
+        let mut request = AdtRequest::new(Method::GET, self.source.uri.clone());
+        for (name, value) in &self.source.query {
+            request.push_query(name, value);
+        }
+        request.set_accept(TEXT_PLAIN_MEDIA_TYPE);
+        Ok(EncodedOperation::from(request))
+    }
+
+    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+        response.require_status(StatusCode::OK)?;
+        response.require_content_type(&[TEXT_PLAIN_MEDIA_TYPE])?;
+
+        let etag = response.etag();
+        let content = String::from_utf8(response.into_body())
+            .map_err(ObjectError::InvalidResponseEncoding)?;
+        Ok(SourceCode::new(self.source.clone(), content, etag))
+    }
+}
+
+impl<T: Source> ObjectSnapshot<T> {
+    /// Resolves the primary source advertised by this loaded object.
+    pub fn source(&self) -> Result<SourceRef, ObjectError> {
+        map_source_ref(self.reference(), self.resources(), "main")?
+            .ok_or(ObjectError::MissingRelation { relation: "source" })
+    }
+}
+
+impl<T: SourceComponents> ObjectSnapshot<T> {
+    /// Resolves one named source component supported by this loaded object family.
+    pub fn source_component(
+        &self,
+        name: impl AsRef<str>,
+    ) -> Result<Option<SourceRef>, ObjectError> {
+        map_source_ref(self.reference(), self.resources(), name.as_ref())
+    }
+}
+
+impl ObjectSnapshot<()> {
+    /// Resolves the primary source advertised by this runtime-typed object.
+    pub fn source(&self) -> Result<SourceRef, ObjectError> {
+        if !self.reference().require_descriptor()?.supports_source() {
+            return Err(self.reference().unsupported_capability("source"));
+        }
+
+        map_source_ref(self.reference(), self.resources(), "main")?
+            .ok_or(ObjectError::MissingRelation { relation: "source" })
+    }
+
+    /// Resolves one named source component supported by this runtime-typed object.
+    pub fn source_component(
+        &self,
+        name: impl AsRef<str>,
+    ) -> Result<Option<SourceRef>, ObjectError> {
+        let descriptor = self.reference().require_descriptor()?;
+        if !descriptor.supports_source_components() {
+            return Err(self.reference().unsupported_capability("source components"));
+        }
+        map_source_ref(self.reference(), self.resources(), name.as_ref())
+    }
+}
+
+/// Replaces the complete source code of an object.
+///
+/// Construct through [`SourceRef::update_if_match`] for optimistic concurrency
+/// or [`SourceRef::update_with_lock`] for a stateful, lock-based update.
+#[derive(Debug)]
+pub struct SourceUpdate {
+    /// The source resource whose complete content will be replaced.
+    source: SourceRef,
+
+    /// The complete replacement source text.
+    content: String,
+
+    /// The transport request selected for this update, when recording is required.
+    transport_request: Option<TransportNumber>,
+}
+
+impl SourceUpdate {
+    const MEDIA_TYPE: &str = "text/plain; charset=utf-8";
+
+    /// Records this update in the supplied transport request.
+    ///
+    /// This replaces any transport request inherited from the lock.
+    #[must_use]
+    pub fn transport(mut self, transport_request: impl Into<TransportNumber>) -> Self {
+        self.transport_request = Some(transport_request.into());
+        self
+    }
+}
+
+impl Operation for SourceUpdate {
+    type Response = SourceUpdateResult;
+    type Kind = Stateless;
+    type ResolutionRequirement = Independent;
+
+    fn encode(&self, _: &()) -> Result<EncodedOperation, EncodeError> {
+        let mut request = AdtRequest::new(Method::PUT, self.source.uri.clone());
+        if let Some(transport_request) = &self.transport_request {
+            request.push_query(TRANSPORT_REQUEST_QUERY, transport_request.as_str());
+        }
+        request.set_content_type(Self::MEDIA_TYPE);
+        request.set_body(self.content.clone());
+        Ok(EncodedOperation::from(request))
+    }
+
+    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+        response.require_success()?;
+        let etag = response.etag();
+        let body = response.into_body();
+        let content = (!body.is_empty())
+            .then(|| String::from_utf8(body))
+            .transpose()
+            .map_err(ObjectError::InvalidResponseEncoding)?;
+        Ok(SourceUpdateResult::new(self.source.clone(), content, etag))
+    }
+}
+
+impl SourceRef {
+    /// Creates a stateless query for this source representation.
+    pub fn query(&self) -> SourceQuery {
+        SourceQuery {
+            source: self.clone(),
+        }
+    }
+
+    /// Creates a stateless update guarded by the entity tag from this reference.
+    ///
+    /// Construction fails when the reference has no entity tag. A failed HTTP
+    /// precondition is represented by [`crate::PreconditionResult::Failed`].
+    /// Uses the tag stored on this reference. Query and update response tags
+    /// remain separate and do not automatically replace it.
+    pub fn update_if_match(
+        &self,
+        content: impl Into<String>,
+    ) -> Result<IfMatch<SourceUpdate>, ObjectError> {
+        let etag = self.etag.clone().ok_or(ObjectError::MissingEntityTag)?;
+        self.update(content)
+            .map(|operation| IfMatch::new(operation, etag))
+    }
+
+    /// Creates a stateful update guarded by a persistent modification lock.
+    ///
+    /// The lock must belong to this object and permit modifications. Its user
+    /// session and transport request are retained by the returned operation.
+    pub fn update_with_lock(
+        &self,
+        content: impl Into<String>,
+        lock: ObjectLock,
+    ) -> Result<Locked<SourceUpdate>, ObjectError> {
+        let mut update = self.update(content)?;
+        update.transport_request = lock.transport_request().cloned();
+        Locked::try_new(update, lock, &self.object)
+    }
+
+    /// Constructs the source update shared by both concurrency modes.
+    fn update(&self, content: impl Into<String>) -> Result<SourceUpdate, ObjectError> {
+        Ok(SourceUpdate {
+            source: self.clone(),
+            content: content.into(),
+            transport_request: None,
+        })
+    }
+}
+
+impl IfMatch<SourceUpdate> {
+    /// Records this update in the supplied transport request.
+    pub fn transport(self, transport: impl Into<TransportNumber>) -> Self {
+        self.map_inner(|update| update.transport_request = Some(transport.into()))
+    }
+}
+
+impl Locked<SourceUpdate> {
+    /// Overrides the transport request inherited from the lock.
+    pub fn transport(self, transport: impl Into<TransportNumber>) -> Self {
+        self.map_inner(|update| update.transport_request = Some(transport.into()))
+    }
+}
 
 /// A fetched source representation and its attached metadata.
 #[derive(Debug)]
@@ -64,39 +262,9 @@ impl SourceUpdateResult {
     }
 }
 
-/// Fetches the source code advertised by a [`SourceRef`].
-#[derive(Debug)]
-pub struct ObjectSourceQuery {
-    /// The source resource to fetch.
-    pub source: SourceRef,
-}
-
-impl Operation for ObjectSourceQuery {
-    type Response = SourceCode;
-    type Kind = Stateless;
-    type ResolutionRequirement = Independent;
-
-    fn encode(&self, _: &()) -> Result<EncodedOperation, EncodeError> {
-        let mut request = AdtRequest::new(Method::GET, self.source.uri.clone());
-        for (name, value) in &self.source.query {
-            request.push_query(name, value);
-        }
-        request.set_accept(TEXT_PLAIN_MEDIA_TYPE);
-        Ok(EncodedOperation::from(request))
-    }
-
-    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        response.require_status(StatusCode::OK)?;
-        response.require_content_type(&[TEXT_PLAIN_MEDIA_TYPE])?;
-
-        let etag = response.etag();
-        let content = String::from_utf8(response.into_body())
-            .map_err(ObjectError::InvalidResponseEncoding)?;
-        Ok(SourceCode::new(self.source.clone(), content, etag))
-    }
-}
-
-fn source_resource<T>(
+/// Internal helper method to look up the [`crate::SnapshotResource`] associated
+/// with the source component and map it into a [`SourceRef`].
+fn map_source_ref<T>(
     reference: &ObjectRef<T>,
     resources: SnapshotResources<'_>,
     name: &str,
@@ -111,142 +279,6 @@ fn source_resource<T>(
             )
         })
         .transpose()
-}
-
-impl<T: Source> ObjectSnapshot<T> {
-    /// Resolves the primary source advertised by this loaded object.
-    pub fn source(&self) -> Result<SourceRef, ObjectError> {
-        source_resource(self.reference(), self.resources(), "main")?
-            .ok_or(ObjectError::MissingRelation { relation: "source" })
-    }
-}
-
-impl<T: SourceComponents> ObjectSnapshot<T> {
-    /// Resolves one named source component supported by this loaded object family.
-    pub fn source_component(
-        &self,
-        name: impl AsRef<str>,
-    ) -> Result<Option<SourceRef>, ObjectError> {
-        source_resource(self.reference(), self.resources(), name.as_ref())
-    }
-}
-
-impl ObjectSnapshot<()> {
-    /// Resolves the primary source advertised by this runtime-typed object.
-    pub fn source(&self) -> Result<SourceRef, ObjectError> {
-        if !self.reference().require_descriptor()?.supports_source() {
-            return Err(self.reference().unsupported_capability("source"));
-        }
-        source_resource(self.reference(), self.resources(), "main")?
-            .ok_or(ObjectError::MissingRelation { relation: "source" })
-    }
-
-    /// Resolves one named source component supported by this runtime-typed object.
-    pub fn source_component(
-        &self,
-        name: impl AsRef<str>,
-    ) -> Result<Option<SourceRef>, ObjectError> {
-        if !self
-            .reference()
-            .require_descriptor()?
-            .supports_source_components()
-        {
-            return Err(self.reference().unsupported_capability("source components"));
-        }
-        source_resource(self.reference(), self.resources(), name.as_ref())
-    }
-}
-
-/// Replaces the complete source code of an object.
-///
-/// This operation is stateful and requires an [`ObjectLock`] issued for the
-/// object being updated. [`SourceRef::update`] verifies this relationship before
-/// constructing the operation.
-#[derive(Debug)]
-pub struct ObjectSourceUpdate {
-    /// The source resource whose complete content will be replaced.
-    source: SourceRef,
-
-    /// A modification lock obtained for the source's owning object.
-    object_lock: ObjectLock,
-
-    /// The complete replacement source text.
-    content: String,
-
-    /// The transport request selected for this update, when recording is required.
-    transport_request: Option<TransportNumber>,
-}
-
-impl ObjectSourceUpdate {
-    const MEDIA_TYPE: &str = "text/plain; charset=utf-8";
-
-    /// Records this update in the supplied transport request.
-    ///
-    /// This replaces any transport request inherited from the lock.
-    #[must_use]
-    pub fn transport(mut self, transport_request: impl Into<TransportNumber>) -> Self {
-        self.transport_request = Some(transport_request.into());
-        self
-    }
-}
-
-impl Operation for ObjectSourceUpdate {
-    type Response = SourceUpdateResult;
-    type Kind = Stateful;
-    type ResolutionRequirement = Independent;
-
-    fn encode(&self, _: &()) -> Result<EncodedOperation, EncodeError> {
-        let mut request = AdtRequest::new(Method::PUT, self.source.uri.clone());
-        request.push_query(LOCK_HANDLE_QUERY, self.object_lock.handle());
-        if let Some(transport_request) = &self.transport_request {
-            request.push_query(TRANSPORT_REQUEST_QUERY, transport_request.as_str());
-        }
-        request.set_content_type(Self::MEDIA_TYPE);
-        request.set_body(self.content.clone());
-        let mut operation = EncodedOperation::from(request);
-        if let Some(user_session) = self.object_lock.user_session() {
-            operation.bind_user_session(user_session);
-        }
-        Ok(operation)
-    }
-
-    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
-        response.require_success()?;
-        let etag = response.etag();
-        let body = response.into_body();
-        let content = (!body.is_empty())
-            .then(|| String::from_utf8(body))
-            .transpose()
-            .map_err(ObjectError::InvalidResponseEncoding)?;
-        Ok(SourceUpdateResult::new(self.source.clone(), content, etag))
-    }
-}
-
-impl SourceRef {
-    /// Creates a stateless query for this source representation.
-    pub fn query(&self) -> ObjectSourceQuery {
-        ObjectSourceQuery {
-            source: self.clone(),
-        }
-    }
-
-    /// Replaces this source using a modification lock for its owning object.
-    ///
-    /// The update automatically uses the transport request attached to the lock,
-    /// when SAP supplied one.
-    pub fn update(
-        &self,
-        object_lock: &ObjectLock,
-        content: impl Into<String>,
-    ) -> Result<ObjectSourceUpdate, ObjectError> {
-        object_lock.validate_modification_for(&self.object)?;
-        Ok(ObjectSourceUpdate {
-            source: self.clone(),
-            object_lock: object_lock.clone(),
-            content: content.into(),
-            transport_request: object_lock.transport_request().cloned(),
-        })
-    }
 }
 
 #[cfg(test)]
@@ -289,10 +321,112 @@ mod tests {
 
     #[test]
     fn source_operations_do_not_require_discovery() {
-        fn accepts_operation<O: Operation>() {}
+        fn accepts_stateless<
+            O: Operation<Kind = Stateless, ResolutionRequirement = Independent>,
+        >() {
+        }
+        fn accepts_stateful<
+            O: Operation<Kind = crate::Stateful, ResolutionRequirement = Independent>,
+        >() {
+        }
 
-        accepts_operation::<ObjectSourceQuery>();
-        accepts_operation::<ObjectSourceUpdate>();
+        accepts_stateless::<SourceQuery>();
+        accepts_stateless::<IfMatch<SourceUpdate>>();
+        accepts_stateful::<Locked<SourceUpdate>>();
+    }
+
+    #[test]
+    fn optimistic_source_update_requires_a_source_etag() {
+        assert!(matches!(
+            program_source().update_if_match("REPORT zprogram."),
+            Err(ObjectError::MissingEntityTag)
+        ));
+        assert!(matches!(
+            SourceRef::from_href(
+                program().erase(),
+                "source/main",
+                Some("invalid\r\ntag".into())
+            ),
+            Err(ObjectError::InvalidEntityTag(_))
+        ));
+    }
+
+    #[test]
+    fn optimistic_source_update_encodes_source_validator_and_transport() {
+        let source = SourceRef::from_href(
+            program().erase(),
+            "source/main?version=inactive",
+            Some("\"source-1\"".into()),
+        )
+        .unwrap();
+        for transport in [None, Some("A4HK900001")] {
+            let mut update = source.update_if_match("REPORT zprogram.").unwrap();
+            if let Some(transport) = transport {
+                update = update.transport(transport);
+            }
+            let request = update.encode(&()).unwrap();
+            assert_eq!(request.method(), Method::PUT);
+            assert_eq!(request.target(), &source.uri);
+            assert_eq!(request.headers()[header::IF_MATCH], "\"source-1\"");
+            assert_eq!(
+                request.headers()[header::CONTENT_TYPE],
+                "text/plain; charset=utf-8"
+            );
+            assert_eq!(request.body(), b"REPORT zprogram.");
+            let expected: Vec<_> = transport
+                .into_iter()
+                .map(|value| ("corrNr".to_owned(), value.to_owned()))
+                .collect();
+            // Read-version parameters and lock handles do not belong to this PUT.
+            assert_eq!(request.query(), expected);
+        }
+    }
+
+    #[test]
+    fn optimistic_source_update_decodes_success_and_conflicts() {
+        let mut source = program_source();
+        source.etag = Some(EntityTag::from_static("source-1"));
+        let update = source.update_if_match("REPORT zprogram.").unwrap();
+        for (status, body, expected_content) in [
+            (
+                StatusCode::OK,
+                "REPORT zprogram.\n",
+                Some("REPORT zprogram.\n"),
+            ),
+            (StatusCode::NO_CONTENT, "", None),
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::ETAG, HeaderValue::from_static("source-2"));
+            let result = update
+                .decode(OperationResponse::new(
+                    AdtResponse::new(status, headers, body.as_bytes().to_vec()),
+                    source.uri.clone(),
+                ))
+                .unwrap();
+            let crate::PreconditionResult::Success(saved) = result else {
+                panic!("expected successful source update");
+            };
+            assert_eq!(saved.content.as_deref(), expected_content);
+            assert_eq!(saved.etag.as_deref(), Some("source-2"));
+            assert_eq!(saved.reference, source);
+        }
+        for etag in [None, Some("source-3")] {
+            let mut headers = HeaderMap::new();
+            if let Some(etag) = etag {
+                headers.insert(header::ETAG, etag.parse().unwrap());
+            }
+            let result = update
+                .decode(OperationResponse::new(
+                    AdtResponse::new(StatusCode::PRECONDITION_FAILED, headers, vec![0xff]),
+                    source.uri.clone(),
+                ))
+                .unwrap();
+            let crate::PreconditionResult::Failed { etag: actual } = result else {
+                panic!("expected failed source precondition");
+            };
+            assert_eq!(actual.as_deref(), etag);
+        }
+        assert_eq!(source.etag.as_deref(), Some("source-1"));
     }
 
     #[test]
@@ -340,8 +474,10 @@ mod tests {
             "/sap/bc/adt/oo/classes/zcl_example/includes/implementations",
         ] {
             let source = source_ref(&class, uri);
-            let update = source.update(&object_lock, "source").unwrap();
-            let request = <ObjectSourceUpdate as Operation>::encode(&update, &()).unwrap();
+            let update = source
+                .update_with_lock("source", object_lock.clone())
+                .unwrap();
+            let request = update.encode(&()).unwrap();
 
             assert_eq!(request.target(), &source.uri);
             assert_eq!(
@@ -364,7 +500,7 @@ mod tests {
         let object_lock = ObjectLock::for_test(first.erase(), AccessMode::Modify);
 
         let error = source_ref(&second, "/sap/bc/adt/programs/programs/zsecond/source/main")
-            .update(&object_lock, "REPORT zsecond.")
+            .update_with_lock("REPORT zsecond.", object_lock)
             .unwrap_err();
 
         assert!(matches!(error, ObjectError::ObjectLockMismatch { .. }));
@@ -376,7 +512,7 @@ mod tests {
         let object_lock = ObjectLock::for_test(program.erase(), AccessMode::Show);
 
         let error = program_source()
-            .update(&object_lock, "REPORT zprogram.")
+            .update_with_lock("REPORT zprogram.", object_lock)
             .unwrap_err();
 
         assert!(matches!(error, ObjectError::ObjectLockNotModifiable));
@@ -389,7 +525,7 @@ mod tests {
         let lock = ObjectLock::for_test(other.erase(), AccessMode::Modify);
 
         assert!(matches!(
-            program_source().update(&lock, "REPORT zprogram."),
+            program_source().update_with_lock("REPORT zprogram.", lock),
             Err(ObjectError::ObjectLockMismatch { .. })
         ));
     }
@@ -421,7 +557,7 @@ mod tests {
             owner.uri().clone(),
         );
         let lock = ObjectLock::for_test(lock_owner.erase(), AccessMode::Modify);
-        assert!(source.update(&lock, "source").is_ok());
+        assert!(source.update_with_lock("source", lock).is_ok());
     }
 
     #[test]
@@ -433,17 +569,19 @@ mod tests {
             .push(("version".to_owned(), "inactive".to_owned()));
         let object_lock =
             ObjectLock::for_test_with_transport(program.erase(), AccessMode::Modify, "A4HK900001");
-        let update = source.update(&object_lock, "REPORT zprogram.").unwrap();
+        let update = source
+            .update_with_lock("REPORT zprogram.", object_lock)
+            .unwrap();
 
-        let request = <ObjectSourceUpdate as Operation>::encode(&update, &()).unwrap();
+        let request = update.encode(&()).unwrap();
 
         assert_eq!(request.method(), Method::PUT);
         assert_eq!(request.target(), &source.uri);
         assert_eq!(
             request.query(),
             [
-                ("lockHandle".to_owned(), "LOCK-HANDLE".to_owned()),
                 ("corrNr".to_owned(), "A4HK900001".to_owned()),
+                ("lockHandle".to_owned(), "LOCK-HANDLE".to_owned()),
             ]
         );
         assert_eq!(request.body(), b"REPORT zprogram.");
@@ -459,16 +597,16 @@ mod tests {
             ObjectLock::for_test_with_transport(program.erase(), AccessMode::Modify, "A4HK900001"),
         ] {
             let update = source
-                .update(&object_lock, "REPORT zprogram.")
+                .update_with_lock("REPORT zprogram.", object_lock)
                 .unwrap()
                 .transport("A4HK900002");
-            let request = <ObjectSourceUpdate as Operation>::encode(&update, &()).unwrap();
+            let request = update.encode(&()).unwrap();
 
             assert_eq!(
                 request.query(),
                 [
-                    ("lockHandle".to_owned(), "LOCK-HANDLE".to_owned()),
                     ("corrNr".to_owned(), "A4HK900002".to_owned()),
+                    ("lockHandle".to_owned(), "LOCK-HANDLE".to_owned()),
                 ]
             );
         }
@@ -479,11 +617,13 @@ mod tests {
         let program = program();
         let source = program_source();
         let object_lock = ObjectLock::for_test(program.erase(), AccessMode::Modify);
-        let update = source.update(&object_lock, "REPORT zprogram.").unwrap();
+        let update = source
+            .update_with_lock("REPORT zprogram.", object_lock)
+            .unwrap();
         let mut headers = HeaderMap::new();
         headers.insert(header::ETAG, HeaderValue::from_static("source-etag-2"));
 
-        let result = <ObjectSourceUpdate as Operation>::decode(
+        let result = <Locked<SourceUpdate> as Operation>::decode(
             &update,
             OperationResponse::new(
                 AdtResponse::new(StatusCode::OK, headers, b"REPORT zprogram.\n".to_vec()),
@@ -502,7 +642,9 @@ mod tests {
         let program = program();
         let source = program_source();
         let object_lock = ObjectLock::for_test(program.erase(), AccessMode::Modify);
-        let update = source.update(&object_lock, "REPORT zprogram.").unwrap();
+        let update = source
+            .update_with_lock("REPORT zprogram.", object_lock)
+            .unwrap();
         let body =
             br#"<exc:exception xmlns:exc="http://www.sap.com/abapxml/types/communicationframework">
             <namespace id="com.sap.adt"/>
@@ -514,7 +656,7 @@ mod tests {
             </properties>
         </exc:exception>"#;
 
-        let error = <ObjectSourceUpdate as Operation>::decode(
+        let error = <Locked<SourceUpdate> as Operation>::decode(
             &update,
             OperationResponse::new(
                 AdtResponse::new(StatusCode::CONFLICT, HeaderMap::new(), body.to_vec()),
@@ -536,9 +678,11 @@ mod tests {
         let program = program();
         let source = program_source();
         let object_lock = ObjectLock::for_test(program.erase(), AccessMode::Modify);
-        let update = source.update(&object_lock, "REPORT zprogram.").unwrap();
+        let update = source
+            .update_with_lock("REPORT zprogram.", object_lock)
+            .unwrap();
 
-        let result = <ObjectSourceUpdate as Operation>::decode(
+        let result = <Locked<SourceUpdate> as Operation>::decode(
             &update,
             OperationResponse::new(
                 AdtResponse::new(StatusCode::NO_CONTENT, HeaderMap::new(), Vec::new()),
@@ -556,7 +700,7 @@ mod tests {
         let program = program();
         let object_lock = ObjectLock::for_test(program.erase(), AccessMode::Modify);
         let update = program_source()
-            .update(&object_lock, "REPORT zprogram.")
+            .update_with_lock("REPORT zprogram.", object_lock)
             .unwrap();
         let session = Client::new(UnusedTransport).create_user_session();
 

@@ -1,7 +1,7 @@
-use std::{fmt, marker::PhantomData};
+use std::{fmt, marker::PhantomData, str::FromStr};
 
 use crate::{
-    AdtUri, ObjectError, ObjectRef,
+    AdtUri, EntityTag, ObjectError, ObjectRef,
     resource::{AdvertisedLink, resolve_href},
 };
 
@@ -24,7 +24,7 @@ pub struct OwnedResourceRef<T> {
     pub fragment: Option<String>,
 
     /// The entity tag advertised for this resource, when present.
-    pub etag: Option<String>,
+    pub etag: Option<EntityTag>,
 
     marker: PhantomData<fn() -> T>,
 }
@@ -55,7 +55,11 @@ impl<T> OwnedResourceRef<T> {
         let mut reference = Self::new(object, resolved.target);
         reference.query = resolved.query;
         reference.fragment = resolved.fragment;
-        reference.etag = etag;
+        reference.etag = etag
+            .as_deref()
+            .map(EntityTag::from_str)
+            .transpose()
+            .map_err(ObjectError::InvalidEntityTag)?;
         Ok(reference)
     }
 
@@ -138,10 +142,11 @@ pub type ParserRef = OwnedResourceRef<kind::Parser>;
 ///
 /// A source URI alone does not establish which object lock authorizes an
 /// update. `SourceRef` therefore retains both the source URI and its
-/// [`ObjectRef`]. [`SourceRef::update`](crate::SourceRef::update) uses that
+/// [`ObjectRef`]. [`SourceRef::update_with_lock`] uses that
 /// relationship to validate an [`ObjectLock`](crate::ObjectLock) before creating
 /// the update operation.
 ///
 /// Its ETag is the advertised plain-text source validator, not the owning
 /// object's properties ETag or a later source response's ETag.
+/// [`SourceRef::update_if_match`] uses this tag for optimistic concurrency.
 pub type SourceRef = OwnedResourceRef<kind::Source>;

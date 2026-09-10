@@ -53,7 +53,7 @@ pub use api::repository::{
 };
 pub use api::run::{ObjectRun, ObjectRunResult};
 pub use api::session::{Logon, SessionInformation, SessionUri, SystemInformationLink};
-pub use api::source::{ObjectSourceQuery, ObjectSourceUpdate, SourceCode, SourceUpdateResult};
+pub use api::source::{SourceCode, SourceQuery, SourceUpdate, SourceUpdateResult};
 pub use api::transports::{
     QueryTransportKind, TransportCheck, TransportCheckBuilder, TransportCheckBuilderError,
     TransportCheckLinkUpMode, TransportCheckMessage, TransportCheckOperation, TransportCheckResult,
@@ -101,11 +101,10 @@ pub use objects::{
     MetadataExtensionProperties, ObjectKey, ObjectName, ObjectRef, ObjectReferences,
     ObjectSnapshot, ObjectType, Package, PackageAssignment, PackageAttributes, PackageProperties,
     PackageTransport, PackageUseAccess, PackageUseAccesses, PrimaryObjectType, Program,
-    ProgramProperties, Resources,
-    ServiceDefinition, ServiceDefinitionCreateProperties, ServiceDefinitionCreatePropertiesBuilder,
-    ServiceDefinitionCreatePropertiesBuilderError, ServiceDefinitionProperties, SnapshotKind,
-    Source, SourceComponents, Structure, SubObject, SubObjectDescriptor, SyntaxConfiguration,
-    SyntaxLanguage, ToXml, WorkbenchVersion, XmlCodec,
+    ProgramProperties, Resources, ServiceDefinition, ServiceDefinitionCreateProperties,
+    ServiceDefinitionCreatePropertiesBuilder, ServiceDefinitionCreatePropertiesBuilderError,
+    ServiceDefinitionProperties, SnapshotKind, Source, SourceComponents, Structure, SubObject,
+    SubObjectDescriptor, SyntaxConfiguration, SyntaxLanguage, ToXml, WorkbenchVersion, XmlCodec,
 };
 pub use operation::{
     BatchError, BatchKey, BatchOperation, BatchResponses, Batched, ConditionalResult,
