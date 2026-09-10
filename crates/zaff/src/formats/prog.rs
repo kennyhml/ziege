@@ -108,18 +108,18 @@ fn merge(
 /// # Document Layout
 ///
 /// ```text
-/// AFF block           Program ADT storage             Include ADT storage
-/// ---------           -------------------             -------------------
-/// formatVersion       No backing field, constant "1"  No backing field, constant "1"
-/// header              ProgramProperties               IncludeProperties
-/// generalInformation  ProgramProperties               IncludeProperties and fixed AFF values
-/// logicalDatabase     No implemented backing          No implemented backing
+/// AFF block           Program ADT storage                 Include ADT storage
+/// ---------           -------------------                 -------------------
+/// formatVersion       No backing field, constant "1"      No backing field, constant "1"
+/// header              ProgramProperties                   IncludeProperties
+/// generalInformation  ProgramProperties                   IncludeProperties and fixed AFF values
+/// logicalDatabase     ProgramProperties.logical_database  No implemented backing
 /// ```
 ///
 /// Both families expose description and original language through [`ProgramHeader`].
 /// The supported general fields differ between them, as documented on
-/// [`ProgramGeneralInformation`]. [`LogicalDatabase`] describes valid AFF fields
-/// with no implemented ADT mapping.
+/// [`ProgramGeneralInformation`]. [`LogicalDatabase`] maps the Program database
+/// assignment and selection screen.
 ///
 /// The object name, package, links, users, timestamps, and other unrepresented
 /// ADT metadata are not supplied by this document. They remain in the original
@@ -182,11 +182,15 @@ pub struct ProgramHeader {
 /// All AFF paths below are inside `generalInformation`.
 ///
 /// ```text
-/// AFF field           ProgramProperties field  IncludeProperties field
-/// ---------           -----------------------  -----------------------
-/// programType         program_type             No field, fixed to "include"
-/// fixPointArithmetic  fix_point_arithmetic     fix_point_arithmetic
-/// editLocked          locked_by_editor         No implemented backing
+/// AFF field           ProgramProperties field              IncludeProperties field
+/// ---------           -----------------------              -----------------------
+/// programType         program_type                         No field, fixed to "include"
+/// fixPointArithmetic  fix_point_arithmetic                 fix_point_arithmetic
+/// editLocked          locked_by_editor                     No implemented backing
+/// programStatus       source_object_status                 No implemented backing
+/// startsUsingVariant  start_using_variant                  No implemented backing
+/// authorizationGroup  authorization_group.reference.name  No implemented backing
+/// application         authorization_group.application     No implemented backing
 /// ```
 ///
 /// Program type uses the spellings documented on [`ProgramType`]. A Program
@@ -198,21 +202,15 @@ pub struct ProgramHeader {
 /// `locked_by_editor` for Programs. It is an object property, not an ADT session
 /// lock handle. Includes accept only false for this AFF field.
 ///
-/// # Fields Without An Implemented Mapping
+/// Missing optional Program values render as AFF defaults. Unchanged defaults
+/// preserve absent ADT values. Actual edits write explicit values, including
+/// false and empty strings when clearing a setting. Program status spellings
+/// are documented on [`ProgramStatus`].
 ///
-/// ```text
-/// AFF field           Accepted value  ADT backing
-/// ---------           --------------  -----------
-/// programStatus       unknown         Not implemented
-/// startsUsingVariant  false           Not implemented
-/// authorizationGroup  Empty string    Not implemented
-/// application         Empty string    Not implemented
-/// ```
-///
-/// These values are omitted from generated JSON. Supplying their defaults
-/// explicitly is accepted, but nondefault edits are rejected rather than ignored.
-/// This does not imply that every SAP endpoint lacks these fields, only that
-/// this projection does not map them.
+/// Authorization group names retain their reference metadata when unchanged.
+/// A changed name replaces the reference with a name-only value. Editing the
+/// application alone preserves the group reference. Includes accept only the
+/// defaults for status, variant startup, authorization group, and application.
 ///
 /// # Omitted Values
 ///
@@ -330,21 +328,21 @@ impl ProgramType {
 
 /// Program status vocabulary in AFF.
 ///
-/// `generalInformation.programStatus` has no implemented ADT backing for either
-/// family. The model represents the AFF vocabulary, but only `unknown` is
-/// accepted by the mapping.
+/// Maps `generalInformation.programStatus` to Program `source_object_status`.
 ///
 /// ```text
-/// AFF value                  Mapping support
-/// ---------                  ---------------
-/// sapProductionProgram       Unsupported
-/// customerProductionProgram  Unsupported
-/// systemProgram              Unsupported
-/// testProgram                Unsupported
-/// unknown                    Accepted default, no ADT field is changed
+/// AFF value                  ADT value
+/// ---------                  ---------
+/// sapProductionProgram       SAPStandardProduction
+/// customerProductionProgram  customerProduction
+/// systemProgram              system
+/// testProgram                test
+/// unknown                    unknown
 /// ```
 ///
-/// Generated documents omit the default `unknown` value.
+/// Absent or empty ADT values also render as `unknown`. Unchanged values retain
+/// their original representation. Other ADT strings are rejected. Standalone
+/// Includes accept only `unknown`, with no corresponding ADT field.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ProgramStatus {
     #[serde(rename = "sapProductionProgram")]
@@ -361,6 +359,30 @@ pub enum ProgramStatus {
 }
 
 impl ProgramStatus {
+    fn from_adt(value: Option<&str>) -> Result<Self, ProjectionError> {
+        match value.unwrap_or_default() {
+            "SAPStandardProduction" => Ok(Self::SapProductionProgram),
+            "customerProduction" => Ok(Self::CustomerProductionProgram),
+            "system" => Ok(Self::SystemProgram),
+            "test" => Ok(Self::TestProgram),
+            "" | "unknown" => Ok(Self::Unknown),
+            value => Err(ProjectionError::InvalidAffField {
+                field: "generalInformation.programStatus",
+                message: format!("unsupported ADT source object status `{value}`"),
+            }),
+        }
+    }
+
+    const fn adt_value(self) -> &'static str {
+        match self {
+            Self::SapProductionProgram => "SAPStandardProduction",
+            Self::CustomerProductionProgram => "customerProduction",
+            Self::SystemProgram => "system",
+            Self::TestProgram => "test",
+            Self::Unknown => "unknown",
+        }
+    }
+
     const fn is_default(&self) -> bool {
         matches!(self, Self::Unknown)
     }
@@ -371,16 +393,17 @@ impl ProgramStatus {
 /// # Field Mapping
 ///
 /// ```text
-/// AFF field                        ADT backing
-/// ---------                        -----------
-/// logicalDatabase.name             Not implemented
-/// logicalDatabase.selectionScreen  Not implemented
+/// AFF field                        ProgramProperties field
+/// ---------                        -----------------------
+/// logicalDatabase.name             logical_database.reference.name
+/// logicalDatabase.selectionScreen  logical_database.selection_screen
 /// ```
 ///
-/// Neither Program nor Include projections currently supply these values.
-/// The block is omitted from generated JSON. An absent block or a block with
-/// both strings empty is accepted. A nonempty name or selection screen is
-/// rejected, even if it passes AFF schema validation.
+/// Missing values render as empty strings, and an empty block is omitted.
+/// Unchanged fields preserve absent values, explicit empty strings, and reference
+/// metadata. Renaming the database replaces its reference with a name-only value.
+/// Removing a populated block clears the ADT assignment. Standalone Includes
+/// accept only an absent or empty block.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, Validate)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LogicalDatabase {
@@ -406,7 +429,6 @@ pub(crate) fn merge_program_properties(
 ) -> Result<ProgramProperties, ProjectionError> {
     let edited = parse(edited)?;
     let edited_general = edited.general_information.unwrap_or_default();
-    validate_program_fields(&edited_general, edited.logical_database.as_ref())?;
     if edited_general.program_type == ProgramType::Include {
         return Err(ProjectionError::InvalidAffField {
             field: "generalInformation.programType",
@@ -415,7 +437,8 @@ pub(crate) fn merge_program_properties(
     }
 
     // Reject unprojectable baselines before replacing their represented fields.
-    ProjectedProgramProperties::from_program(original)?;
+    let baseline = ProjectedProgramProperties::from_program(original)?;
+    let baseline_general = baseline.general_information.unwrap_or_default();
     let mut merged = original.clone();
     // AFF header.description      -> ADT description
     // AFF header.originalLanguage -> ADT master_language, with language-code conversion
@@ -430,6 +453,57 @@ pub(crate) fn merge_program_properties(
     merged.program_type = edited_general.program_type.adt_value().to_owned();
     merged.fix_point_arithmetic = edited_general.fix_point_arithmetic;
     merged.locked_by_editor = edited_general.edit_locked;
+    if edited_general.program_status != baseline_general.program_status {
+        merged.source_object_status = Some(edited_general.program_status.adt_value().to_owned());
+    }
+    if edited_general.starts_using_variant != baseline_general.starts_using_variant {
+        merged.start_using_variant = Some(edited_general.starts_using_variant);
+    }
+    if edited_general.authorization_group != baseline_general.authorization_group
+        || edited_general.application != baseline_general.application
+    {
+        let group = merged
+            .authorization_group
+            .get_or_insert_with(|| zadt::AuthorizationGroup {
+                application: None,
+                reference: Default::default(),
+            });
+        if edited_general.authorization_group != baseline_general.authorization_group {
+            group.reference = zadt::AdvertisedObjectReference {
+                name: Some(edited_general.authorization_group),
+                ..Default::default()
+            };
+        }
+        if edited_general.application != baseline_general.application {
+            group.application = Some(edited_general.application);
+        }
+    }
+
+    let database = edited.logical_database.unwrap_or_default();
+    let baseline_database = baseline.logical_database.unwrap_or_default();
+    if database.name != baseline_database.name
+        || database.selection_screen != baseline_database.selection_screen
+    {
+        if database.is_empty() {
+            merged.logical_database = None;
+        } else {
+            let target = merged
+                .logical_database
+                .get_or_insert_with(|| zadt::LogicalDatabase {
+                    selection_screen: None,
+                    reference: Default::default(),
+                });
+            if database.name != baseline_database.name {
+                target.reference = zadt::AdvertisedObjectReference {
+                    name: Some(database.name),
+                    ..Default::default()
+                };
+            }
+            if database.selection_screen != baseline_database.selection_screen {
+                target.selection_screen = Some(database.selection_screen);
+            }
+        }
+    }
     Ok(merged)
 }
 
@@ -440,7 +514,7 @@ pub(crate) fn merge_include_properties(
 ) -> Result<IncludeProperties, ProjectionError> {
     let edited = parse(edited)?;
     let edited_general = edited.general_information.unwrap_or_default();
-    validate_program_fields(&edited_general, edited.logical_database.as_ref())?;
+    validate_include_fields(&edited_general, edited.logical_database.as_ref())?;
     if edited_general.program_type != ProgramType::Include {
         return Err(ProjectionError::InvalidAffField {
             field: "generalInformation.programType",
@@ -466,13 +540,19 @@ pub(crate) fn merge_include_properties(
 
 impl ProjectedProgramProperties {
     fn from_program(properties: &ProgramProperties) -> Result<Self, ProjectionError> {
-        // Only these three general-information fields have Program ADT backings.
-        // The other AFF fields retain defaults, not values inferred from source text.
+        let group = properties.authorization_group.as_ref();
         let general = ProgramGeneralInformation {
             program_type: ProgramType::from_adt(&properties.program_type)?,
             fix_point_arithmetic: properties.fix_point_arithmetic,
             edit_locked: properties.locked_by_editor,
-            ..Default::default()
+            program_status: ProgramStatus::from_adt(properties.source_object_status.as_deref())?,
+            starts_using_variant: properties.start_using_variant.unwrap_or_default(),
+            authorization_group: group
+                .and_then(|group| group.reference.name.clone())
+                .unwrap_or_default(),
+            application: group
+                .and_then(|group| group.application.clone())
+                .unwrap_or_default(),
         };
         let document = Self {
             format_version: PROGRAM_FORMAT.version().to_owned(),
@@ -484,7 +564,14 @@ impl ProjectedProgramProperties {
                 )?,
             },
             general_information: (!general.is_empty()).then_some(general),
-            logical_database: None,
+            logical_database: properties
+                .logical_database
+                .as_ref()
+                .map(|database| LogicalDatabase {
+                    name: database.reference.name.clone().unwrap_or_default(),
+                    selection_screen: database.selection_screen.clone().unwrap_or_default(),
+                })
+                .filter(|database| !database.is_empty()),
         };
         document.validate()?;
         Ok(document)
@@ -521,7 +608,7 @@ fn parse(content: &str) -> Result<ProjectedProgramProperties, ProjectionError> {
     Ok(document)
 }
 
-fn validate_program_fields(
+fn validate_include_fields(
     general: &ProgramGeneralInformation,
     database: Option<&LogicalDatabase>,
 ) -> Result<(), ProjectionError> {
@@ -681,6 +768,34 @@ mod tests {
     }
 
     #[test]
+    fn program_description_edits_preserve_optional_adt_settings() {
+        let reference = crate::test_support::reference::<Program>(
+            "ZTFTFRT",
+            "/sap/bc/adt/programs/programs/ztftfrt",
+        );
+        let original = crate::test_support::properties(
+            &reference,
+            Program::MEDIA_TYPES[0],
+            "program-etag",
+            include_bytes!("../../../zadt/tests/fixtures/program-ztftfrt.xml"),
+        )
+        .into_erased();
+        let content = render(&original).unwrap();
+        assert_eq!(merge(&original, &content).unwrap(), None);
+        let mut edited: ProjectedProgramProperties = serde_json::from_str(&content).unwrap();
+        edited.header.description = "Updated description".to_owned();
+        let merged: ProgramProperties = serde_json::from_value(
+            merge(&original, &serde_json::to_string(&edited).unwrap())
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        let mut expected = original.typed_properties::<Program>().unwrap().clone();
+        expected.description = edited.header.description;
+        assert_eq!(merged, expected);
+    }
+
+    #[test]
     fn merges_include_edits_and_requires_the_include_discriminator() {
         let original = include();
         let mut edited: ProjectedProgramProperties =
@@ -718,21 +833,214 @@ mod tests {
     }
 
     #[test]
-    fn rejects_program_fields_not_available_from_adt_properties() {
-        let original = program();
-        let mut edited: ProjectedProgramProperties =
-            serde_json::from_str(&render(&original).unwrap()).unwrap();
-        edited
-            .general_information
-            .get_or_insert_default()
-            .program_status = ProgramStatus::CustomerProductionProgram;
-
+    fn rejects_program_fields_not_available_from_include_properties() {
+        let original = include();
+        let document: Value = serde_json::from_str(&render(&original).unwrap()).unwrap();
+        for (field, value) in [
+            (
+                "programStatus",
+                serde_json::json!("customerProductionProgram"),
+            ),
+            ("startsUsingVariant", serde_json::json!(true)),
+            ("authorizationGroup", serde_json::json!("ZGROUP")),
+            ("application", serde_json::json!("*")),
+        ] {
+            let mut edited = document.clone();
+            edited["generalInformation"][field] = value;
+            assert!(matches!(
+                merge(&original, &edited.to_string()),
+                Err(ProjectionError::UnsupportedAffProperty { .. })
+            ));
+        }
+        let mut edited = document;
+        edited["logicalDatabase"] = serde_json::json!({"name": "ZDB"});
         assert!(matches!(
-            merge(&original, &serde_json::to_string(&edited).unwrap()),
+            merge(&original, &edited.to_string()),
             Err(ProjectionError::UnsupportedAffProperty {
-                field: "generalInformation.programStatus",
+                field: "logicalDatabase",
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn maps_program_settings_and_clears_them_through_aff_defaults() {
+        let original = <ProgramProperties as zadt::XmlCodec>::from_xml(include_bytes!(
+            "../../../zadt/tests/fixtures/program-ztftfrt.xml"
+        ))
+        .unwrap();
+        let mut document = ProjectedProgramProperties::from_program(&original).unwrap();
+        let general = document.general_information.as_mut().unwrap();
+        assert_eq!(
+            general.program_status,
+            ProgramStatus::CustomerProductionProgram
+        );
+        assert!(general.starts_using_variant);
+        assert_eq!(general.authorization_group, "BCVADMIN");
+        assert_eq!(general.application, "*");
+        assert_eq!(document.logical_database.as_ref().unwrap().name, "D$S");
+        assert_eq!(
+            document.logical_database.as_ref().unwrap().selection_screen,
+            ""
+        );
+        general.program_status = ProgramStatus::TestProgram;
+        general.starts_using_variant = false;
+        general.authorization_group = "ZGROUP".into();
+        general.application = "S".into();
+        document.logical_database = Some(LogicalDatabase {
+            name: "ZDB".into(),
+            selection_screen: "100".into(),
+        });
+        let merged =
+            merge_program_properties(&original, &serde_json::to_string(&document).unwrap())
+                .unwrap();
+        assert_eq!(merged.source_object_status.as_deref(), Some("test"));
+        assert_eq!(merged.start_using_variant, Some(false));
+        let group = merged.authorization_group.as_ref().unwrap();
+        assert_eq!(group.reference.name.as_deref(), Some("ZGROUP"));
+        assert_eq!(group.application.as_deref(), Some("S"));
+        let database = merged.logical_database.as_ref().unwrap();
+        assert_eq!(database.reference.name.as_deref(), Some("ZDB"));
+        assert_eq!(database.selection_screen.as_deref(), Some("100"));
+        assert_eq!(
+            serde_json::to_value(ProjectedProgramProperties::from_program(&merged).unwrap())
+                .unwrap(),
+            serde_json::to_value(&document).unwrap()
+        );
+
+        let mut cleared = serde_json::to_value(&document).unwrap();
+        cleared.as_object_mut().unwrap().remove("logicalDatabase");
+        for field in [
+            "programStatus",
+            "startsUsingVariant",
+            "authorizationGroup",
+            "application",
+        ] {
+            cleared["generalInformation"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+        }
+        let cleared = merge_program_properties(&merged, &cleared.to_string()).unwrap();
+        assert_eq!(cleared.source_object_status.as_deref(), Some("unknown"));
+        assert_eq!(cleared.start_using_variant, Some(false));
+        assert_eq!(cleared.logical_database, None);
+        let group = cleared.authorization_group.unwrap();
+        assert_eq!(group.reference.name.as_deref(), Some(""));
+        assert_eq!(group.application.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn program_settings_preserve_sparse_values_and_reference_metadata() {
+        let mut original = program().typed_properties::<Program>().unwrap().clone();
+        let reference = zadt::AdvertisedObjectReference {
+            name: Some("ZREF".into()),
+            uri: Some("reference/location".into()),
+            description: Some("Reference description".into()),
+            ..Default::default()
+        };
+        original.authorization_group = Some(zadt::AuthorizationGroup {
+            application: None,
+            reference: reference.clone(),
+        });
+        original.logical_database = Some(zadt::LogicalDatabase {
+            selection_screen: Some("".into()),
+            reference: reference.clone(),
+        });
+        let mut document = ProjectedProgramProperties::from_program(&original).unwrap();
+        assert_eq!(
+            merge_program_properties(&original, &serde_json::to_string(&document).unwrap())
+                .unwrap(),
+            original
+        );
+        document.general_information.as_mut().unwrap().application = "*".into();
+        document.logical_database.as_mut().unwrap().selection_screen = "900".into();
+        let merged =
+            merge_program_properties(&original, &serde_json::to_string(&document).unwrap())
+                .unwrap();
+        assert_eq!(
+            merged.authorization_group.as_ref().unwrap().reference,
+            reference
+        );
+        assert_eq!(
+            merged.logical_database.as_ref().unwrap().reference,
+            reference
+        );
+        assert_eq!(merged.start_using_variant, None);
+        assert_eq!(merged.source_object_status, None);
+        document
+            .general_information
+            .as_mut()
+            .unwrap()
+            .authorization_group = "ZOTHER".into();
+        document.logical_database.as_mut().unwrap().name = "ZOTHER".into();
+        let renamed =
+            merge_program_properties(&merged, &serde_json::to_string(&document).unwrap()).unwrap();
+        let expected = zadt::AdvertisedObjectReference {
+            name: Some("ZOTHER".into()),
+            ..Default::default()
+        };
+        assert_eq!(renamed.authorization_group.unwrap().reference, expected);
+        assert_eq!(renamed.logical_database.unwrap().reference, expected);
+
+        let absent = program().typed_properties::<Program>().unwrap().clone();
+        let added =
+            merge_program_properties(&absent, &serde_json::to_string(&document).unwrap()).unwrap();
+        assert_eq!(added.authorization_group.unwrap().reference, expected);
+        assert_eq!(added.logical_database.unwrap().reference, expected);
+    }
+
+    #[test]
+    fn program_status_mappings_preserve_baselines_and_reject_unknown_values() {
+        let mut original = program().typed_properties::<Program>().unwrap().clone();
+        for (adt, aff) in [
+            ("SAPStandardProduction", ProgramStatus::SapProductionProgram),
+            (
+                "customerProduction",
+                ProgramStatus::CustomerProductionProgram,
+            ),
+            ("system", ProgramStatus::SystemProgram),
+            ("test", ProgramStatus::TestProgram),
+            ("unknown", ProgramStatus::Unknown),
+            ("", ProgramStatus::Unknown),
+        ] {
+            original.source_object_status = Some(adt.into());
+            let document = ProjectedProgramProperties::from_program(&original).unwrap();
+            assert_eq!(
+                document
+                    .general_information
+                    .as_ref()
+                    .unwrap()
+                    .program_status,
+                aff
+            );
+            assert_eq!(
+                merge_program_properties(&original, &serde_json::to_string(&document).unwrap())
+                    .unwrap(),
+                original
+            );
+            let mut changed = document;
+            changed.general_information.as_mut().unwrap().program_status =
+                ProgramStatus::CustomerProductionProgram;
+            if aff == ProgramStatus::CustomerProductionProgram {
+                changed.general_information.as_mut().unwrap().program_status =
+                    ProgramStatus::SapProductionProgram;
+            }
+            let merged =
+                merge_program_properties(&original, &serde_json::to_string(&changed).unwrap())
+                    .unwrap();
+            assert_eq!(
+                merged.source_object_status.as_deref(),
+                Some(
+                    changed
+                        .general_information
+                        .unwrap()
+                        .program_status
+                        .adt_value()
+                )
+            );
+        }
+        original.source_object_status = Some("futureStatus".into());
+        assert!(ProjectedProgramProperties::from_program(&original).is_err());
     }
 }

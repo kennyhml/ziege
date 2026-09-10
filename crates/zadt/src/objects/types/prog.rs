@@ -74,6 +74,38 @@ pub struct SyntaxLanguage {
     pub links: Vec<AdvertisedLink>,
 }
 
+/// The logical database reference embedded in program properties.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LogicalDatabase {
+    /// The selection screen supplied by ADT, preserving an explicitly empty value.
+    #[serde(
+        rename = "@program:selectionScreen",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub selection_screen: Option<String>,
+
+    /// The referenced logical database.
+    #[serde(rename = "program:ref")]
+    pub reference: AdvertisedObjectReference,
+}
+
+/// The authorization group reference embedded in program properties.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthorizationGroup {
+    /// The application value supplied by ADT.
+    #[serde(
+        rename = "@program:application",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub application: Option<String>,
+
+    /// The referenced authorization group.
+    #[serde(rename = "program:ref")]
+    pub reference: AdvertisedObjectReference,
+}
+
 /// The currently modeled ABAP program-properties payload.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename = "program:abapProgram", deny_unknown_fields)]
@@ -122,6 +154,20 @@ pub struct ProgramProperties {
     #[serde(rename = "@program:programType")]
     pub program_type: String,
 
+    /// Whether the program starts using a variant, when supplied by ADT.
+    #[serde(
+        rename = "@program:startUsingVariant",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub start_using_variant: Option<bool>,
+
+    /// The source object status exactly as supplied by ADT.
+    #[serde(
+        rename = "@abapsource:sourceObjectStatus",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub source_object_status: Option<String>,
+
     /// The source URI exactly as supplied by ADT.
     #[serde(rename = "@abapsource:sourceUri")]
     pub source_uri: String,
@@ -157,6 +203,20 @@ pub struct ProgramProperties {
     /// The source syntax configuration embedded in the payload.
     #[serde(rename = "abapsource:syntaxConfiguration")]
     pub syntax_configuration: SyntaxConfiguration,
+
+    /// The logical database assigned to this program.
+    #[serde(
+        rename = "program:logicalDatabase",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub logical_database: Option<LogicalDatabase>,
+
+    /// The authorization group assigned to this program.
+    #[serde(
+        rename = "program:authorizationGroup",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub authorization_group: Option<AuthorizationGroup>,
 
     /// Atom links embedded at the payload root.
     #[serde(rename = "atom:link", default)]
@@ -275,6 +335,8 @@ mod tests {
     use crate::ObjectType;
 
     const PROGRAM_XML: &str = include_str!("../../../tests/fixtures/program-z-test.xml");
+    const PROGRAM_WITH_SETTINGS_XML: &str =
+        include_str!("../../../tests/fixtures/program-ztftfrt.xml");
     const INCLUDE_XML: &str = include_str!("../../../tests/fixtures/include-ztest.xml");
 
     fn parse_program(body: &str) -> Result<ProgramProperties, serde_xml_rs::Error> {
@@ -305,6 +367,100 @@ mod tests {
                 .as_deref(),
             Some("757")
         );
+    }
+
+    #[test]
+    fn program_optional_settings_round_trip_through_json_and_xml() {
+        let program = parse_program(PROGRAM_WITH_SETTINGS_XML).unwrap();
+        assert_eq!(program.name, "ZTFTFRT");
+        assert_eq!(program.start_using_variant, Some(true));
+        assert_eq!(
+            program.source_object_status.as_deref(),
+            Some("customerProduction")
+        );
+        let database = program.logical_database.as_ref().unwrap();
+        assert_eq!(database.selection_screen.as_deref(), Some(""));
+        assert_eq!(database.reference.name.as_deref(), Some("D$S"));
+        let group = program.authorization_group.as_ref().unwrap();
+        assert_eq!(group.application.as_deref(), Some("*"));
+        assert_eq!(group.reference.name.as_deref(), Some("BCVADMIN"));
+
+        let value = serde_json::to_value(&program).unwrap();
+        assert_eq!(value["@program:startUsingVariant"], true);
+        assert_eq!(
+            value["@abapsource:sourceObjectStatus"],
+            "customerProduction"
+        );
+        assert_eq!(
+            value["program:logicalDatabase"]["@program:selectionScreen"],
+            ""
+        );
+        assert_eq!(
+            value["program:logicalDatabase"]["program:ref"]["@adtcore:name"],
+            "D$S"
+        );
+        assert_eq!(
+            value["program:authorizationGroup"]["@program:application"],
+            "*"
+        );
+        assert_eq!(
+            value["program:authorizationGroup"]["program:ref"]["@adtcore:name"],
+            "BCVADMIN"
+        );
+        assert_eq!(
+            serde_json::from_value::<ProgramProperties>(value).unwrap(),
+            program
+        );
+        let xml = String::from_utf8(program.to_xml().unwrap()).unwrap();
+        assert!(xml.contains("program:selectionScreen=\"\""));
+        assert_eq!(parse_program(&xml).unwrap(), program);
+    }
+
+    #[test]
+    fn absent_program_settings_remain_omitted() {
+        let program = parse_program(PROGRAM_XML).unwrap();
+        assert_eq!(program.start_using_variant, None);
+        assert_eq!(program.source_object_status, None);
+        assert_eq!(program.logical_database, None);
+        assert_eq!(program.authorization_group, None);
+        let value = serde_json::to_value(&program).unwrap();
+        let xml = String::from_utf8(program.to_xml().unwrap()).unwrap();
+        for key in [
+            "@program:startUsingVariant",
+            "@abapsource:sourceObjectStatus",
+            "program:logicalDatabase",
+            "program:authorizationGroup",
+        ] {
+            assert!(value.get(key).is_none());
+            assert!(!xml.contains(key.trim_start_matches('@')));
+        }
+
+        let sparse = PROGRAM_WITH_SETTINGS_XML
+            .replace(" program:selectionScreen=\"\"", "")
+            .replace(" program:application=\"*\"", "")
+            .replace(
+                "program:startUsingVariant=\"true\"",
+                "program:startUsingVariant=\"false\"",
+            )
+            .replace("customerProduction", "futureStatus");
+        let program = parse_program(&sparse).unwrap();
+        assert_eq!(
+            program.logical_database.as_ref().unwrap().selection_screen,
+            None
+        );
+        assert_eq!(
+            program.authorization_group.as_ref().unwrap().application,
+            None
+        );
+        assert_eq!(program.start_using_variant, Some(false));
+        assert_eq!(
+            program.source_object_status.as_deref(),
+            Some("futureStatus")
+        );
+        let xml = String::from_utf8(program.to_xml().unwrap()).unwrap();
+        assert!(!xml.contains("program:selectionScreen"));
+        assert!(!xml.contains("program:application"));
+        assert_eq!(parse_program(&xml).unwrap(), program);
     }
 
     #[test]

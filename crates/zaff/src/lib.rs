@@ -700,11 +700,16 @@ mod tests {
                         ));
                     }
                     "PROG" => {
-                        invalid["generalInformation"]["programStatus"] = json!("testProgram");
+                        invalid["generalInformation"]["programType"] =
+                            if document["generalInformation"]["programType"] == "include" {
+                                json!("executableProgram")
+                            } else {
+                                json!("include")
+                            };
                         assert!(matches!(
                             properties.merge(&invalid.to_string()),
-                            Err(ProjectionError::UnsupportedAffProperty {
-                                field: "generalInformation.programStatus",
+                            Err(ProjectionError::InvalidAffField {
+                                field: "generalInformation.programType",
                                 ..
                             })
                         ));

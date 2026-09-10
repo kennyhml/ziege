@@ -57,7 +57,8 @@ pub use intf::{
     InterfaceCreatePropertiesBuilderError, InterfaceProperties,
 };
 pub use prog::{
-    Include, IncludeProperties, Program, ProgramProperties, SyntaxConfiguration, SyntaxLanguage,
+    AuthorizationGroup, Include, IncludeProperties, LogicalDatabase, Program, ProgramProperties,
+    SyntaxConfiguration, SyntaxLanguage,
 };
 pub use srvd::{
     ServiceDefinition, ServiceDefinitionCreateProperties, ServiceDefinitionCreatePropertiesBuilder,

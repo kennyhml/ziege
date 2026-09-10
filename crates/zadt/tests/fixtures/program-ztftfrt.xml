@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<program:abapProgram xmlns:program="http://www.sap.com/adt/programs/programs" xmlns:abapsource="http://www.sap.com/adt/abapsource" xmlns:adtcore="http://www.sap.com/adt/core" xmlns:atom="http://www.w3.org/2005/Atom" adtcore:changedAt="2026-09-10T21:17:39Z" adtcore:changedBy="DEVELOPER" adtcore:createdAt="2026-09-04T00:00:00Z" adtcore:description="tfartarft" adtcore:descriptionTextLimit="70" adtcore:language="EN" adtcore:name="ZTFTFRT" adtcore:type="PROG/P" adtcore:version="inactive" adtcore:abapLanguageVersion="standard" adtcore:masterLanguage="EN" adtcore:masterSystem="A4H" adtcore:responsible="DEVELOPER" abapsource:activeUnicodeCheck="true" abapsource:fixPointArithmetic="true" abapsource:sourceObjectStatus="customerProduction" abapsource:sourceUri="source/main" program:lockedByEditor="false" program:programType="executableProgram" program:startUsingVariant="true">
+  <atom:link href="source/main/versions" rel="http://www.sap.com/adt/relations/versions"/>
+  <atom:link etag="202609102117390001" href="source/main" rel="http://www.sap.com/adt/relations/source" type="text/plain"/>
+  <atom:link etag="202609102117390001" href="source/main" rel="http://www.sap.com/adt/relations/source" type="text/html"/>
+  <atom:link href="./ztftfrt/objectstructure" rel="http://www.sap.com/adt/relations/objectstructure" type="application/vnd.sap.adt.objectstructure.v2+xml"/>
+  <atom:link href="/sap/bc/adt/textelements/programs/ztftfrt" rel="http://www.sap.com/adt/relations/sources/textelements" title="Text Elements"/>
+  <atom:link href="/sap/bc/adt/programs/programs/ztftfrt/enhancements/implementations" rel="http://www.sap.com/adt/relations/enhancementImplementations" title="Enhancement Implementations" type="application/vnd.sap.adt.enhancementimplementations.v1+xml"/>
+  <atom:link href="/sap/bc/adt/programs/programs/ztftfrt/enhancements/options" rel="http://www.sap.com/adt/relations/enhancementOptionsOfMainObject" title="Enhancement Options" type="application/vnd.sap.adt.enhancementoptions.v2+xml"/>
+  <atom:link href="/sap/bc/adt/programs/programs/ztftfrt/source/main/enhancements/options" rel="http://www.sap.com/adt/relations/enhancementOptions" title="Enhancement Options" type="application/vnd.sap.adt.enhancementoptions.v2+xml"/>
+  <atom:link href="/sap/bc/adt/programs/programs/ztftfrt?version=active" rel="http://www.sap.com/adt/relations/objectstates" title="Reference to active or inactive version"/>
+  <adtcore:packageRef adtcore:name="$TMP" adtcore:type="DEVC/K" adtcore:uri="/sap/bc/adt/packages/%24tmp"/>
+  <abapsource:syntaxConfiguration>
+    <abapsource:language>
+      <abapsource:version>X</abapsource:version>
+      <abapsource:description>Standard ABAP</abapsource:description>
+      <atom:link etag="816" href="/sap/bc/adt/abapsource/parsers/rnd/grammar" rel="http://www.sap.com/adt/relations/abapsource/parser" title="Standard ABAP" type="text/plain"/>
+    </abapsource:language>
+  </abapsource:syntaxConfiguration>
+  <program:logicalDatabase program:selectionScreen="">
+    <program:ref adtcore:name="D$S"/>
+  </program:logicalDatabase>
+  <program:authorizationGroup program:application="*">
+    <program:ref adtcore:name="BCVADMIN"/>
+  </program:authorizationGroup>
+</program:abapProgram>
