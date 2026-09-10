@@ -11,9 +11,9 @@ of using the ABAP file formats.
 The crate only has one relevant entry point, the `zaff::project()` method.
 
 It takes ownership of an object snapshot - i. e. the loaded presentation of an object
-at some point in time, and returns a [`Projection`]. The projection exposes a set
-of [`FileProjection`] which map to some component of the object vie a [`FileBacking`],
-such as [`SourceRef`] for source components or a property codec to convert between
+at some point in time, and returns a `Projection`. The projection exposes a set
+of `FileProjection` which map to some component of the object vie a `FileBacking`,
+such as `SourceRef` for source components or a property codec to convert between
 ADT and AFF for the general property mappings - usually the backings for the `.json` files.
 
 This also reveals one of the drawbacks of the AFF projection. A loaded object (snapshot)
