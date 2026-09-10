@@ -12,6 +12,8 @@ pub(crate) enum NameSource {
 }
 
 impl NameSource {
+    /// Selects either the `object` or the `parent` based on whether
+    /// the value is [`Self::Object`] or [`Self::Parent`] respectively.
     fn select_from<'a, 'name>(
         &self,
         object: &'a ObjectName<'name>,
@@ -19,10 +21,7 @@ impl NameSource {
     ) -> Result<&'a ObjectName<'name>, ProjectionError> {
         match self {
             NameSource::Object => Ok(object),
-            NameSource::Parent => parent.ok_or_else(|| ProjectionError::InvalidAffField {
-                field: "parent",
-                message: "filename template requires a parent name".to_owned(),
-            }),
+            NameSource::Parent => parent.ok_or(ProjectionError::MissingParentName),
         }
     }
 }
@@ -279,10 +278,7 @@ mod tests {
             .with_names(&[("name", NameSource::Parent), ("fmname", NameSource::Object)]);
         assert!(matches!(
             child.substitute(ObjectName::parse("Z_MODULE").unwrap(), None, None),
-            Err(ProjectionError::InvalidAffField {
-                field: "parent",
-                ..
-            })
+            Err(ProjectionError::MissingParentName)
         ));
     }
 }

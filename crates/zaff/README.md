@@ -1,121 +1,126 @@
 # zaff
 
-ABAP File Formats (AFF) projection of loaded ADT objects. Object in, file
-projections out. ZAFF performs no network or filesystem I/O.
+ABAP File Formats (AFF) specifications and projection of loaded ADT objects
+for editor files and property schemas.
+
+See [abap-file-formats](https://github.com/SAP/abap-file-formats) to understand the background and benefits
+of using the ABAP file formats.
 
 ## Projection
 
-`project(snapshot)` is the only entry point. It takes ownership of an
-`ObjectSnapshot<()>` and returns a `Projection`. Typed snapshots can be passed
-using `snapshot.into_erased()`.
+The crate only has one relevant entry point, the `zaff::project()` method.
 
-- `subject()` returns the original loaded ADT object.
-- `files()` lists available file projections; `file(name)` looks one up.
-- `format()` identifies the AFF family and version.
+It takes ownership of an object snapshot - i. e. the loaded presentation of an object
+at some point in time, and returns a [`Projection`]. The projection exposes a set
+of [`FileProjection`] which map to some component of the object vie a [`FileBacking`],
+such as [`SourceRef`] for source components or a property codec to convert between
+ADT and AFF for the general property mappings - usually the backings for the `.json` files.
 
-Each file has a filename, a specification, and a backing:
+This also reveals one of the drawbacks of the AFF projection. A loaded object (snapshot)
+is required to project the correct files. Not only because the file bindings must bind
+to data accessed through the object properties, but also because certain objects, such
+as classes, do not always project to the same set of files. Depending on the age of the
+class, it may have a different set of includes advertised in its properties.
 
-| Backing | Content |
-| --- | --- |
-| `Source(SourceRef)` | Source text fetched through ZADT using the advertised reference. |
-| `Properties(PropertiesProjection)` | AFF JSON rendered from the retained ADT properties. |
-
-```rust,no_run
-# use zadt::{Client, Discovery, ObjectSnapshot, Operation};
-# async fn example(snapshot: ObjectSnapshot<()>, client: &Client<Discovery>, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
-use zaff::{FileBacking, project};
-
-let projection = project(snapshot)?;
-let file = projection.file(filename).ok_or("file is not available")?;
-
-let content = match file.backing() {
-    FileBacking::Properties(properties) => properties.render()?,
-    FileBacking::Source(source) => source.query().execute(client).await?.content,
-};
-# let _ = content;
-# Ok(())
-# }
-```
+ZAFF guarantees that no I/O takes place during projection. It is entirely pure and statless
+because it requires all the prerequisites to be passed at projection-time.
 
 ## Editing
 
-For metadata, `properties.merge(edited)` validates AFF JSON and applies its
-changes to the original ADT properties, preserving unrelated modeled fields.
-It returns `None` for a validated no-op, or `Some` **ADT wire-shaped JSON** for
-`properties.subject().update_if_match(...)` or `update_with_lock(...)`.
-Only submit an update for `Some`; `None` compares against the retained snapshot,
-not current backend state.
-Source files use ZADT's lock-based source-update API instead.
+ZAFF is not concerned with storing or writing to source code or properties directly.
 
-Field constraints use Garde; `ProjectionError::Validation` retains its structured
-report with Rust field names. ADT mapping restrictions are checked separately.
+It only provides the interface to find out what resource backs a projected file and,
+in the case of object properties, it provides methods to map between the AFF schema
+and the ADT properties formats.
 
-Projections are immutable. Keep the backing that produced an edited document;
+Projections are immutable. Keep the backing that produced an edited document
 after saving, project the returned or refetched snapshot. ZAFF does not manage
 dirty buffers, locks, conflicts, or cache refreshes.
 
-## Supported Families
+### Example
+When opening a projected file in an editor:
+```rust
+use zadt::{Client, Discovery, Operation};
+use zaff::{FileBacking, FileProjection};
 
-| Family | Files |
+async fn read_file(
+    client: &Client<Discovery>,
+    file: &FileProjection,
+) -> Result<String, Box<dyn std::error::Error>> {
+    match file.backing() {
+        FileBacking::Source(source) => {
+            let loaded = source.query().execute(client).await?;
+            Ok(loaded.content)
+        }
+        FileBacking::Properties(properties) => {
+            properties.render().map_err(Into::into)
+        }
+    }
+}
+```
+When writing, using optimistic locking for simplification
+(assuming a source `update_if_match` API):
+```rust,ignore
+use zadt::{Client, Discovery, Operation, PreconditionResult};
+use zaff::{FileBacking, FileProjection};
+
+async fn write_file(
+    client: &Client<Discovery>,
+    file: &FileProjection,
+    contents: String,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match file.backing() {
+        FileBacking::Source(source) => {
+            let result = source.update_if_match(contents)?.execute(client).await?;
+            match result {
+                PreconditionResult::Success(_) => {}
+                PreconditionResult::Failed { .. } => {
+                    return Err("source changed since the file was opened".into());
+                }
+            }
+        }
+        FileBacking::Properties(properties) => {
+            if let Some(payload) = properties.merge(&contents)? {
+                let result = properties.subject()
+                    .update_if_match(payload)?
+                    .execute(client)
+                    .await?;
+
+                match result {
+                    PreconditionResult::Success(_) => {}
+                    PreconditionResult::Failed { .. } => {
+                        return Err("object properties changed since the file was opened".into());
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+```
+
+## Supported Formats
+
+Source files are projected when advertised by the loaded object. Language-dependent
+text files and other file specifications without an implemented mapping are omitted.
+Unsupported metadata edits are rejected.
+
+| Format | Implementation notes |
 | --- | --- |
-| Class | `.clas.json`, main source, and advertised includes |
-| Interface | `.intf.json` and `.intf.abap` |
-| Program / standalone Include | `.prog.json` and main source |
-| Data Element | `.dtel.json` |
-| Domain | `.doma.json` |
-| Package | `.devc.json` |
-| CDS Data Definition | `.ddls.json` and `.ddls.acds` |
-| CDS Metadata Extension | `.ddlx.json` and `.ddlx.acds` |
-| CDS Annotation Definition | `.ddla.json` and `.ddla.acds` |
-| CDS Access Control | `.dcls.json` and `.dcls.acds` |
-| Service Definition | `.srvd.json` and `.srvd.acds` |
-| Function Group | `.fugr.json`, main-program `.reps.json` and `.reps.abap` |
-| Function Group Include | Parent-prefixed `.reps.json` and `.reps.abap` |
-| Function Module | Parent-prefixed `.func.json` and `.func.abap` |
+| [CLAS — Class](src/formats/clas.rs) | Component descriptions have no implemented backing. |
+| [INTF — Interface](src/formats/intf.rs) | Category, proxy status, and component descriptions accept only default or empty values. |
+| [PROG — Program / standalone Include](src/formats/prog.rs) | Standalone includes use PROG rather than the function-group REPS format. |
+| [DTEL — Data Element](src/formats/dtel.rs) | Maps type definitions, labels, and search-help settings. |
+| [DOMA — Domain](src/formats/doma.rs) | Fixed-value append names are unavailable. Optional documentation is declared but unsupported. |
+| [DEVC — Package](src/formats/devc.rs) | Switch assignments have no implemented backing. |
+| [DDLS — CDS Data Definition](src/formats/ddls.rs) | `sourceType` currently unsupported. |
+| [DDLX — CDS Metadata Extension](src/formats/ddlx.rs) | Metadata maps the header. |
+| [DDLA — CDS Annotation Definition](src/formats/ddla.rs) | Header has no ABAP language version. |
+| [DCLS — CDS Access Control](src/formats/dcls.rs) | Metadata maps the header. |
+| [SRVD — Service Definition](src/formats/srvd.rs) | Maps the header, origin, and definition or extension source type. |
+| [FUGR — Function Group](src/formats/fugr.rs) | Children are projected separately. Group and main-program metadata share the description field. |
+| [REPS — Function Group Include](src/formats/fugr.rs) | Requires the parent group name. Child discovery and folder assembly belong to the caller. |
+| [FUNC — Function Module](src/formats/fugr.rs) | `includeNumber` is temporarily fixed to `"00"`. Source is passed through without AFF pseudo-syntax conversion. |
 
-Each module in `src/formats/` declares one or more static `ObjectFormat`s for a
-family, containing Workbench types and file mappings, alongside its AFF models
-and validation.
-The registry enumerates these formats; projections hold a reference to one.
 
-Missing sources are omitted; invalid advertised locations are errors.
-Language-dependent `.properties` files are recognized specifications but are
-not implemented. Unsupported AFF edits are rejected rather than silently lost.
 
-Interface category, proxy status, and component descriptions have no implemented
-ADT backing; only their default/empty values can be merged. Domain fixed-value
-append names and package switch assignments are likewise not exposed by ZADT.
-
-DDLS metadata renders `sourceType` as `unknown`: the ADT semantic label alone does
-not reliably identify the AFF source syntax category. The original ADT type is
-preserved; non-unknown `sourceType` edits and nonempty `parentName` are rejected.
-Determining these fields from source would require loading and parsing it.
-
-Function groups and their children are projected from separate snapshots. The
-caller discovers children and places their files in a group folder. Child names
-use the logical parent or advertised container name, not a guessed URI segment.
-Missing or conflicting parent names are errors. REPS metadata for the main
-program shares the group snapshot, including the description also in `.fugr.json`.
-
-FUNC `includeNumber` is temporarily rendered as `"00"` because ZADT does not expose
-the actual value. This is a placeholder, not a real include assignment or an AFF
-default, and edits are rejected. Other unmapped FUNC settings are also restricted.
-These projections are not yet a complete round-trip Function Group export. Source
-text is passed through without conversion to AFF pseudo syntax. Group discovery,
-ZVFS container expansion, dynpros, and text-element mappings are outside this layer.
-
-## Integration
-
-ZVFS lists repository objects. A language server loads their properties through
-ZADT, projects them with ZAFF, and associates editor documents with the resulting
-files. The server owns document state and save orchestration; AFF files do not
-become ZVFS repository nodes.
-
-Look up editor files within their retained projection using `projection.file(name)`.
-Keep the connection, authoritative object reference, and version in the caller's
-index; ZAFF does not infer remote objects from filenames or AFF metadata.
-Source reads do not automatically inherit the properties snapshot's
-version, and source validators are distinct from properties validators.
-
-See `tests/editor_flow.rs` for the complete list, read, edit, and guarded-save
-workflow using ZVFS and ZADT.

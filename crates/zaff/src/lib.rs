@@ -18,8 +18,48 @@ pub use models::{AbapLanguageVersion, CdsHeader, CdsSourceOrigin};
 
 /// The available AFF files derived from one immutable, loaded ADT snapshot.
 ///
-/// The snapshot is shared with its properties files. Source text, dirty buffers,
-/// cache invalidation, and save orchestration belong to the caller.
+/// Created by [`project`], a projection associates concrete AFF filenames with
+/// their source references or properties mappings. [`Self::format`] describes
+/// the full file inventory, while [`Self::files`] contains only the files that
+/// could be bound to the snapshot. Missing sources and unsupported mappings are
+/// omitted.
+///
+/// Properties files share the retained snapshot as their baseline for rendering
+/// AFF JSON and merging edits into ADT properties. Source files retain advertised
+/// [`SourceRef`] values, with their text fetched separately. Creating or cloning
+/// a projection performs no I/O. Clones share the same snapshot.
+///
+/// The snapshot exposed by [`Self::subject`] is not refreshed automatically.
+/// To reflect updated object metadata or source availability, obtain a fresh
+/// snapshot and pass it to [`project`] again.
+///
+/// # Example
+///
+/// Project an already loaded class snapshot and look up its metadata file:
+///
+/// ```
+/// use zadt::{Class, ObjectSnapshot};
+/// use zaff::{ProjectionError, project};
+///
+/// # fn example(snapshot: ObjectSnapshot<Class>) -> Result<(), ProjectionError> {
+/// let projection = project(snapshot.into_erased())?;
+/// let metadata = projection.file("zcl_demo.clas.json");
+/// # Ok(())
+/// # }
+/// ```
+///
+/// For `ZCL_DEMO`, if all supported sources are advertised, the files are:
+///
+/// ```text
+/// ZCL_DEMO
+/// ├── zcl_demo.clas.json                  properties mapping
+/// ├── zcl_demo.clas.abap                  main source
+/// ├── zcl_demo.clas.definitions.abap      source: definitions
+/// ├── zcl_demo.clas.implementations.abap  source: implementations
+/// ├── zcl_demo.clas.macros.abap           source: macros
+/// ├── zcl_demo.clas.testclasses.abap      source: testclasses
+/// └── zcl_demo.clas.locals.abap           source: localtypes
+/// ```
 #[derive(Clone, Debug)]
 pub struct Projection {
     snapshot: Arc<ObjectSnapshot<()>>,
@@ -77,7 +117,7 @@ impl FileProjection {
 /// An AFF properties mapping bound to the snapshot from which it was projected.
 ///
 /// Rendering and merging always use the same immutable baseline. Cloning this
-/// value shares that baseline; it does not clone the complete ADT properties.
+/// value shares that baseline. It does not clone the complete ADT properties.
 #[derive(Clone, Debug)]
 pub struct PropertiesProjection {
     snapshot: Arc<ObjectSnapshot<()>>,
@@ -173,6 +213,9 @@ pub enum ProjectionError {
     #[error("`{object_name}` is not a valid projectable ABAP object name")]
     InvalidObjectName { object_name: String },
 
+    #[error("filename template requires a parent name")]
+    MissingParentName,
+
     #[error("file template `{template}` requires a language")]
     MissingLanguage { template: &'static str },
 
@@ -267,8 +310,8 @@ mod test_support {
 #[cfg(test)]
 mod tests {
     use zadt::{
-        Class, ClassProperties, DataElement, EntityTag, Include, ObjectType,
-        Operation, Program, ToXml, WorkbenchVersion, XmlCodec,
+        Class, ClassProperties, DataElement, EntityTag, Include, ObjectType, Operation, Program,
+        ToXml, WorkbenchVersion, XmlCodec,
     };
 
     use super::*;
