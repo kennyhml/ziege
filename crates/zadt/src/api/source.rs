@@ -26,6 +26,19 @@ use super::{
 pub struct SourceQuery {
     /// The source resource to fetch.
     pub source: SourceRef,
+
+    with_abap_doc_from_short_texts: bool,
+}
+
+impl SourceQuery {
+    /// Requests ABAP Doc imported from repository short texts.
+    ///
+    /// Support depends on the backend and source object. The option applies only
+    /// to this query and is omitted by default.
+    pub fn with_abap_doc_from_short_texts(mut self, enabled: bool) -> Self {
+        self.with_abap_doc_from_short_texts = enabled;
+        self
+    }
 }
 
 impl Operation for SourceQuery {
@@ -37,6 +50,9 @@ impl Operation for SourceQuery {
         let mut request = AdtRequest::new(Method::GET, self.source.uri.clone());
         for (name, value) in &self.source.query {
             request.push_query(name, value);
+        }
+        if self.with_abap_doc_from_short_texts {
+            request.push_query("withAbapDocFromShortTexts", "true");
         }
         request.set_accept(TEXT_PLAIN_MEDIA_TYPE);
         Ok(EncodedOperation::from(request))
@@ -156,6 +172,7 @@ impl SourceRef {
     pub fn query(&self) -> SourceQuery {
         SourceQuery {
             source: self.clone(),
+            with_abap_doc_from_short_texts: false,
         }
     }
 
