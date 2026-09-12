@@ -2,6 +2,7 @@ mod common;
 mod content;
 mod facets;
 mod favorites;
+mod nodes;
 mod object_properties;
 
 pub use common::{RepositoryFacet, RepositoryPreselection};
@@ -15,6 +16,10 @@ pub use facets::{
 };
 pub use favorites::{
     FavoriteObject, FavoriteObjectList, FavoriteObjectsQuery, FavoriteObjectsUpdate,
+};
+pub use nodes::{
+    RepositoryNode, RepositoryNodeCategory, RepositoryNodeGroup, RepositoryNodeType,
+    RepositoryNodes, RepositoryNodesQuery,
 };
 pub use object_properties::{
     AssignedTransport, AssignedTransportRequests, AssignedTransportsQuery,

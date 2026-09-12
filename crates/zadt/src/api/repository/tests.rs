@@ -25,7 +25,7 @@ impl Transport for UnusedTransport {
     }
 }
 
-fn discovered_client(xml: &[u8]) -> Client<Discovery> {
+pub(super) fn discovered_client(xml: &[u8]) -> Client<Discovery> {
     Client::new(UnusedTransport).with_capabilities(
         crate::api::discovery::parse_capabilities(xml).unwrap(),
         crate::api::discovery::parse_capabilities(xml).unwrap(),
@@ -52,6 +52,18 @@ fn repository_client() -> Client<Discovery> {
 </app:service>"#,
     );
     discovered_client(discovery.as_bytes())
+}
+
+#[test]
+fn facet_prerequisites_and_repeated_keys_are_retained() {
+    let xml = br#"<vf:facets xmlns:vf="http://www.sap.com/adt/ris/facets">
+      <vf:facet key="sourcetype" displayName="Source Type" description="DDL type" isHierarchical="false" isForFiltering="true" isForStructuring="true" preCondition="TYPE:DDLS"/>
+      <vf:facet key="sourcetype" displayName="Source Type" description="Service type" isHierarchical="false" isForFiltering="true" isForStructuring="true" preCondition="TYPE:SRVD"/>
+    </vf:facets>"#;
+    let facets = RepositoryFacets::parse(xml).unwrap();
+    assert_eq!(facets.facets.len(), 2);
+    assert_eq!(facets.facets[0].pre_condition.as_deref(), Some("TYPE:DDLS"));
+    assert_eq!(facets.facets[1].pre_condition.as_deref(), Some("TYPE:SRVD"));
 }
 
 #[test]

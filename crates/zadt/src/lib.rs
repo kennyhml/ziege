@@ -46,10 +46,11 @@ pub use api::repository::{
     FavoriteObjectList, FavoriteObjectsQuery, FavoriteObjectsUpdate, RepositoryContent,
     RepositoryContentOperation, RepositoryContentQuery, RepositoryContentQueryBuilder,
     RepositoryContentQueryBuilderError, RepositoryFacet, RepositoryFacetDefinition,
-    RepositoryFacetValuesLink, RepositoryFacets, RepositoryFacetsQuery, RepositoryObjectEntry,
-    RepositoryObjectProperties, RepositoryObjectPropertiesQuery, RepositoryObjectSummary,
-    RepositoryPreselection, RepositoryPreselectionInfo, RepositoryProperty,
-    RepositoryVirtualFolder,
+    RepositoryFacetValuesLink, RepositoryFacets, RepositoryFacetsQuery, RepositoryNode,
+    RepositoryNodeCategory, RepositoryNodeGroup, RepositoryNodeType, RepositoryNodes,
+    RepositoryNodesQuery, RepositoryObjectEntry, RepositoryObjectProperties,
+    RepositoryObjectPropertiesQuery, RepositoryObjectSummary, RepositoryPreselection,
+    RepositoryPreselectionInfo, RepositoryProperty, RepositoryVirtualFolder,
 };
 pub use api::run::{ObjectRun, ObjectRunResult};
 pub use api::session::{Logon, SessionInformation, SessionUri, SystemInformationLink};

@@ -60,6 +60,8 @@ pub struct RepositoryFacetDefinition {
     pub is_hierarchical: bool,
     pub is_for_filtering: bool,
     pub is_for_structuring: bool,
+    /// Backend selection prerequisite, such as `TYPE:DDLS`, when advertised.
+    pub pre_condition: Option<String>,
     pub values: Option<RepositoryFacetValuesLink>,
 }
 
@@ -91,6 +93,7 @@ impl RepositoryFacets {
                     is_hierarchical: facet.is_hierarchical,
                     is_for_filtering: facet.is_for_filtering,
                     is_for_structuring: facet.is_for_structuring,
+                    pre_condition: facet.pre_condition,
                     values: facet.values.map(|link| RepositoryFacetValuesLink {
                         title: link.title,
                         relation: link.relation,
@@ -125,6 +128,8 @@ struct RawRepositoryFacetDefinition {
     is_for_filtering: bool,
     #[serde(rename = "@isForStructuring")]
     is_for_structuring: bool,
+    #[serde(rename = "@preCondition")]
+    pre_condition: Option<String>,
     #[serde(rename = "adtcomp:templateLink")]
     values: Option<RawTemplateLink>,
 }

@@ -228,6 +228,33 @@ they nor `SnapshotKind` dispatch resources: typed snapshots call the properties'
 `Resources` method directly, while erased snapshots use their registered
 descriptor to call that same method before binding the view to their own URI.
 
+### Repository Object Children
+
+RIS virtual folders organize repository objects. To expand an object into its
+backend browser folders and children, use `repository_nodes()`:
+
+```rust,no_run
+use zadt::{Client, Discovery, FunctionGroup, ObjectKey, Operation};
+
+# async fn example(client: &Client<Discovery>) -> Result<(), Box<dyn std::error::Error>> {
+let group = ObjectKey::<FunctionGroup>::new("ZGROUP123");
+let contents = group.repository_nodes().short_descriptions(true).execute(client).await?;
+for folder in contents.groups() {
+    let children = folder.query().execute(client).await?;
+    println!("{}: {} entries", folder.definition.label, children.objects().len());
+}
+# Ok(())
+# }
+```
+
+Initial and nested folders retain their tree context, backend node ID, and query options. Use
+`groups_query()` to expand folders sharing a request context together. Returned
+objects expose navigation locations and an optional follow-up `query()` when
+expandable. Plain object locations also provide `object_ref()` for normal ADT
+operations. Source fragments and query parameters remain in the navigation link.
+Backend node IDs are temporary navigation tokens. Rediscover them when rebuilding
+the tree. These queries do not require a stateful ADT session.
+
 ### Wire Model Strictness
 
 Complete deserialized models reject unknown fields, including nested references,
