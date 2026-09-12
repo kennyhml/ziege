@@ -359,27 +359,29 @@ pub enum ProgramStatus {
 }
 
 impl ProgramStatus {
-    fn from_adt(value: Option<&str>) -> Result<Self, ProjectionError> {
-        match value.unwrap_or_default() {
-            "SAPStandardProduction" => Ok(Self::SapProductionProgram),
-            "customerProduction" => Ok(Self::CustomerProductionProgram),
-            "system" => Ok(Self::SystemProgram),
-            "test" => Ok(Self::TestProgram),
-            "" | "unknown" => Ok(Self::Unknown),
-            value => Err(ProjectionError::InvalidAffField {
+    fn from_adt(value: Option<&zadt::SourceObjectStatus>) -> Result<Self, ProjectionError> {
+        use zadt::SourceObjectStatus;
+        match value {
+            Some(SourceObjectStatus::SapStandardProduction) => Ok(Self::SapProductionProgram),
+            Some(SourceObjectStatus::CustomerProduction) => Ok(Self::CustomerProductionProgram),
+            Some(SourceObjectStatus::System) => Ok(Self::SystemProgram),
+            Some(SourceObjectStatus::Test) => Ok(Self::TestProgram),
+            None | Some(SourceObjectStatus::Unknown) => Ok(Self::Unknown),
+            Some(SourceObjectStatus::Other(value)) if value.is_empty() => Ok(Self::Unknown),
+            Some(SourceObjectStatus::Other(value)) => Err(ProjectionError::InvalidAffField {
                 field: "generalInformation.programStatus",
                 message: format!("unsupported ADT source object status `{value}`"),
             }),
         }
     }
 
-    const fn adt_value(self) -> &'static str {
+    const fn adt_value(self) -> zadt::SourceObjectStatus {
         match self {
-            Self::SapProductionProgram => "SAPStandardProduction",
-            Self::CustomerProductionProgram => "customerProduction",
-            Self::SystemProgram => "system",
-            Self::TestProgram => "test",
-            Self::Unknown => "unknown",
+            Self::SapProductionProgram => zadt::SourceObjectStatus::SapStandardProduction,
+            Self::CustomerProductionProgram => zadt::SourceObjectStatus::CustomerProduction,
+            Self::SystemProgram => zadt::SourceObjectStatus::System,
+            Self::TestProgram => zadt::SourceObjectStatus::Test,
+            Self::Unknown => zadt::SourceObjectStatus::Unknown,
         }
     }
 
@@ -454,7 +456,7 @@ pub(crate) fn merge_program_properties(
     merged.fix_point_arithmetic = edited_general.fix_point_arithmetic;
     merged.locked_by_editor = edited_general.edit_locked;
     if edited_general.program_status != baseline_general.program_status {
-        merged.source_object_status = Some(edited_general.program_status.adt_value().to_owned());
+        merged.source_object_status = Some(edited_general.program_status.adt_value());
     }
     if edited_general.starts_using_variant != baseline_general.starts_using_variant {
         merged.start_using_variant = Some(edited_general.starts_using_variant);
@@ -545,7 +547,7 @@ impl ProjectedProgramProperties {
             program_type: ProgramType::from_adt(&properties.program_type)?,
             fix_point_arithmetic: properties.fix_point_arithmetic,
             edit_locked: properties.locked_by_editor,
-            program_status: ProgramStatus::from_adt(properties.source_object_status.as_deref())?,
+            program_status: ProgramStatus::from_adt(properties.source_object_status.as_ref())?,
             starts_using_variant: properties.start_using_variant.unwrap_or_default(),
             authorization_group: group
                 .and_then(|group| group.reference.name.clone())
@@ -894,7 +896,10 @@ mod tests {
         let merged =
             merge_program_properties(&original, &serde_json::to_string(&document).unwrap())
                 .unwrap();
-        assert_eq!(merged.source_object_status.as_deref(), Some("test"));
+        assert_eq!(
+            merged.source_object_status,
+            Some(zadt::SourceObjectStatus::Test)
+        );
         assert_eq!(merged.start_using_variant, Some(false));
         let group = merged.authorization_group.as_ref().unwrap();
         assert_eq!(group.reference.name.as_deref(), Some("ZGROUP"));
@@ -922,7 +927,10 @@ mod tests {
                 .remove(field);
         }
         let cleared = merge_program_properties(&merged, &cleared.to_string()).unwrap();
-        assert_eq!(cleared.source_object_status.as_deref(), Some("unknown"));
+        assert_eq!(
+            cleared.source_object_status,
+            Some(zadt::SourceObjectStatus::Unknown)
+        );
         assert_eq!(cleared.start_using_variant, Some(false));
         assert_eq!(cleared.logical_database, None);
         let group = cleared.authorization_group.unwrap();
@@ -1030,7 +1038,7 @@ mod tests {
                 merge_program_properties(&original, &serde_json::to_string(&changed).unwrap())
                     .unwrap();
             assert_eq!(
-                merged.source_object_status.as_deref(),
+                merged.source_object_status,
                 Some(
                     changed
                         .general_information

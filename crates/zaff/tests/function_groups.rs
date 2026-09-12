@@ -721,21 +721,16 @@ fn group_languages_status_and_noop_guard_preserve_unexposed_properties() {
         assert_eq!(rendered["header"]["originalLanguage"], aff);
         assert_eq!(properties.merge(&rendered.to_string()).unwrap(), None);
     }
-    for status in [
-        "sapProgram",
-        "customerProgram",
-        "systemProgram",
-        "testProgram",
+    for (status, wire) in [
+        ("sapProgram", "SAPStandardProduction"),
+        ("customerProgram", "customerProduction"),
+        ("systemProgram", "system"),
+        ("testProgram", "test"),
     ] {
         let mut edited = doc.clone();
         edited["status"] = json!(status);
-        assert!(matches!(
-            properties.merge(&edited.to_string()),
-            Err(ProjectionError::UnsupportedAffProperty {
-                object_type: "FUGR",
-                field: "status"
-            })
-        ));
+        let payload = properties.merge(&edited.to_string()).unwrap().unwrap();
+        assert_eq!(payload["@abapsource:sourceObjectStatus"], wire);
     }
     for (field, value) in [
         ("originalLanguage", "not-supported"),

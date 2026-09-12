@@ -3,7 +3,7 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTypes, ResourceView, SyntaxConfiguration, ToXml, WorkbenchVersion,
+    MediaTypes, ResourceView, SourceObjectStatus, SyntaxConfiguration, ToXml, WorkbenchVersion,
 };
 
 /// An ABAP function group.
@@ -73,6 +73,13 @@ pub struct FunctionGroupInclude;
 )]
 #[serde(rename = "group:abapFunctionGroup", deny_unknown_fields)]
 pub struct FunctionGroupProperties {
+    /// The source object status exactly as supplied by ADT.
+    #[serde(
+        rename = "@abapsource:sourceObjectStatus",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub source_object_status: Option<SourceObjectStatus>,
+
     #[serde(rename = "@group:lockedByEditor")]
     pub locked_by_editor: bool,
     #[serde(rename = "@abapsource:sourceUri")]

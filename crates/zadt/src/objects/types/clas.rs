@@ -1,6 +1,6 @@
 use super::super::{
     AbapLanguageVersion, AdvertisedObjectReference, GlobalWorkbenchType, ObjectKey, ObjectType,
-    ToXml, WorkbenchVersion,
+    SourceObjectStatus, ToXml, WorkbenchVersion,
 };
 use crate::{MediaTypes, ResourceView, resource::AdvertisedLink};
 use serde::{Deserialize, Serialize};
@@ -107,7 +107,7 @@ pub struct ClassProperties {
     pub abap_language_version: Option<AbapLanguageVersion>,
     /// The purpose assigned to this source object by SAP.
     #[serde(rename = "@abapsource:sourceObjectStatus")]
-    pub source_object_status: Option<String>,
+    pub source_object_status: Option<SourceObjectStatus>,
     /// Whether fixed-point arithmetic is enabled.
     #[serde(rename = "@abapsource:fixPointArithmetic")]
     pub fix_point_arithmetic: bool,

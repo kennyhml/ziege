@@ -235,10 +235,110 @@ impl fmt::Display for AbapLanguageVersion {
     }
 }
 
+/// Source status classification advertised for repository objects.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum SourceObjectStatus {
+    /// SAP standard production source.
+    SapStandardProduction,
+    /// Customer production source.
+    CustomerProduction,
+    /// System source.
+    System,
+    /// Test source.
+    Test,
+    /// Source without a classification.
+    Unknown,
+    /// An unrecognized backend value, including an explicitly empty string.
+    Other(String),
+}
+
+impl SourceObjectStatus {
+    /// Returns the exact ADT wire value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::SapStandardProduction => "SAPStandardProduction",
+            Self::CustomerProduction => "customerProduction",
+            Self::System => "system",
+            Self::Test => "test",
+            Self::Unknown => "unknown",
+            Self::Other(value) => value,
+        }
+    }
+}
+
+impl From<String> for SourceObjectStatus {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "SAPStandardProduction" => Self::SapStandardProduction,
+            "customerProduction" => Self::CustomerProduction,
+            "system" => Self::System,
+            "test" => Self::Test,
+            "unknown" => Self::Unknown,
+            _ => Self::Other(value),
+        }
+    }
+}
+
+impl From<&str> for SourceObjectStatus {
+    fn from(value: &str) -> Self {
+        value.to_owned().into()
+    }
+}
+
+impl Serialize for SourceObjectStatus {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for SourceObjectStatus {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        String::deserialize(deserializer).map(Self::from)
+    }
+}
+
+impl fmt::Display for SourceObjectStatus {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{Class, DataElement, Include, ObjectType, Program};
+
+    #[test]
+    fn source_status_preserves_known_and_unknown_wire_values() {
+        for (wire, expected) in [
+            (
+                "SAPStandardProduction",
+                SourceObjectStatus::SapStandardProduction,
+            ),
+            ("customerProduction", SourceObjectStatus::CustomerProduction),
+            ("system", SourceObjectStatus::System),
+            ("test", SourceObjectStatus::Test),
+            ("unknown", SourceObjectStatus::Unknown),
+            ("", SourceObjectStatus::Other(String::new())),
+            (
+                "futureStatus",
+                SourceObjectStatus::Other("futureStatus".into()),
+            ),
+        ] {
+            let value = serde_json::Value::String(wire.into());
+            let status: SourceObjectStatus = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(status, expected);
+            assert_eq!(status.as_str(), wire);
+            assert_eq!(serde_json::to_value(status).unwrap(), value);
+        }
+        assert!(serde_json::from_str::<SourceObjectStatus>("42").is_err());
+    }
 
     #[test]
     fn preserves_exact_static_global_workbench_types() {

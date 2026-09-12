@@ -84,7 +84,7 @@ fn render(obj: &ObjectSnapshot<()>) -> Result<String, ProjectionError> {
     Ok(content)
 }
 
-/// Maps the AFF header and arithmetic flag to complete ADT properties, or None for a no-op.
+/// Maps AFF edits to complete ADT properties, or None for a no-op.
 fn merge(
     obj: &ObjectSnapshot<()>,
     edited: &str,
@@ -92,12 +92,6 @@ fn merge(
     let original = obj.typed_properties::<FunctionGroup>()?;
     let edited: ProjectedFunctionGroupProperties = parse_object(edited)?;
     edited.validate()?;
-    if edited.status != FunctionGroupStatus::NotClassified {
-        return Err(ProjectionError::UnsupportedAffProperty {
-            object_type: "FUGR",
-            field: "status",
-        });
-    }
     let previous = ProjectedFunctionGroupProperties::from_adt(original)?;
     let mut merged = original.clone();
 
@@ -108,6 +102,9 @@ fn merge(
     merged.master_language =
         language_to_adt(&edited.header.original_language, "header.originalLanguage")?;
     merged.fix_point_arithmetic = edited.fix_point_arithmetic;
+    if edited.status != previous.status {
+        merged.source_object_status = Some(edited.status.adt_value());
+    }
 
     // AFF Standard can represent absent, blank, or "X" ADT values.
     // Only a changed language version replaces that original representation.
@@ -130,12 +127,12 @@ fn merge(
 /// header.originalLanguage     master_language
 /// header.abapLanguageVersion  abap_language_version
 /// fixPointArithmetic          fix_point_arithmetic
-/// status                      No implemented backing
+/// status                      source_object_status
 /// ```
 ///
 /// `fixPointArithmetic` is required even when false. It does not change the
-/// separate ADT `unicode_check_active` flag. `status` accepts only the default
-/// `notClassified` value until its ADT backing is implemented.
+/// separate ADT `unicode_check_active` flag. Unchanged status values retain
+/// their original ADT representation.
 ///
 /// The main-program REPS document also exposes the same ADT description.
 /// Saving either document requires a fresh snapshot before editing or saving
@@ -206,10 +203,20 @@ pub struct FunctionGroupHeader {
     pub abap_language_version: AbapLanguageVersion,
 }
 
-/// AFF Function Group status vocabulary, currently without an ADT backing.
+/// AFF Function Group status vocabulary.
 ///
-/// Only `notClassified` is accepted by this mapping and it is omitted from JSON.
-/// The remaining variants are valid AFF values but unsupported edits.
+/// ```text
+/// AFF value        ADT source_object_status
+/// ---------        ------------------------
+/// notClassified    unknown
+/// sapProgram       SAPStandardProduction
+/// customerProgram  customerProduction
+/// systemProgram    system
+/// testProgram      test
+/// ```
+///
+/// Absent or empty ADT values also render as `notClassified`, omitted from JSON.
+/// Unchanged values preserve their original spelling. Other ADT strings are rejected.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FunctionGroupStatus {
@@ -222,6 +229,32 @@ pub enum FunctionGroupStatus {
 }
 
 impl FunctionGroupStatus {
+    fn from_adt(value: Option<&zadt::SourceObjectStatus>) -> Result<Self, ProjectionError> {
+        use zadt::SourceObjectStatus;
+        match value {
+            None | Some(SourceObjectStatus::Unknown) => Ok(Self::NotClassified),
+            Some(SourceObjectStatus::Other(value)) if value.is_empty() => Ok(Self::NotClassified),
+            Some(SourceObjectStatus::SapStandardProduction) => Ok(Self::SapProgram),
+            Some(SourceObjectStatus::CustomerProduction) => Ok(Self::CustomerProgram),
+            Some(SourceObjectStatus::System) => Ok(Self::SystemProgram),
+            Some(SourceObjectStatus::Test) => Ok(Self::TestProgram),
+            Some(SourceObjectStatus::Other(value)) => Err(ProjectionError::InvalidAffField {
+                field: "status",
+                message: format!("unsupported ADT source object status `{value}`"),
+            }),
+        }
+    }
+
+    const fn adt_value(self) -> zadt::SourceObjectStatus {
+        match self {
+            Self::NotClassified => zadt::SourceObjectStatus::Unknown,
+            Self::SapProgram => zadt::SourceObjectStatus::SapStandardProduction,
+            Self::CustomerProgram => zadt::SourceObjectStatus::CustomerProduction,
+            Self::SystemProgram => zadt::SourceObjectStatus::System,
+            Self::TestProgram => zadt::SourceObjectStatus::Test,
+        }
+    }
+
     const fn is_default(&self) -> bool {
         matches!(self, Self::NotClassified)
     }
@@ -247,7 +280,7 @@ impl ProjectedFunctionGroupProperties {
                 })?,
             },
             fix_point_arithmetic: properties.fix_point_arithmetic,
-            status: FunctionGroupStatus::NotClassified,
+            status: FunctionGroupStatus::from_adt(properties.source_object_status.as_ref())?,
         };
         document.validate()?;
         Ok(document)
@@ -1010,6 +1043,74 @@ mod tests {
 
     fn snapshot(properties: &FunctionModuleProperties) -> ObjectSnapshot<()> {
         module_snapshot(&properties.to_xml().unwrap()).into_erased()
+    }
+
+    #[test]
+    fn group_status_round_trips_and_preserves_sparse_values() {
+        let xml = include_str!("../../../zadt/tests/fixtures/function-group-z-test-group.xml");
+        let reference = crate::test_support::reference::<FunctionGroup>(
+            "Z_TEST_GROUP",
+            "/sap/bc/adt/functions/groups/z_test_group",
+        );
+        let loaded = crate::test_support::properties(
+            &reference,
+            FunctionGroup::MEDIA_TYPES[0],
+            "etag",
+            xml.as_bytes(),
+        );
+        let baseline = loaded.properties();
+        for (wire, aff) in [
+            (None, "notClassified"),
+            (Some(""), "notClassified"),
+            (Some("unknown"), "notClassified"),
+            (Some("SAPStandardProduction"), "sapProgram"),
+            (Some("customerProduction"), "customerProgram"),
+            (Some("system"), "systemProgram"),
+            (Some("test"), "testProgram"),
+        ] {
+            let mut original = baseline.clone();
+            original.source_object_status = wire.map(Into::into);
+            let xml = original.to_xml().unwrap();
+            let obj = crate::test_support::properties(
+                &reference,
+                FunctionGroup::MEDIA_TYPES[0],
+                "etag",
+                &xml,
+            )
+            .into_erased();
+            assert_eq!(obj.typed_properties::<FunctionGroup>().unwrap(), &original);
+            let content = render(&obj).unwrap();
+            assert_eq!(merge(&obj, &content).unwrap(), None);
+            let mut edited: Value = serde_json::from_str(&content).unwrap();
+            assert_eq!(edited["status"].as_str().unwrap_or("notClassified"), aff);
+            edited["header"]["description"] = json!("Changed description");
+            let payload = merge(&obj, &edited.to_string()).unwrap().unwrap();
+            let preserved: FunctionGroupProperties = serde_json::from_value(payload).unwrap();
+            assert_eq!(
+                preserved.source_object_status,
+                original.source_object_status
+            );
+
+            for (status, expected) in [
+                ("notClassified", "unknown"),
+                ("sapProgram", "SAPStandardProduction"),
+                ("customerProgram", "customerProduction"),
+                ("systemProgram", "system"),
+                ("testProgram", "test"),
+            ] {
+                edited["status"] = json!(status);
+                let payload = merge(&obj, &edited.to_string()).unwrap().unwrap();
+                let updated: FunctionGroupProperties = serde_json::from_value(payload).unwrap();
+                assert_eq!(
+                    updated
+                        .source_object_status
+                        .as_ref()
+                        .map(zadt::SourceObjectStatus::as_str),
+                    if status == aff { wire } else { Some(expected) }
+                );
+            }
+        }
+        assert!(FunctionGroupStatus::from_adt(Some(&"futureStatus".into())).is_err());
     }
 
     #[test]

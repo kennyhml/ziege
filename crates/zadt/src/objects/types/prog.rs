@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use zadt_macros::object_type;
 
 use super::super::{AbapLanguageVersion, GlobalWorkbenchType, ObjectKey, ToXml, WorkbenchVersion};
-use crate::{AdvertisedLink, AdvertisedObjectReference, MediaTypes, ResourceView};
+use crate::{AdvertisedLink, AdvertisedObjectReference, MediaTypes, ResourceView, SourceObjectStatus};
 
 #[object_type(
     properties = ProgramProperties,
@@ -166,7 +166,7 @@ pub struct ProgramProperties {
         rename = "@abapsource:sourceObjectStatus",
         skip_serializing_if = "Option::is_none"
     )]
-    pub source_object_status: Option<String>,
+    pub source_object_status: Option<SourceObjectStatus>,
 
     /// The source URI exactly as supplied by ADT.
     #[serde(rename = "@abapsource:sourceUri")]
@@ -375,7 +375,10 @@ mod tests {
         assert_eq!(program.name, "ZTFTFRT");
         assert_eq!(program.start_using_variant, Some(true));
         assert_eq!(
-            program.source_object_status.as_deref(),
+            program
+                .source_object_status
+                .as_ref()
+                .map(SourceObjectStatus::as_str),
             Some("customerProduction")
         );
         let database = program.logical_database.as_ref().unwrap();
@@ -454,7 +457,10 @@ mod tests {
         );
         assert_eq!(program.start_using_variant, Some(false));
         assert_eq!(
-            program.source_object_status.as_deref(),
+            program
+                .source_object_status
+                .as_ref()
+                .map(SourceObjectStatus::as_str),
             Some("futureStatus")
         );
         let xml = String::from_utf8(program.to_xml().unwrap()).unwrap();

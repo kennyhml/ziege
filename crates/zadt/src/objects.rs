@@ -21,7 +21,8 @@ pub(crate) use snapshot::ErasedProperties;
 pub use snapshot::ObjectSnapshot;
 pub use types::*;
 pub use workbench::{
-    AbapLanguageVersion, GlobalWorkbenchType, InvalidWorkbenchType, WorkbenchVersion,
+    AbapLanguageVersion, GlobalWorkbenchType, InvalidWorkbenchType, SourceObjectStatus,
+    WorkbenchVersion,
 };
 
 /// Statically identified ADT object type.
