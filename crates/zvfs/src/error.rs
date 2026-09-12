@@ -47,6 +47,9 @@ pub enum VfsError {
     #[error("VFS node {0:?} is not a repository object")]
     NotObject(NodeId),
 
+    #[error("VFS object {0:?} has no plain ADT object reference")]
+    MissingObjectReference(NodeId),
+
     #[error("VFS node {0:?} has static children and cannot be refreshed")]
     NotRefreshable(NodeId),
 }

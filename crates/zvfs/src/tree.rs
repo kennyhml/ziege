@@ -21,8 +21,8 @@ use std::{collections::HashMap, sync::Arc};
 
 use parking_lot::RwLock;
 use zadt::{
-    Client, Discovery, Operation, RepositoryFacet, RepositoryFacetDefinition,
-    RepositoryFacetsQuery, RepositoryObjectEntry,
+    Client, Discovery, ObjectRef, Operation, RepositoryFacet, RepositoryFacetDefinition,
+    RepositoryFacetsQuery,
 };
 
 use self::{
@@ -188,11 +188,18 @@ impl VirtualRepositoryTree {
         Ok(path)
     }
 
-    /// Returns the retained ADT entry for an object node.
-    pub fn object_entry(&self, id: NodeId) -> Result<RepositoryObjectEntry, VfsError> {
+    /// Returns the retained ADT reference for an object-resource node.
+    /// Source members with query/fragment navigation targets have no plain object reference.
+    pub fn object_ref(&self, id: NodeId) -> Result<ObjectRef<()>, VfsError> {
         let graph = self.inner.graph.read();
         let record = graph.record(id).ok_or(VfsError::UnknownNode(id))?;
-        record.object.clone().ok_or(VfsError::NotObject(id))
+        if record.node.object().is_none() {
+            return Err(VfsError::NotObject(id));
+        }
+        record
+            .object
+            .clone()
+            .ok_or(VfsError::MissingObjectReference(id))
     }
 
     /// Returns loaded children without starting an ADT request.
@@ -324,7 +331,47 @@ impl VirtualRepositoryTree {
     /// A concurrent ancestor refresh can remove this node or update its expansion
     /// inputs. In either case, work started from the old generation is discarded
     /// with an error.
+    ///
+    /// Browser-local folders rebuild their owning object first to rediscover
+    /// backend selectors. Cached descendants become stale. A deeply nested target
+    /// removed by that rebuild returns [`VfsError::StaleNode`].
     pub async fn refresh(&self, id: NodeId) -> Result<Vec<Node>, VfsError> {
+        let owner = {
+            let graph = self.inner.graph.read();
+            let record = graph.record(id).ok_or(VfsError::UnknownNode(id))?;
+            if let ExpansionStrategy::RepositoryNodes { query, .. } = &record.expansion
+                && !query.is_root()
+            {
+                let mut parent = record.node.parent;
+                let mut owner = None;
+                while let Some(id) = parent {
+                    let record = graph.record(id).ok_or(VfsError::StaleNode(id))?;
+                    if let ExpansionStrategy::RepositoryNodes { query, .. } = &record.expansion
+                        && query.is_root()
+                    {
+                        owner = Some(id);
+                        break;
+                    }
+                    parent = record.node.parent;
+                }
+                Some(owner.ok_or(VfsError::StaleNode(id))?)
+            } else {
+                None
+            }
+        };
+        if let Some(owner) = owner {
+            // Rediscover selectors before refreshing a browser-local folder.
+            // Rebuilding a tree can reassign IDs belonging to sibling folders.
+            self.refresh_direct(owner).await?;
+            if self.node(id).is_none() {
+                return Err(VfsError::StaleNode(id));
+            }
+            return self.children(id).await;
+        }
+        self.refresh_direct(id).await
+    }
+
+    async fn refresh_direct(&self, id: NodeId) -> Result<Vec<Node>, VfsError> {
         let (load, revision) = {
             let graph = self.inner.graph.read();
             let record = graph.record(id).ok_or(VfsError::UnknownNode(id))?;

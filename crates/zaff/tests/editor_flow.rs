@@ -267,12 +267,11 @@ async fn open_program(script: &Script, etag: Option<&str>) -> (Client<Discovery>
     assert_eq!(children.len(), 1);
     assert!(
         !children[0].is_directory(),
-        "ZVFS objects remain leaves, not AFF directories"
+        "the listed program is not advertised as expandable"
     );
-    let entry = tree
-        .object_entry(children[0].id)
-        .expect("object leaf retains its ADT entry");
-    let reference = entry.object();
+    let reference = tree
+        .object_ref(children[0].id)
+        .expect("object node retains its ADT reference");
     assert_eq!(reference.uri().as_str(), OBJECT_URI);
     assert_eq!(reference.workbench_type(), &Program::WORKBENCH_TYPE);
     assert_eq!(

@@ -36,7 +36,10 @@ pub struct Node {
 impl Node {
     /// Returns whether this node can have children.
     pub fn is_directory(&self) -> bool {
-        !matches!(self.kind, NodeKind::Object { .. })
+        match &self.kind {
+            NodeKind::Object { object } => object.expandable,
+            _ => true,
+        }
     }
 
     /// Returns object metadata when this is a repository-object node.
@@ -70,13 +73,19 @@ pub enum NodeKind {
     Object {
         object: ObjectNode,
     },
+    /// A type folder supplied by the backend repository browser, independent of RIS facets.
+    ObjectGroup {
+        #[serde(rename = "objectType")]
+        workbench_type: GlobalWorkbenchType,
+        category: String,
+    },
 }
 impl NodeKind {
     pub(crate) fn rank(&self) -> u8 {
         match self {
             NodeKind::Root | NodeKind::Mount { .. } => 0,
             NodeKind::Package { .. } => 1,
-            NodeKind::Facet { .. } => 2,
+            NodeKind::Facet { .. } | NodeKind::ObjectGroup { .. } => 2,
             NodeKind::Object { .. } => 3,
         }
     }
@@ -90,15 +99,20 @@ pub enum MountKind {
     Selection,
 }
 
-/// Serializable metadata for one repository-object leaf.
+/// Serializable metadata for a repository object or source member.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjectNode {
     pub name: String,
-    pub package: String,
+    /// Known from RIS or an owning parent, absent for unrelated browser references.
+    pub package: Option<String>,
     #[serde(rename = "objectType")]
     pub workbench_type: GlobalWorkbenchType,
-    pub uri: AdtUri,
+    pub uri: Option<AdtUri>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub query: Vec<(String, String)>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fragment: Option<String>,
     pub virtual_workbench_uri: Option<String>,
     pub version: Option<String>,
     pub expandable: bool,

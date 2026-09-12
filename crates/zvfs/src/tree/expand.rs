@@ -5,10 +5,11 @@ use std::{cmp::Ordering, sync::Arc};
 use async_lock::MutexGuardArc;
 use futures_util::future::try_join_all;
 use zadt::{
-    BatchKey, Batched, Client, CompatibilityError, Discovery, EncodeError, ObjectKey, Operation,
-    OperationError, Package, RepositoryContent, RepositoryContentOperation, RepositoryContentQuery,
-    RepositoryFacet, RepositoryObjectEntry, RepositoryPreselection, RepositoryVirtualFolder,
-    ResolveError,
+    BatchKey, Batched, Client, CompatibilityError, Discovery, EncodeError, EncodedOperation,
+    ObjectKey, ObjectRef, Operation, OperationError, OperationResponse, Package, RepositoryContent,
+    RepositoryContentOperation, RepositoryContentQuery, RepositoryFacet, RepositoryNodes,
+    RepositoryNodesQuery, RepositoryObjectEntry, RepositoryPreselection, RepositoryVirtualFolder,
+    RequiresDiscovery, ResolveError, ResponseError, Stateless,
 };
 
 use super::VirtualRepositoryTree;
@@ -54,6 +55,10 @@ use crate::{
 /// wave 2: [direct objects]
 /// ```
 enum Expansion {
+    RepositoryNodes {
+        query: RepositoryNodesQuery,
+        package: Option<String>,
+    },
     /// Top-level package hierarchy.
     PackageIndex { context: ExpansionContext },
     /// Child packages belonging to one package.
@@ -78,6 +83,9 @@ impl Expansion {
     /// Static nodes and leaves have no backend expansion and therefore produce none.
     fn prepare(strategy: ExpansionStrategy) -> Vec<Self> {
         match strategy {
+            ExpansionStrategy::RepositoryNodes { query, package } => {
+                vec![Self::RepositoryNodes { query, package }]
+            }
             ExpansionStrategy::Static | ExpansionStrategy::Leaf => Vec::new(),
             ExpansionStrategy::PackageIndex { context } => {
                 vec![Self::PackageIndex { context }]
@@ -140,15 +148,20 @@ impl Expansion {
     /// This does not mutate the expansion. The decoded response must be routed back
     /// to this same value through [`Expansion::advance`] before another request is
     /// built for it.
-    fn request(&self) -> Result<RepositoryContentQuery, VfsError> {
+    fn request(&self) -> Result<ExpansionRequest, VfsError> {
         match self {
+            Self::RepositoryNodes { query, .. } => Ok(ExpansionRequest::Nodes(query.clone())),
             Self::PackageIndex { context } => {
                 content_query(context.preselections(), Some(&RepositoryFacet::PACKAGE))
+                    .map(ExpansionRequest::Content)
             }
             Self::ChildPackages { selection, .. } => {
                 content_query(selection, Some(&RepositoryFacet::PACKAGE))
+                    .map(ExpansionRequest::Content)
             }
-            Self::Package { cursor } | Self::Content { cursor, .. } => cursor.request(),
+            Self::Package { cursor } | Self::Content { cursor, .. } => {
+                cursor.request().map(ExpansionRequest::Content)
+            }
         }
     }
 
@@ -159,25 +172,57 @@ impl Expansion {
     /// to the next level and [`Expansion::request`] must be called again.
     fn advance(
         &mut self,
-        content: RepositoryContent,
+        response: ExpansionResponse,
     ) -> Result<Option<PreparedChildren>, VfsError> {
-        match self {
-            Self::PackageIndex { context } | Self::ChildPackages { context, .. } => {
+        match (self, response) {
+            (Self::RepositoryNodes { package, .. }, ExpansionResponse::Nodes(nodes)) => Ok(Some(
+                PreparedChildren::from_repository_nodes(nodes, package.as_deref()),
+            )),
+            (Self::PackageIndex { context }, ExpansionResponse::Content(content)) => {
                 Ok(Some(PreparedChildren {
                     nodes: LoadedLayer::from_packages(content, context.clone())?.nodes,
                     object_count: None,
                     has_children_of_same_facet: None,
                 }))
             }
-            Self::Package { cursor } => Ok(cursor.advance(content).map(|layer| PreparedChildren {
-                nodes: layer.nodes,
-                object_count: None,
-                has_children_of_same_facet: None,
-            })),
-            Self::Content {
-                cursor,
-                retain_object_count,
-            } => {
+            (
+                Self::ChildPackages { context, selection },
+                ExpansionResponse::Content(mut content),
+            ) => {
+                // Some systems repeat the selected package rather than using a
+                // direct-assignment pseudo-folder. It is not its own child.
+                if let Some(parent) = selection
+                    .iter()
+                    .rev()
+                    .find(|p| p.facet() == &RepositoryFacet::PACKAGE)
+                {
+                    content.folders.retain(|folder| {
+                        !parent
+                            .values()
+                            .iter()
+                            .any(|name| name.eq_ignore_ascii_case(&folder.name))
+                    });
+                }
+                Ok(Some(PreparedChildren {
+                    nodes: LoadedLayer::from_packages(content, context.clone())?.nodes,
+                    object_count: None,
+                    has_children_of_same_facet: None,
+                }))
+            }
+            (Self::Package { cursor }, ExpansionResponse::Content(content)) => {
+                Ok(cursor.advance(content).map(|layer| PreparedChildren {
+                    nodes: layer.nodes,
+                    object_count: None,
+                    has_children_of_same_facet: None,
+                }))
+            }
+            (
+                Self::Content {
+                    cursor,
+                    retain_object_count,
+                },
+                ExpansionResponse::Content(content),
+            ) => {
                 let Some(layer) = cursor.advance(content) else {
                     return Ok(None);
                 };
@@ -187,6 +232,38 @@ impl Expansion {
                     has_children_of_same_facet: None,
                 }))
             }
+            _ => unreachable!("each expansion decodes its own response type"),
+        }
+    }
+}
+
+#[derive(Clone)]
+enum ExpansionRequest {
+    Content(RepositoryContentQuery),
+    Nodes(RepositoryNodesQuery),
+}
+
+enum ExpansionResponse {
+    Content(RepositoryContent),
+    Nodes(RepositoryNodes),
+}
+
+impl Operation for ExpansionRequest {
+    type Response = ExpansionResponse;
+    type Kind = Stateless;
+    type ResolutionRequirement = RequiresDiscovery;
+
+    fn encode(&self, resolver: &Discovery) -> Result<EncodedOperation, EncodeError> {
+        match self {
+            Self::Content(query) => query.encode(resolver),
+            Self::Nodes(query) => query.encode(resolver),
+        }
+    }
+
+    fn decode(&self, response: OperationResponse) -> Result<Self::Response, ResponseError> {
+        match self {
+            Self::Content(query) => query.decode(response).map(ExpansionResponse::Content),
+            Self::Nodes(query) => query.decode(response).map(ExpansionResponse::Nodes),
         }
     }
 }
@@ -194,6 +271,11 @@ impl Expansion {
 /// Describes how one directory obtains its immediate children.
 #[derive(Clone)]
 pub(super) enum ExpansionStrategy {
+    /// A repository object or browser folder expanded by its retained query.
+    RepositoryNodes {
+        query: RepositoryNodesQuery,
+        package: Option<String>,
+    },
     /// A directory whose children were installed while constructing the VFS.
     Static,
     /// The top-level package hierarchy used by a system-library mount.
@@ -213,7 +295,7 @@ pub(super) enum ExpansionStrategy {
         object_count: u32,
         has_children_of_same_facet: bool,
     },
-    /// A repository object, which cannot be expanded by this tree.
+    /// A node for which the backend does not advertise expansion.
     Leaf,
 }
 
@@ -229,6 +311,20 @@ impl ExpansionStrategy {
     /// In reality, it is extremely unlikely for this to happen.
     pub(super) fn cache_compatible(&self, other: &Self) -> bool {
         match (self, other) {
+            (
+                Self::RepositoryNodes {
+                    query: left,
+                    package: lp,
+                },
+                Self::RepositoryNodes {
+                    query: right,
+                    package: rp,
+                },
+            ) => {
+                // Root queries can survive a RIS refresh. Browser-local selectors
+                // are rediscovered when their owner is rebuilt, even if IDs repeat.
+                left.is_root() && right.is_root() && left == right && lp == rp
+            }
             (Self::Static, Self::Static) | (Self::Leaf, Self::Leaf) => true,
             (Self::PackageIndex { context: left }, Self::PackageIndex { context: right })
             | (Self::Selection { context: left }, Self::Selection { context: right }) => {
@@ -365,7 +461,7 @@ pub(super) struct PreparedNode {
     pub(super) label: String,
     pub(super) kind: NodeKind,
     pub(super) expansion: ExpansionStrategy,
-    pub(super) object: Option<RepositoryObjectEntry>,
+    pub(super) object: Option<ObjectRef<()>>,
 }
 
 impl PreparedNode {
@@ -462,9 +558,11 @@ impl From<RepositoryObjectEntry> for PreparedNode {
     fn from(entry: RepositoryObjectEntry) -> Self {
         let object = ObjectNode {
             name: entry.name.clone(),
-            package: entry.package.clone(),
+            package: Some(entry.package.clone()),
             workbench_type: entry.object().workbench_type().clone(),
-            uri: entry.uri().clone(),
+            uri: Some(entry.uri().clone()),
+            query: Vec::new(),
+            fragment: None,
             virtual_workbench_uri: entry.virtual_workbench_uri.clone(),
             version: entry.version.clone(),
             expandable: entry.expandable,
@@ -473,8 +571,15 @@ impl From<RepositoryObjectEntry> for PreparedNode {
         PreparedNode {
             label: entry.name.clone(),
             kind: NodeKind::Object { object },
-            expansion: ExpansionStrategy::Leaf,
-            object: Some(entry),
+            expansion: if entry.expandable {
+                ExpansionStrategy::RepositoryNodes {
+                    query: entry.reference.repository_nodes().short_descriptions(true),
+                    package: Some(entry.package.clone()),
+                }
+            } else {
+                ExpansionStrategy::Leaf
+            },
+            object: Some(entry.reference),
         }
     }
 }
@@ -486,6 +591,85 @@ pub(super) struct PreparedChildren {
 }
 
 impl PreparedChildren {
+    fn from_repository_nodes(content: RepositoryNodes, package: Option<&str>) -> Self {
+        let mut nodes = Vec::new();
+        for group in content.groups() {
+            let definition = &group.definition;
+            nodes.push(PreparedNode {
+                label: if definition.label.is_empty() {
+                    definition.workbench_type.to_string()
+                } else {
+                    definition.label.clone()
+                },
+                kind: NodeKind::ObjectGroup {
+                    workbench_type: definition.workbench_type.clone(),
+                    category: definition.category.clone(),
+                },
+                expansion: ExpansionStrategy::RepositoryNodes {
+                    query: group.query(),
+                    package: package.map(str::to_owned),
+                },
+                object: None,
+            });
+        }
+        for node in content.objects() {
+            let reference = node.object_ref();
+            let child_package = reference
+                .as_ref()
+                .and_then(|reference| reference.key().parent())
+                .and(package)
+                .map(str::to_owned);
+            let expansion = node
+                .query()
+                .map(|query| {
+                    let context_package = if query.is_root() {
+                        child_package.clone()
+                    } else {
+                        package.map(str::to_owned)
+                    };
+                    ExpansionStrategy::RepositoryNodes {
+                        query,
+                        package: context_package,
+                    }
+                })
+                .unwrap_or(ExpansionStrategy::Leaf);
+            let object = ObjectNode {
+                name: node.name.clone(),
+                package: child_package,
+                workbench_type: node.workbench_type.clone(),
+                uri: node.location.as_ref().map(|link| link.target.clone()),
+                query: node
+                    .location
+                    .as_ref()
+                    .map(|link| link.query.clone())
+                    .unwrap_or_default(),
+                fragment: node
+                    .location
+                    .as_ref()
+                    .and_then(|link| link.fragment.clone()),
+                virtual_workbench_uri: node
+                    .virtual_workbench_location
+                    .as_ref()
+                    .map(|link| link.href.clone()),
+                version: node.version.clone(),
+                expandable: node.expandable,
+                description: node.description.clone(),
+            };
+            nodes.push(PreparedNode {
+                label: node.name.clone(),
+                kind: NodeKind::Object { object },
+                expansion,
+                object: reference,
+            });
+        }
+        nodes.sort_by(PreparedNode::tree_order);
+        Self {
+            nodes,
+            object_count: None,
+            has_children_of_same_facet: None,
+        }
+    }
+
     fn merge(parts: Vec<Self>) -> Self {
         let mut merged = Self {
             nodes: Vec::new(),
@@ -647,6 +831,13 @@ impl VirtualRepositoryTree {
         }
 
         match expansion {
+            ExpansionStrategy::RepositoryNodes { query, package } => {
+                self.execute_expansion(ExpansionStrategy::RepositoryNodes {
+                    query: query.rebuild(true),
+                    package,
+                })
+                .await
+            }
             ExpansionStrategy::Static => unreachable!("static nodes have preloaded children"),
             // Loading of all packages, likely from the system library
             ExpansionStrategy::PackageIndex { context } => {
@@ -718,14 +909,14 @@ impl VirtualRepositoryTree {
         }
     }
 
-    /// Executes the provided [`RepositoryContentQuery`] either in batch or in
+    /// Executes repository expansion queries either in batch or in
     /// single mode depending on the number of queries needed. While the effect
     /// is negligible for a small set of requests, it can noticably improve
     /// performance for preloading a bigger set of nodes.
     async fn batch_execute_requests(
         &self,
-        requests: Vec<RepositoryContentQuery>,
-    ) -> Result<Vec<RepositoryContent>, VfsError> {
+        requests: Vec<ExpansionRequest>,
+    ) -> Result<Vec<ExpansionResponse>, VfsError> {
         if requests.len() > 1 {
             match requests.clone().batched(&self.inner.client).await {
                 Ok(responses) => return Ok(responses),
@@ -736,7 +927,7 @@ impl VirtualRepositoryTree {
             }
         }
 
-        // Fall back to sequential requests if batching it not supported
+        // Fall back to individual requests if batching is not supported.
         try_join_all(requests.into_iter().map(|request| async move {
             Ok::<_, VfsError>(request.execute(&self.inner.client).await?)
         }))
@@ -785,18 +976,16 @@ impl VirtualRepositoryTree {
 
         while !pending.is_empty() {
             let mut batch = self.inner.client.batch();
-            let mut routes: Vec<(usize, usize, BatchKey<RepositoryContent>)> = Vec::new();
+            let mut routes: Vec<(usize, usize, BatchKey<ExpansionResponse>)> = Vec::new();
             let mut failed = vec![false; pending.len()];
 
             for (index, preload) in pending.iter().enumerate() {
                 for (expansion_index, expansion) in preload.expansions.iter().enumerate() {
                     match expansion.request() {
-                        Ok(request) => {
-                            let Ok(key) = batch.push(request) else {
-                                return;
-                            };
-                            routes.push((index, expansion_index, key));
-                        }
+                        Ok(request) => match batch.push(request) {
+                            Ok(key) => routes.push((index, expansion_index, key)),
+                            Err(_) => failed[index] = true,
+                        },
                         Err(_) => failed[index] = true,
                     }
                 }

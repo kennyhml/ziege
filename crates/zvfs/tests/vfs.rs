@@ -2,7 +2,7 @@ use std::{
     io,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -48,6 +48,9 @@ const CHILD_PACKAGES_XML: &str = r#"
     <vfs:virtualFoldersResult xmlns:vfs="http://www.sap.com/adt/ris/virtualFolders"
         objectCount="9">
         <vfs:preselectionInfo facet="PACKAGE" hasChildrenOfSameFacet="true" />
+        <vfs:virtualFolder name="/ROOT" displayName="/ROOT" facet="PACKAGE"
+            uri="/sap/bc/adt/packages/%2froot"
+            counter="9" hasChildrenOfSameFacet="true" />
         <vfs:virtualFolder name="../ROOT" displayName="../ROOT" facet="PACKAGE"
             uri="/sap/bc/adt/packages/%2froot"
             counter="2" hasChildrenOfSameFacet="false" />
@@ -109,6 +112,8 @@ const OBJECT_XML: &str = r#"
 
 #[derive(Clone, Copy)]
 enum Behavior {
+    ObjectTree,
+    ObjectMembers,
     Tree,
     TreeWithoutBatch,
     MissingPackageUri,
@@ -141,6 +146,9 @@ struct TransportState {
     facet_count: AtomicUsize,
     post_count: AtomicUsize,
     batch_count: AtomicUsize,
+    node_count: AtomicUsize,
+    node_roots: AtomicUsize,
+    object_is_leaf: AtomicBool,
     active: AtomicUsize,
     max_active: AtomicUsize,
     descendant_started: Notify,
@@ -167,6 +175,11 @@ impl TestTransport {
 
     fn repository_response(&self, body: &str, request_number: usize) -> Result<String, io::Error> {
         match self.behavior {
+            Behavior::ObjectTree => Ok(r#"<vfs:virtualFoldersResult xmlns:vfs="http://www.sap.com/adt/ris/virtualFolders" objectCount="2">
+                <vfs:object name="ZGROUP123" package="$TMP" type="FUGR/F" uri="/sap/bc/adt/functions/groups/zgroup123" expandable="true"/>
+                <vfs:object name="Z_LEAF" package="$TMP" type="PROG/P" uri="/sap/bc/adt/programs/programs/z_leaf" expandable="false"/>
+                </vfs:virtualFoldersResult>"#.replace("expandable=\"true\"", if self.state.object_is_leaf.load(Ordering::SeqCst) { "expandable=\"false\"" } else { "expandable=\"true\"" })),
+            Behavior::ObjectMembers => Ok(OBJECT_XML.to_owned()),
             Behavior::Tree | Behavior::TreeWithoutBatch => {
                 if body.contains("<vfs:value>/ROOT</vfs:value>")
                     && body.contains("<vfs:facet>PACKAGE</vfs:facet>")
@@ -422,11 +435,13 @@ impl TestTransport {
                 }
                 let (_, inner_request) = part.split_once("\r\n\r\n")?;
                 let (head, body) = inner_request.split_once("\r\n\r\n")?;
-                assert!(head.lines().any(|line| {
-                    line.eq_ignore_ascii_case(
+                assert!(
+                    head.lines().any(|line| {
+                        line.eq_ignore_ascii_case(
                         "accept:application/vnd.sap.adt.repository.virtualfolders.result.v1+xml",
                     )
-                }));
+                    }) || head.contains("dataname=com.sap.adt.RepositoryObjectTreeContent")
+                );
                 Some(body.trim_end_matches("\r\n").to_owned())
             })
             .collect::<Vec<_>>();
@@ -436,7 +451,12 @@ impl TestTransport {
         for body in bodies {
             self.state.requests.lock().unwrap().push(body.clone());
             let request_number = self.state.post_count.fetch_add(1, Ordering::SeqCst);
-            let response = self.repository_response(&body, request_number);
+            let is_nodes = body.contains("<asx:abap");
+            let response = if is_nodes {
+                self.nodes_response(&body)
+            } else {
+                self.repository_response(&body, request_number)
+            };
             let (status, body) = match response {
                 Ok(body) => (StatusCode::OK, body),
                 Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
@@ -445,7 +465,11 @@ impl TestTransport {
             response_body.extend_from_slice(b"content-type: application/http\r\n");
             response_body.extend_from_slice(b"content-transfer-encoding: binary\r\n\r\n");
             response_body
-                .extend_from_slice(format!("HTTP/1.1 {} test\r\n\r\n", status.as_u16()).as_bytes());
+                .extend_from_slice(format!("HTTP/1.1 {} test\r\n", status.as_u16()).as_bytes());
+            if is_nodes {
+                response_body.extend_from_slice(b"Content-Type: application/vnd.sap.as+xml;dataname=com.sap.adt.RepositoryObjectTreeContent\r\n");
+            }
+            response_body.extend_from_slice(b"\r\n");
             response_body.extend_from_slice(body.as_bytes());
             response_body.extend_from_slice(b"\r\n");
         }
@@ -459,12 +483,107 @@ impl TestTransport {
         );
         AdtResponse::new(StatusCode::ACCEPTED, headers, response_body)
     }
+
+    fn nodes_response(&self, body: &str) -> Result<String, io::Error> {
+        self.state.node_count.fetch_add(1, Ordering::SeqCst);
+        if body.contains("<item>000000</item>") {
+            let count = self.state.node_roots.fetch_add(1, Ordering::SeqCst);
+            if matches!(self.behavior, Behavior::ObjectMembers) {
+                return Ok(format!(
+                    r#"<asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><DATA><TREE_CONTENT/><CATEGORIES/><OBJECT_TYPES><SEU_ADT_OBJECT_TYPE_INFO><OBJECT_TYPE>CLAS/OM</OBJECT_TYPE><CATEGORY_TAG>source_library</CATEGORY_TAG><OBJECT_TYPE_LABEL>Methods</OBJECT_TYPE_LABEL><NODE_ID>{}</NODE_ID></SEU_ADT_OBJECT_TYPE_INFO></OBJECT_TYPES></DATA></asx:values></asx:abap>"#,
+                    if count == 0 { "000002" } else { "000012" }
+                ));
+            }
+            let xml = include_str!("../../zadt/tests/fixtures/repository-nodes-fugr.xml");
+            return Ok(if count == 0 {
+                xml.to_owned()
+            } else {
+                xml.replace("000002", "000012")
+                    .replace("000005", "000015")
+                    .replace("000008", "000018")
+            });
+        }
+        let refreshed = self.state.node_roots.load(Ordering::SeqCst) > 1;
+        let (modules, includes, texts) = if refreshed {
+            ("000012", "000015", "000018")
+        } else {
+            ("000002", "000005", "000008")
+        };
+        let objects = if body.contains(&format!("<item>{modules}</item>")) {
+            if matches!(self.behavior, Behavior::ObjectMembers) {
+                format!(
+                    "{}{}{}",
+                    browser_object(
+                        "CLAS/OM",
+                        "FIRST",
+                        "/sap/bc/adt/oo/classes/zcl_demo/source/main#start=1,0"
+                    ),
+                    browser_object(
+                        "CLAS/OM",
+                        "SECOND",
+                        "/sap/bc/adt/oo/classes/zcl_demo/source/main?version=inactive#start=8,0"
+                    ),
+                    browser_object("FUTR/XX", "UNLOCATED", "")
+                )
+            } else {
+                let first = if refreshed { "Z_NEW" } else { "ZFTFTR" };
+                format!(
+                    "{}{}",
+                    browser_object(
+                        "FUGR/FF",
+                        first,
+                        &format!(
+                            "/sap/bc/adt/functions/groups/zgroup123/fmodules/{}",
+                            first.to_lowercase()
+                        )
+                    ),
+                    browser_object(
+                        "FUGR/FF",
+                        "ZTFATFART",
+                        "/sap/bc/adt/functions/groups/zgroup123/fmodules/ztfatfart"
+                    )
+                )
+            }
+        } else if body.contains(&format!("<item>{includes}</item>")) {
+            browser_object(
+                "FUGR/I",
+                "LZGROUP123TOP",
+                "/sap/bc/adt/functions/groups/zgroup123/includes/lzgroup123top",
+            )
+        } else if body.contains(&format!("<item>{texts}</item>")) {
+            browser_object(
+                "FUGR/PX",
+                "SAPLZGROUP123",
+                "/sap/bc/adt/textelements/functiongroups/zgroup123",
+            )
+        } else {
+            return Err(io::Error::other(format!(
+                "stale or unexpected browser selector: {body}"
+            )));
+        };
+        Ok(format!(
+            r#"<asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><DATA><TREE_CONTENT>{objects}</TREE_CONTENT><CATEGORIES/><OBJECT_TYPES/></DATA></asx:values></asx:abap>"#
+        ))
+    }
+}
+
+fn browser_object(kind: &str, name: &str, uri: &str) -> String {
+    format!(
+        "<SEU_ADT_REPOSITORY_OBJ_NODE><OBJECT_TYPE>{kind}</OBJECT_TYPE><OBJECT_NAME>{name}</OBJECT_NAME><TECH_NAME>{name}</TECH_NAME><OBJECT_URI>{uri}</OBJECT_URI><EXPANDABLE/><DESCRIPTION>{name}</DESCRIPTION></SEU_ADT_REPOSITORY_OBJ_NODE>"
+    )
 }
 
 #[async_trait]
 impl Transport for TestTransport {
     async fn send(&self, request: AdtRequest) -> Result<AdtResponse, TransportError> {
         if request.target().as_str() == "/sap/bc/adt/discovery" {
+            if matches!(
+                self.behavior,
+                Behavior::ObjectTree | Behavior::ObjectMembers
+            ) {
+                let xml = DISCOVERY_XML.replace("</app:service>", r#"<app:workspace><atom:title>Nodes</atom:title><app:collection href="/sap/bc/adt/repository/nodestructure"><atom:category scheme="http://www.sap.com/adt/categories/respository" term="nodestructure"/></app:collection></app:workspace></app:service>"#);
+                return Ok(Self::response(xml.into_bytes()));
+            }
             return Ok(Self::response(DISCOVERY_XML.as_bytes().to_vec()));
         }
         if request.target().as_str() == "/sap/bc/adt/core/discovery" {
@@ -484,6 +603,30 @@ impl Transport for TestTransport {
         if request.target().as_str() == "/sap/bc/adt/communication/batch" {
             self.state.batch_count.fetch_add(1, Ordering::SeqCst);
             return Ok(self.batch_response(&request));
+        }
+        if request.target().as_str() == "/sap/bc/adt/repository/nodestructure" {
+            assert!(request.query().iter().any(|(key, _)| key == "parent_name"));
+            assert!(
+                request
+                    .query()
+                    .iter()
+                    .any(|(key, value)| key == "withShortDescriptions" && value == "true")
+            );
+            let body = String::from_utf8_lossy(request.body()).into_owned();
+            self.state.requests.lock().unwrap().push(body.clone());
+            let response = self.nodes_response(&body).map_err(TransportError::new)?;
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                header::CONTENT_TYPE,
+                "application/vnd.sap.as+xml;dataname=com.sap.adt.RepositoryObjectTreeContent"
+                    .parse()
+                    .unwrap(),
+            );
+            return Ok(AdtResponse::new(
+                StatusCode::OK,
+                headers,
+                response.into_bytes(),
+            ));
         }
 
         let body = String::from_utf8_lossy(request.body()).into_owned();
@@ -595,6 +738,210 @@ fn successor(id: NodeId) -> NodeId {
 }
 
 #[tokio::test]
+async fn repository_objects_expand_into_folders_and_preload_children() {
+    let (client, state) = client(Behavior::ObjectTree).await;
+    let tree = VirtualRepositoryTree::builder(client)
+        .mount(flat_selection_mount("Objects"))
+        .build()
+        .await
+        .unwrap();
+    let mount = tree.children(tree.root()).await.unwrap().remove(0);
+    let objects = tree.children(mount.id).await.unwrap();
+    let group = objects
+        .iter()
+        .find(|node| node.label == "ZGROUP123")
+        .unwrap();
+    let leaf = objects.iter().find(|node| node.label == "Z_LEAF").unwrap();
+    assert!(matches!(group.kind, NodeKind::Object { .. }));
+    assert!(group.is_directory());
+    assert!(!leaf.is_directory());
+    assert!(matches!(
+        tree.children(leaf.id).await,
+        Err(VfsError::NotDirectory(_))
+    ));
+    let folders = tree.children(group.id).await.unwrap();
+    assert_eq!(folders.len(), 3);
+    assert!(
+        folders
+            .iter()
+            .all(|folder| matches!(folder.kind, NodeKind::ObjectGroup { .. })
+                && folder.is_directory())
+    );
+    assert_eq!(tree.children(group.id).await.unwrap(), folders);
+    assert_eq!(state.node_count.load(Ordering::SeqCst), 1);
+    tree.preload_all_children(group.id).await.unwrap();
+    assert_eq!(state.batch_count.load(Ordering::SeqCst), 1);
+    assert!(
+        folders
+            .iter()
+            .all(|folder| tree.cached_children(folder.id).unwrap().is_some())
+    );
+    let modules = folders
+        .iter()
+        .find(|node| node.label == "Function Modules")
+        .unwrap();
+    let children = tree.children(modules.id).await.unwrap();
+    assert_eq!(
+        children
+            .iter()
+            .map(|node| node.label.as_str())
+            .collect::<Vec<_>>(),
+        ["ZFTFTR", "ZTFATFART"]
+    );
+    let reference = tree.object_ref(children[0].id).unwrap();
+    assert_eq!(reference.key().parent().unwrap().name(), "ZGROUP123");
+    assert_eq!(reference.workbench_type().as_str(), "FUGR/FF");
+    assert_eq!(
+        children[0].object().unwrap().package.as_deref(),
+        Some("$TMP")
+    );
+    assert!(matches!(
+        tree.object_ref(modules.id),
+        Err(VfsError::NotObject(_))
+    ));
+    assert!(!children[0].is_directory());
+    assert_eq!(state.node_count.load(Ordering::SeqCst), 4);
+}
+
+#[tokio::test]
+async fn folder_refresh_rediscovers_backend_ids_and_invalidates_sibling_caches() {
+    let (client, state) = client(Behavior::ObjectTree).await;
+    let tree = VirtualRepositoryTree::builder(client)
+        .mount(flat_selection_mount("Objects"))
+        .build()
+        .await
+        .unwrap();
+    let mount = tree.children(tree.root()).await.unwrap().remove(0);
+    let group = tree
+        .children(mount.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|n| n.label == "ZGROUP123")
+        .unwrap();
+    let folders = tree.children(group.id).await.unwrap();
+    let modules = folders
+        .iter()
+        .find(|n| n.label == "Function Modules")
+        .unwrap();
+    let includes = folders
+        .iter()
+        .find(|n| n.label == "Function Group Includes")
+        .unwrap();
+    let old_modules = tree.children(modules.id).await.unwrap();
+    let old_includes = tree.children(includes.id).await.unwrap();
+    // Refreshing the outer RIS listing retains an unchanged object tree.
+    tree.refresh(mount.id).await.unwrap();
+    assert_eq!(
+        tree.cached_children(modules.id).unwrap().unwrap(),
+        old_modules
+    );
+    assert_eq!(state.node_roots.load(Ordering::SeqCst), 1);
+    // A folder refresh rebuilds its owning object before reusing a browser selector.
+    let refreshed = tree.refresh(modules.id).await.unwrap();
+    assert_eq!(state.node_roots.load(Ordering::SeqCst), 2);
+    assert!(refreshed.iter().any(|node| node.label == "Z_NEW"));
+    assert!(old_modules.iter().all(|node| tree.node(node.id).is_none()));
+    assert!(old_includes.iter().all(|node| tree.node(node.id).is_none()));
+    assert!(tree.cached_children(includes.id).unwrap().is_none());
+    let new_folders = tree.children(group.id).await.unwrap();
+    assert_eq!(
+        new_folders
+            .iter()
+            .find(|n| n.label == "Function Modules")
+            .unwrap()
+            .id,
+        modules.id
+    );
+    assert_eq!(
+        tree.children(includes.id).await.unwrap()[0].label,
+        "LZGROUP123TOP"
+    );
+    assert!(
+        state
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|body| body.contains("<item>000015</item>"))
+    );
+    // A later rebuild reuses the same backend IDs, but old descendant caches
+    // still cannot be assumed valid merely because their numbers match.
+    tree.refresh(group.id).await.unwrap();
+    assert!(tree.cached_children(modules.id).unwrap().is_none());
+    assert!(tree.cached_children(includes.id).unwrap().is_none());
+    assert!(refreshed.iter().all(|node| tree.node(node.id).is_none()));
+}
+
+#[tokio::test]
+async fn object_expandability_changes_without_changing_its_repository_identity() {
+    let (client, state) = client(Behavior::ObjectTree).await;
+    let tree = VirtualRepositoryTree::builder(client)
+        .mount(flat_selection_mount("Objects"))
+        .build()
+        .await
+        .unwrap();
+    let mount = tree.children(tree.root()).await.unwrap().remove(0);
+    let group = tree
+        .children(mount.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|n| n.label == "ZGROUP123")
+        .unwrap();
+    let folders = tree.children(group.id).await.unwrap();
+    state.object_is_leaf.store(true, Ordering::SeqCst);
+    let updated = tree.refresh(mount.id).await.unwrap();
+    let object = updated.iter().find(|n| n.label == "ZGROUP123").unwrap();
+    assert_eq!(object.id, group.id);
+    assert!(matches!(object.kind, NodeKind::Object { .. }));
+    assert!(!object.is_directory());
+    assert!(folders.iter().all(|folder| tree.node(folder.id).is_none()));
+    assert!(tree.cached_children(object.id).unwrap().is_none());
+    assert!(matches!(
+        tree.children(object.id).await,
+        Err(VfsError::NotDirectory(_))
+    ));
+    assert_eq!(tree.object_ref(object.id).unwrap().name(), "ZGROUP123");
+}
+
+#[tokio::test]
+async fn source_members_keep_distinct_fragments_and_unlocated_metadata() {
+    let (client, _) = client(Behavior::ObjectMembers).await;
+    let tree = VirtualRepositoryTree::builder(client)
+        .mount(flat_selection_mount("Objects"))
+        .build()
+        .await
+        .unwrap();
+    let mount = tree.children(tree.root()).await.unwrap().remove(0);
+    let class = tree.children(mount.id).await.unwrap().remove(0);
+    let methods = tree.children(class.id).await.unwrap().remove(0);
+    let nodes = tree.children(methods.id).await.unwrap();
+    assert_eq!(nodes.len(), 3);
+    let first = nodes.iter().find(|n| n.label == "FIRST").unwrap();
+    let second = nodes.iter().find(|n| n.label == "SECOND").unwrap();
+    assert_ne!(first.id, second.id);
+    assert_eq!(first.object().unwrap().uri, second.object().unwrap().uri);
+    assert_eq!(
+        first.object().unwrap().fragment.as_deref(),
+        Some("start=1,0")
+    );
+    assert_eq!(
+        second.object().unwrap().query,
+        [("version".into(), "inactive".into())]
+    );
+    assert!(matches!(
+        tree.object_ref(first.id),
+        Err(VfsError::MissingObjectReference(_))
+    ));
+    let unlocated = nodes.iter().find(|n| n.label == "UNLOCATED").unwrap();
+    assert!(unlocated.object().unwrap().uri.is_none());
+    assert!(unlocated.object().unwrap().package.is_none());
+    let json = serde_json::to_string(second).unwrap();
+    assert_eq!(serde_json::from_str::<zvfs::Node>(&json).unwrap(), *second);
+}
+
+#[tokio::test]
 async fn validates_facet_policies_while_building() {
     let missing = RepositoryFacet::from("MISSING");
     let (missing_client, state) = client(Behavior::SlowEmpty).await;
@@ -676,11 +1023,11 @@ async fn traverses_packages_groups_types_and_objects() {
 
     let objects = vfs.children(object_type.id).await.unwrap();
     assert_eq!(objects[0].label, "ZCL_DEMO");
-    assert!(!objects[0].is_directory());
+    assert!(objects[0].is_directory());
     let object = objects[0].clone();
     assert_eq!(object.object().unwrap().workbench_type.as_str(), "CLAS/OC");
     assert_eq!(
-        vfs.object_entry(objects[0].id).unwrap().uri().as_str(),
+        vfs.object_ref(objects[0].id).unwrap().uri().as_str(),
         "/sap/bc/adt/oo/classes/zcl_demo"
     );
 
@@ -1282,7 +1629,7 @@ async fn refresh_replaces_descendants_and_invalidates_old_ids() {
     assert_eq!(second.label, "Z_SECOND");
     assert!(vfs.node(first.id).is_none());
     assert!(matches!(
-        vfs.object_entry(first.id),
+        vfs.object_ref(first.id),
         Err(VfsError::UnknownNode(id)) if id == first.id
     ));
 }
@@ -1319,7 +1666,12 @@ async fn refresh_reconciles_objects_by_uri_and_updates_metadata() {
         Some("Updated description")
     );
     assert_eq!(
-        vfs.object_entry(alpha.id).unwrap().description.as_deref(),
+        vfs.node(alpha.id)
+            .unwrap()
+            .object()
+            .unwrap()
+            .description
+            .as_deref(),
         Some("Updated description")
     );
     assert!(vfs.node(beta.id).is_none());

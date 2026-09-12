@@ -7,7 +7,7 @@ use std::{
 
 use async_lock::Mutex;
 use uuid::Uuid;
-use zadt::{AdtUri, RepositoryObjectEntry};
+use zadt::{AdtUri, GlobalWorkbenchType, ObjectRef};
 
 use super::expand::{ExpansionStrategy, PreparedNode};
 use crate::{Node, NodeId, NodeKind, VfsError};
@@ -163,7 +163,7 @@ impl Graph {
                 .nodes
                 .get(&index)
                 .expect("child indices always reference existing records");
-            let identity = SemanticKey::from_kind(&record.node.kind)
+            let identity = SemanticKey::from_kind(&record.node.kind, &record.node.label)
                 .expect("loaded children always have semantic identities");
             let previous = current_by_identity.insert(identity, index);
             debug_assert!(previous.is_none(), "child identities are unique per parent");
@@ -172,7 +172,7 @@ impl Graph {
         let mut reconciled = Vec::with_capacity(children.len());
         let mut invalidated_descendants = Vec::new();
         for child in children {
-            let identity = SemanticKey::from_kind(&child.kind)
+            let identity = SemanticKey::from_kind(&child.kind, &child.label)
                 .expect("loaded children always have semantic identities");
             if let Some(index) = current_by_identity.remove(&identity) {
                 let record = self
@@ -205,7 +205,7 @@ impl Graph {
     ) -> Result<(), VfsError> {
         let mut identities = HashSet::with_capacity(children.len());
         for child in children {
-            let identity = SemanticKey::from_kind(&child.kind)
+            let identity = SemanticKey::from_kind(&child.kind, &child.label)
                 .expect("loaded children always have semantic identities");
             if !identities.insert(identity.clone()) {
                 return Err(VfsError::DuplicateChildIdentity {
@@ -256,7 +256,7 @@ impl Graph {
 pub(super) struct NodeRecord {
     pub(super) node: Node,
     pub(super) expansion: ExpansionStrategy,
-    pub(super) object: Option<RepositoryObjectEntry>,
+    pub(super) object: Option<ObjectRef<()>>,
     pub(super) children: Option<Vec<u64>>,
     pub(super) load: Arc<Mutex<()>>,
     /// Changes when an ancestor reconciliation updates this records load inputs.
@@ -266,11 +266,7 @@ pub(super) struct NodeRecord {
 }
 
 impl NodeRecord {
-    fn new(
-        node: Node,
-        expansion: ExpansionStrategy,
-        object: Option<RepositoryObjectEntry>,
-    ) -> Self {
+    fn new(node: Node, expansion: ExpansionStrategy, object: Option<ObjectRef<()>>) -> Self {
         Self {
             node,
             expansion,
@@ -363,19 +359,53 @@ impl NodeRecord {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum SemanticKey {
     Package(AdtUri),
-    Facet { facet: String, value: String },
-    Object(AdtUri),
+    Facet {
+        facet: String,
+        value: String,
+    },
+    Object {
+        uri: AdtUri,
+        query: Vec<(String, String)>,
+        fragment: Option<String>,
+    },
+    UnlocatedObject {
+        workbench_type: GlobalWorkbenchType,
+        name: String,
+    },
+    ObjectGroup {
+        workbench_type: GlobalWorkbenchType,
+        category: String,
+        label: String,
+    },
 }
 
 impl SemanticKey {
-    fn from_kind(kind: &NodeKind) -> Option<Self> {
+    fn from_kind(kind: &NodeKind, label: &str) -> Option<Self> {
         match kind {
             NodeKind::Package { uri, .. } => Some(Self::Package(uri.clone())),
             NodeKind::Facet { facet, value, .. } => Some(Self::Facet {
                 facet: facet.clone(),
                 value: value.clone(),
             }),
-            NodeKind::Object { object } => Some(Self::Object(object.uri.clone())),
+            NodeKind::Object { object } => Some(match &object.uri {
+                Some(uri) => Self::Object {
+                    uri: uri.clone(),
+                    query: object.query.clone(),
+                    fragment: object.fragment.clone(),
+                },
+                None => Self::UnlocatedObject {
+                    workbench_type: object.workbench_type.clone(),
+                    name: object.name.clone(),
+                },
+            }),
+            NodeKind::ObjectGroup {
+                workbench_type,
+                category,
+            } => Some(Self::ObjectGroup {
+                workbench_type: workbench_type.clone(),
+                category: category.clone(),
+                label: label.to_owned(),
+            }),
             NodeKind::Root | NodeKind::Mount { .. } => None,
         }
     }
@@ -384,7 +414,20 @@ impl SemanticKey {
         match self {
             Self::Package(uri) => format!("package:{}", uri.as_str()),
             Self::Facet { facet, value } => format!("facet:{facet}:{value}"),
-            Self::Object(uri) => format!("object:{}", uri.as_str()),
+            Self::Object {
+                uri,
+                query,
+                fragment,
+            } => format!("object:{uri}:{query:?}:{fragment:?}"),
+            Self::UnlocatedObject {
+                workbench_type,
+                name,
+            } => format!("object:{workbench_type}:{name}"),
+            Self::ObjectGroup {
+                workbench_type,
+                category,
+                label,
+            } => format!("group:{workbench_type}:{category}:{label}"),
         }
     }
 }

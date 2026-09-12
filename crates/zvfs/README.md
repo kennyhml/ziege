@@ -145,9 +145,33 @@ A4H
 Adaptive decisions are evaluated independently at each configured level and
 are reevaluated when a node is refreshed.
 
-## Example: Command line system explorer
+## Repository object children
 
-The crate includes a small, interactive explorer example for navigating a live system.
+Repository objects retain their object identity and can have children when SAP
+advertises them as expandable. Below those objects, ZVFS uses the ADT repository
+node-structure API. Its type folders are always retained, independently of the
+RIS facet policy:
+
+```text
+ZGROUP123
+├── Function Group Includes
+│   ├── LZGROUP123TOP
+│   └── LZGROUP123UXX
+├── Function Modules
+│   ├── ZFTFTR
+│   └── ZTFATFART
+└── Textelements
+```
+
+`Node::is_directory()` reflects expandability rather than excluding object nodes.
+`tree.object_ref(id)` returns a retained ZADT object reference when the node has a
+plain object-resource location. Source members retain their query and fragment
+navigation information instead. Package metadata can be absent for related objects
+whose package was not returned by the backend.
+
+## Example: Terminal system explorer
+
+The crate includes a Ratatui explorer with a tree widget and a selected-object details pane.
 It reads connection details from `.env` or the process environment:
 
 ```text
@@ -164,22 +188,31 @@ name to start with a narrower package mount:
 ```bash
 cargo run -p zvfs --example explorer
 cargo run -p zvfs --example explorer -- /DMO/FLIGHT_REUSE
+cargo run -p zvfs --example explorer -- '$TMP'
 ```
 
-The REPL loads nodes only as they are visited and supports:
+Folders load asynchronously when expanded, so navigation and quitting stay responsive
+while SAP requests are running. Keyboard controls:
 
 ```text
-ls                 list current children
-cd <index>         enter a numbered directory
-cd .. | up         navigate to the parent
-pwd                print the current repository path
-info [index]       show current-node or child metadata
-refresh            refresh the current node
-tree               render loaded branches and collapse unopened packages
-help               show commands
-quit | exit        exit
+Up/Down or k/j     move selection
+Right or l         expand
+Left or h          collapse or select parent
+Enter / Space      toggle expansion
+Home / End         first / last expanded-tree entry
+Page Up / Down     move one page
+/                  find a name in the expanded tree, including off-screen entries
+Enter / Escape     finish finding
+n                  next match
+r                  refresh selected folder, or retry a failed load
+p                  preload one layer below the selected folder
+q / Ctrl+C         quit
 ```
-This is only an example, it is neither polished nor meant to be used in productive environmens!
+Search only visits loaded, expanded branches. Refreshing a backend tree may remove
+the selected node, in which case selection returns to its nearest surviving ancestor.
+The terminal is restored when the explorer exits. For a local system with development certificates, the
+example also honors `SAP_DANGER_ACCEPT_INVALID_CERTS` and
+`SAP_DANGER_ACCEPT_INVALID_HOSTNAMES` from the environment.
 
 ## Technical Details
 
@@ -200,12 +233,18 @@ Repository package and object locations are exposed as validated `AdtUri`
 values rather than unchecked strings.
 
 Refreshes reconcile one immediate layer by semantic identity: package and
-object nodes use their ADT resource URI, while facet folders use their facet
+object nodes use their ADT navigation location including query and fragment,
+while facet folders use their facet
 and technical value. Matching children retain their IDs, load gates, and
 compatible cached descendants. Removed nodes and descendants whose expansion
 shape changed become stale. Per-record generations prevent requests started
 before an ancestor reconciliation from committing obsolete results.
 
-`zvfs` models repository hierarchy only. Repository objects are leaves in this
-tree. Source retrieval, editing, persistence, and local-file projection belong
-to higher layers.
+Browser folders use their type, category, and label as semantic identity, keeping
+backend node IDs separate from public `NodeId` values. Refreshing a browser folder
+first rebuilds its owning object tree to rediscover backend selectors. Cached
+browser descendants are invalidated, even if the backend reuses the same numeric
+IDs. Deeply nested nodes may become stale and must be reacquired.
+
+`zvfs` models repository hierarchy. Source retrieval, editing, persistence, and
+local-file projection belong to higher layers.
