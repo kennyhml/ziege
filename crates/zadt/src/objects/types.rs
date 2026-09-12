@@ -50,7 +50,8 @@ pub use fugr::{
     FunctionGroupIncludeCreatePropertiesBuilderError, FunctionGroupIncludeProperties,
     FunctionGroupProperties, FunctionModule, FunctionModuleCreateProperties,
     FunctionModuleCreatePropertiesBuilder, FunctionModuleCreatePropertiesBuilderError,
-    FunctionModuleProperties,
+    FunctionModuleProcessingType, FunctionModuleProperties, FunctionModuleReleaseState, RfcScope,
+    RfcVersion, UpdateTaskKind,
 };
 pub use intf::{
     Interface, InterfaceCreateProperties, InterfaceCreatePropertiesBuilder,

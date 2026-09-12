@@ -492,32 +492,56 @@ pub(crate) static FUNCTION_MODULE_FORMAT: ObjectFormat = ObjectFormat {
 /// Renders validated FUNC JSON with a trailing newline.
 fn render_function_module(snapshot: &ObjectSnapshot<()>) -> Result<String, ProjectionError> {
     let properties = snapshot.typed_properties::<FunctionModule>()?;
-    let document = ProjectedFunctionModuleProperties {
-        format_version: FUNCTION_MODULE_FORMAT.version().to_owned(),
-        header: FunctionModuleHeader {
-            description: properties.description.clone(),
-        },
-        processing_type: FunctionModuleProcessingType::from_adt(&properties.processing_type)?,
-        rfc_properties: None,
-        update_properties: None,
-        release_state: FunctionModuleReleaseState::from_adt(&properties.release_state)?,
-        release_date: None,
-        global: false,
-        exception_classes: false,
-        application: String::new(),
-        client: String::new(),
-        active_function_exit: false,
-        // TEMP placeholder, not an assignment to a function-group include.
-        include_number: "00".to_owned(),
-        not_executable: false,
-        edit_locked: false,
-        parameters: Vec::new(),
-        exceptions: Vec::new(),
-    };
-    document.validate()?;
+    let document = ProjectedFunctionModuleProperties::from_adt(properties)?;
     let mut content = serde_json::to_string_pretty(&document)?;
     content.push('\n');
     Ok(content)
+}
+
+impl ProjectedFunctionModuleProperties {
+    fn from_adt(properties: &zadt::FunctionModuleProperties) -> Result<Self, ProjectionError> {
+        let processing_type =
+            FunctionModuleProcessingType::from_adt(properties.processing_type.as_ref())?;
+        let document = Self {
+            format_version: FUNCTION_MODULE_FORMAT.version().to_owned(),
+            header: FunctionModuleHeader {
+                description: properties.description.clone(),
+            },
+            processing_type,
+            rfc_properties: if processing_type == FunctionModuleProcessingType::Rfc {
+                Some(RfcProperties::from_adt(properties)?)
+            } else {
+                None
+            },
+            update_properties: if processing_type == FunctionModuleProcessingType::Update {
+                Some(UpdateProperties {
+                    update_task_kind: UpdateTaskKind::from_adt(
+                        properties.update_task_kind.as_ref(),
+                    )?,
+                })
+            } else {
+                None
+            },
+            release_state: FunctionModuleReleaseState::from_adt(properties.release_state.as_ref())?,
+            release_date: properties
+                .release_date
+                .clone()
+                .filter(|value| !value.is_empty()),
+            global: properties.global.unwrap_or(false),
+            exception_classes: false,
+            application: String::new(),
+            client: String::new(),
+            active_function_exit: false,
+            // Deliberate AFF deviation until ADT exposes the include assignment.
+            include_number: None,
+            not_executable: false,
+            edit_locked: false,
+            parameters: Vec::new(),
+            exceptions: Vec::new(),
+        };
+        document.validate()?;
+        Ok(document)
+    }
 }
 
 /// Validates edits and returns changed ADT wire properties, or `None` for a no-op.
@@ -529,17 +553,15 @@ fn merge_function_module(
     let edited: ProjectedFunctionModuleProperties = parse_object(edited)?;
     edited.validate()?;
 
-    let previous_type = FunctionModuleProcessingType::from_adt(&original.processing_type)?;
-    FunctionModuleReleaseState::from_adt(&original.release_state)?;
+    let previous = ProjectedFunctionModuleProperties::from_adt(original)?;
+    let type_changed = previous.processing_type != edited.processing_type;
 
     for (unsupported, field) in [
-        (edited.release_date.is_some(), "releaseDate"),
-        (edited.global, "global"),
         (edited.exception_classes, "exceptionClasses"),
         (!edited.application.is_empty(), "application"),
         (!edited.client.is_empty(), "client"),
         (edited.active_function_exit, "activeFunctionExit"),
-        (edited.include_number != "00", "includeNumber"),
+        (edited.include_number.is_some(), "includeNumber"),
         (edited.not_executable, "notExecutable"),
         (edited.edit_locked, "editLocked"),
         (!edited.parameters.is_empty(), "parameters"),
@@ -552,7 +574,10 @@ fn merge_function_module(
             });
         }
     }
-    if let Some(rfc) = &edited.rfc_properties {
+
+    if let Some(rfc) = &edited.rfc_properties
+        && edited.processing_type != FunctionModuleProcessingType::Rfc
+    {
         for (unsupported, field) in [
             (rfc.basxml_enabled, "rfcProperties.basxmlEnabled"),
             (
@@ -566,11 +591,6 @@ fn merge_function_module(
             (rfc.abap_from_java, "rfcProperties.abapFromJava"),
             (rfc.java_from_abap, "rfcProperties.javaFromAbap"),
             (rfc.java_remote, "rfcProperties.javaRemote"),
-            (
-                previous_type == FunctionModuleProcessingType::Rfc
-                    || edited.processing_type == FunctionModuleProcessingType::Rfc,
-                "rfcProperties",
-            ),
         ] {
             if unsupported {
                 return Err(ProjectionError::UnsupportedAffProperty {
@@ -580,27 +600,68 @@ fn merge_function_module(
             }
         }
     }
-    if let Some(update) = &edited.update_properties {
-        if update.update_task_kind != UpdateTaskKind::StartImmediately {
-            return Err(ProjectionError::UnsupportedAffProperty {
-                object_type: "FUNC",
-                field: "updateProperties.updateTaskKind",
-            });
-        }
-        if previous_type == FunctionModuleProcessingType::Update
-            || edited.processing_type == FunctionModuleProcessingType::Update
-        {
-            return Err(ProjectionError::UnsupportedAffProperty {
-                object_type: "FUNC",
-                field: "updateProperties",
-            });
-        }
+    if let Some(update) = &edited.update_properties
+        && edited.processing_type != FunctionModuleProcessingType::Update
+        && update.update_task_kind != UpdateTaskKind::StartImmediately
+    {
+        return Err(ProjectionError::UnsupportedAffProperty {
+            object_type: "FUNC",
+            field: "updateProperties.updateTaskKind",
+        });
     }
 
     let mut merged = original.clone();
     merged.description = edited.header.description;
-    merged.processing_type = edited.processing_type.adt_value().to_owned();
-    merged.release_state = edited.release_state.adt_value().to_owned();
+    if type_changed {
+        merged.processing_type = Some(edited.processing_type.adt_value());
+    }
+    if edited.release_state != previous.release_state {
+        merged.release_state = Some(edited.release_state.adt_value());
+    }
+    if edited.release_date != previous.release_date {
+        merged.release_date = edited.release_date;
+    }
+    if edited.global != previous.global {
+        merged.global = Some(edited.global);
+    }
+    if edited.processing_type == FunctionModuleProcessingType::Rfc {
+        let rfc = edited.rfc_properties.unwrap_or_default();
+        let old = previous.rfc_properties.unwrap_or_default();
+        if type_changed || rfc.basxml_enabled != old.basxml_enabled {
+            merged.basxml_enabled = Some(rfc.basxml_enabled);
+        }
+        if type_changed || rfc.abap_from_java != old.abap_from_java {
+            merged.abap_from_java = Some(rfc.abap_from_java);
+        }
+        if type_changed || rfc.java_from_abap != old.java_from_abap {
+            merged.java_from_abap = Some(rfc.java_from_abap);
+        }
+        if type_changed || rfc.java_remote != old.java_remote {
+            merged.java_remote = Some(rfc.java_remote);
+        }
+        if type_changed || rfc.rfc_scope != old.rfc_scope {
+            merged.rfc_scope = Some(rfc.rfc_scope.adt_value());
+        }
+        if type_changed || rfc.rfc_version != old.rfc_version {
+            merged.rfc_version = Some(rfc.rfc_version.adt_value());
+        }
+    } else if type_changed {
+        merged.basxml_enabled = None;
+        merged.abap_from_java = None;
+        merged.java_from_abap = None;
+        merged.java_remote = None;
+        merged.rfc_scope = None;
+        merged.rfc_version = None;
+    }
+    if edited.processing_type == FunctionModuleProcessingType::Update {
+        let update = edited.update_properties.unwrap_or_default();
+        let old = previous.update_properties.unwrap_or_default();
+        if type_changed || update.update_task_kind != old.update_task_kind {
+            merged.update_task_kind = Some(update.update_task_kind.adt_value());
+        }
+    } else if type_changed {
+        merged.update_task_kind = None;
+    }
     if merged == *original {
         return Ok(None);
     }
@@ -619,35 +680,38 @@ fn merge_function_module(
 /// formatVersion       Constant "1", required
 /// header.description  description, required, at most 74 characters
 /// processingType      processing_type, required even for normal
-/// rfcProperties       No backing, see RfcProperties for acceptance policy
-/// updateProperties    No backing, see UpdateProperties for acceptance policy
+/// rfcProperties       RFC attributes, exposed when processing_type is rfc
+/// updateProperties    update_task_kind, exposed when processing_type is update
 /// releaseState        release_state, omission means notReleased
-/// releaseDate         No backing, every supplied date is rejected after validation
-/// global              No backing, absent or false
+/// releaseDate         release_date, YYYY-MM-DD, absent/empty ADT values omitted
+/// global              global, absent ADT value renders as false
 /// exceptionClasses    No backing, absent or false
 /// application         No backing, absent or empty string, at most 1 character
 /// client              No backing, absent or empty string, at most 3 characters
 /// activeFunctionExit  No backing, absent or false
-/// includeNumber       Required TEMP "00", no include assignment is performed
+/// includeNumber       Omitted, no implemented backing (deviation from AFF)
 /// notExecutable       No backing, absent or false
 /// editLocked          No backing, absent or false
 /// parameters          No backing, absent or empty array
 /// exceptions          No backing, absent or empty array
 /// ```
 ///
-/// The required include number is a string of one or two ASCII digits in the
-/// schema. ZADT has no include-number field, so rendering supplies the TEMP
-/// placeholder `"00"`. Even schema-valid alternatives such as `"0"` or `"01"`
-/// are rejected with `UnsupportedAffProperty` at `includeNumber`.
+/// # AFF Deviation
+///
+/// AFF requires `includeNumber`, a string of one or two ASCII digits. ZADT does
+/// not expose the assignment, so this projection deliberately omits the field
+/// and accepts its absence on merge. Generated FUNC JSON therefore does not fully
+/// conform to the upstream schema. Any supplied number, including `"00"`, is
+/// rejected with `UnsupportedAffProperty` after validating its shape.
 ///
 /// Optional false flags, empty strings, empty arrays, and `notReleased` are
 /// omitted on render. Their explicit defaults are accepted on merge. Omitted
-/// `releaseState` writes `notReleased`. Other unbacked nondefault edits return
+/// `releaseState` means `notReleased`. Other unbacked nondefault edits return
 /// `UnsupportedAffProperty` with object type `FUNC` and the AFF field path.
 /// Schema validation runs before unsupported-property checks.
 ///
-/// Only description, processing type, and release state are changed in a clone
-/// of the typed ADT properties. Identity, container, source URI, links, language,
+/// Changes are applied to a clone of the typed ADT properties. Unchanged fields
+/// preserve absent values and explicit defaults. Identity, container, source URI, links, language,
 /// timestamps, version, and description limit retain their original values.
 /// The separate `.func.abap` backing retains the advertised source reference.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, Validate)]
@@ -712,8 +776,13 @@ pub struct ProjectedFunctionModuleProperties {
     #[serde(default, skip_serializing_if = "is_false")]
     pub active_function_exit: bool,
 
-    #[garde(length(chars, min = 1, max = 2), custom(numeric_string))]
-    pub include_number: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    #[garde(inner(length(chars, min = 1, max = 2), custom(numeric_string)))]
+    pub include_number: Option<String>,
 
     #[serde(default, skip_serializing_if = "is_false")]
     pub not_executable: bool,
@@ -764,8 +833,9 @@ pub struct FunctionModuleHeader {
 /// update     update
 /// ```
 ///
-/// Unknown ADT strings fail rather than selecting a default. All transitions
-/// between these values map directly, without synthesizing RFC or update settings.
+/// Absent ADT values render as normal. Unknown strings fail rather than selecting
+/// a default. Changing mode clears attributes belonging to inactive modes and
+/// initializes the selected mode from its AFF block, or defaults when omitted.
 /// The required field is always serialized, including `normal`.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -778,23 +848,26 @@ pub enum FunctionModuleProcessingType {
 }
 
 impl FunctionModuleProcessingType {
-    fn from_adt(value: &str) -> Result<Self, ProjectionError> {
+    fn from_adt(
+        value: Option<&zadt::FunctionModuleProcessingType>,
+    ) -> Result<Self, ProjectionError> {
+        use zadt::FunctionModuleProcessingType as Adt;
         match value {
-            "normal" => Ok(Self::Normal),
-            "rfc" => Ok(Self::Rfc),
-            "update" => Ok(Self::Update),
-            value => Err(ProjectionError::InvalidAffField {
+            None | Some(Adt::Normal) => Ok(Self::Normal),
+            Some(Adt::Rfc) => Ok(Self::Rfc),
+            Some(Adt::Update) => Ok(Self::Update),
+            Some(Adt::Other(value)) => Err(ProjectionError::InvalidAffField {
                 field: "processingType",
                 message: format!("unsupported ADT processing type `{value}`"),
             }),
         }
     }
 
-    const fn adt_value(self) -> &'static str {
+    const fn adt_value(self) -> zadt::FunctionModuleProcessingType {
         match self {
-            Self::Normal => "normal",
-            Self::Rfc => "rfc",
-            Self::Update => "update",
+            Self::Normal => zadt::FunctionModuleProcessingType::Normal,
+            Self::Rfc => zadt::FunctionModuleProcessingType::Rfc,
+            Self::Update => zadt::FunctionModuleProcessingType::Update,
         }
     }
 }
@@ -805,12 +878,13 @@ impl FunctionModuleProcessingType {
 /// AFF value            ADT release_state     Render policy
 /// ---------            -----------------     -------------
 /// notReleased          notReleased           Default, omitted
-/// released             released              Included
-/// releasedSapInternal  releasedSapInternal   Included
+/// released             external              Included
+/// releasedSapInternal  internal              Included
 /// obsolete             obsolete              Included
-/// releasePlanned       releasePlanned        Included
+/// releasePlanned       markedForRelease      Included
 /// ```
 ///
+/// Absent ADT values render as notReleased and retain their absence on a no-op.
 /// Unknown ADT values, including empty strings, fail on render and merge.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -828,27 +902,28 @@ pub enum FunctionModuleReleaseState {
 }
 
 impl FunctionModuleReleaseState {
-    fn from_adt(value: &str) -> Result<Self, ProjectionError> {
+    fn from_adt(value: Option<&zadt::FunctionModuleReleaseState>) -> Result<Self, ProjectionError> {
+        use zadt::FunctionModuleReleaseState as Adt;
         match value {
-            "notReleased" => Ok(Self::NotReleased),
-            "released" => Ok(Self::Released),
-            "releasedSapInternal" => Ok(Self::ReleasedSapInternal),
-            "obsolete" => Ok(Self::Obsolete),
-            "releasePlanned" => Ok(Self::ReleasePlanned),
-            value => Err(ProjectionError::InvalidAffField {
+            None | Some(Adt::NotReleased) => Ok(Self::NotReleased),
+            Some(Adt::External) => Ok(Self::Released),
+            Some(Adt::Internal) => Ok(Self::ReleasedSapInternal),
+            Some(Adt::Obsolete) => Ok(Self::Obsolete),
+            Some(Adt::MarkedForRelease) => Ok(Self::ReleasePlanned),
+            Some(Adt::Other(value)) => Err(ProjectionError::InvalidAffField {
                 field: "releaseState",
                 message: format!("unsupported ADT release state `{value}`"),
             }),
         }
     }
 
-    const fn adt_value(self) -> &'static str {
+    const fn adt_value(self) -> zadt::FunctionModuleReleaseState {
         match self {
-            Self::NotReleased => "notReleased",
-            Self::Released => "released",
-            Self::ReleasedSapInternal => "releasedSapInternal",
-            Self::Obsolete => "obsolete",
-            Self::ReleasePlanned => "releasePlanned",
+            Self::NotReleased => zadt::FunctionModuleReleaseState::NotReleased,
+            Self::Released => zadt::FunctionModuleReleaseState::External,
+            Self::ReleasedSapInternal => zadt::FunctionModuleReleaseState::Internal,
+            Self::Obsolete => zadt::FunctionModuleReleaseState::Obsolete,
+            Self::ReleasePlanned => zadt::FunctionModuleReleaseState::MarkedForRelease,
         }
     }
 
@@ -857,27 +932,25 @@ impl FunctionModuleReleaseState {
     }
 }
 
-/// RFC settings with no implemented ADT backing.
+/// RFC settings mapped to flat function-module ADT attributes.
 ///
 /// Paths below are relative to `rfcProperties`.
 ///
 /// ```text
-/// AFF field      Schema presence  Default accepted only for an inactive block
-/// ---------      ---------------  -------------------------------------------
-/// basxmlEnabled  Required         false
-/// rfcScope       Required         notClassified
-/// rfcVersion     Required         any
-/// abapFromJava   Optional         Absent or false
-/// javaFromAbap   Optional         Absent or false
-/// javaRemote     Optional         Absent or false
+/// AFF field      ADT field        Default for an absent ADT attribute
+/// ---------      ---------        ----------------------------------
+/// basxmlEnabled  basxml_enabled   false
+/// rfcScope       rfc_scope        notClassified
+/// rfcVersion     rfc_version      any
+/// abapFromJava   abap_from_java   false
+/// javaFromAbap   java_from_abap   false
+/// javaRemote     java_remote     false
 /// ```
 ///
-/// Rendering omits this block. Absence never writes RFC settings. An explicit
-/// block is accepted only when all values above are default and both original
-/// and edited processing types are not `rfc`. A block active on either side of
-/// a transition is rejected at `rfcProperties`, since its default-looking values
-/// cannot be compared with the actual unexposed ADT settings. Nondefault fields
-/// are rejected at their precise nested paths, even in an inactive block.
+/// Rendered only for RFC modules. Omitting the block on an RFC edit selects its
+/// defaults. Non-RFC edits accept only absent or default blocks. Unchanged fields
+/// retain sparse ADT representations. Dormant attributes are preserved during
+/// unrelated edits, but cleared on a transition to a non-RFC mode.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, Validate)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[garde(allow_unvalidated)]
@@ -900,15 +973,28 @@ pub struct RfcProperties {
     pub java_remote: bool,
 }
 
-/// RFC call-scope vocabulary, without an ADT mapping.
+impl RfcProperties {
+    fn from_adt(properties: &zadt::FunctionModuleProperties) -> Result<Self, ProjectionError> {
+        Ok(Self {
+            basxml_enabled: properties.basxml_enabled.unwrap_or(false),
+            rfc_scope: RfcScope::from_adt(properties.rfc_scope.as_ref())?,
+            rfc_version: RfcVersion::from_adt(properties.rfc_version.as_ref())?,
+            abap_from_java: properties.abap_from_java.unwrap_or(false),
+            java_from_abap: properties.java_from_abap.unwrap_or(false),
+            java_remote: properties.java_remote.unwrap_or(false),
+        })
+    }
+}
+
+/// RFC call-scope vocabulary with matching AFF and ADT spellings.
 ///
 /// ```text
-/// AFF rfcProperties.rfcScope  Mapping policy
-/// -------------------------  --------------
-/// fromSameClientAndUser      Rejected
-/// fromSameSystem             Rejected
-/// fromAnySystem              Rejected
-/// notClassified              Default, subject to inactive-block policy
+/// AFF rfcProperties.rfcScope  ADT rfc_scope
+/// -------------------------  -------------
+/// fromSameClientAndUser      fromSameClientAndUser
+/// fromSameSystem             fromSameSystem
+/// fromAnySystem              fromAnySystem
+/// notClassified              notClassified
 /// ```
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -923,13 +1009,37 @@ pub enum RfcScope {
     NotClassified,
 }
 
-/// RFC serialization vocabulary, without an ADT mapping.
+impl RfcScope {
+    fn from_adt(value: Option<&zadt::RfcScope>) -> Result<Self, ProjectionError> {
+        match value {
+            None | Some(zadt::RfcScope::NotClassified) => Ok(Self::NotClassified),
+            Some(zadt::RfcScope::FromSameClientAndUser) => Ok(Self::FromSameClientAndUser),
+            Some(zadt::RfcScope::FromSameSystem) => Ok(Self::FromSameSystem),
+            Some(zadt::RfcScope::FromAnySystem) => Ok(Self::FromAnySystem),
+            Some(zadt::RfcScope::Other(value)) => Err(ProjectionError::InvalidAffField {
+                field: "rfcProperties.rfcScope",
+                message: format!("unsupported ADT RFC scope `{value}`"),
+            }),
+        }
+    }
+
+    const fn adt_value(self) -> zadt::RfcScope {
+        match self {
+            Self::NotClassified => zadt::RfcScope::NotClassified,
+            Self::FromSameClientAndUser => zadt::RfcScope::FromSameClientAndUser,
+            Self::FromSameSystem => zadt::RfcScope::FromSameSystem,
+            Self::FromAnySystem => zadt::RfcScope::FromAnySystem,
+        }
+    }
+}
+
+/// RFC serialization vocabulary with matching AFF and ADT spellings.
 ///
 /// ```text
-/// AFF rfcProperties.rfcVersion  Mapping policy
-/// ---------------------------  --------------
-/// fastSerializationRequired    Rejected
-/// any                          Default, subject to inactive-block policy
+/// AFF rfcProperties.rfcVersion  ADT rfc_version
+/// ---------------------------  ---------------
+/// fastSerializationRequired    fastSerializationRequired
+/// any                          any
 /// ```
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -940,7 +1050,29 @@ pub enum RfcVersion {
     Any,
 }
 
-/// Update settings with no implemented ADT backing.
+impl RfcVersion {
+    fn from_adt(value: Option<&zadt::RfcVersion>) -> Result<Self, ProjectionError> {
+        match value {
+            None | Some(zadt::RfcVersion::Any) => Ok(Self::Any),
+            Some(zadt::RfcVersion::FastSerializationRequired) => {
+                Ok(Self::FastSerializationRequired)
+            }
+            Some(zadt::RfcVersion::Other(value)) => Err(ProjectionError::InvalidAffField {
+                field: "rfcProperties.rfcVersion",
+                message: format!("unsupported ADT RFC version `{value}`"),
+            }),
+        }
+    }
+
+    const fn adt_value(self) -> zadt::RfcVersion {
+        match self {
+            Self::Any => zadt::RfcVersion::Any,
+            Self::FastSerializationRequired => zadt::RfcVersion::FastSerializationRequired,
+        }
+    }
+}
+
+/// Update settings mapped to the ADT update_task_kind attribute.
 ///
 /// ```text
 /// AFF field                        Schema presence  Default
@@ -948,10 +1080,10 @@ pub enum RfcVersion {
 /// updateProperties.updateTaskKind  Required         startImmediately
 /// ```
 ///
-/// Rendering omits this block. Absence never writes update settings. An explicit
-/// default block is accepted only when neither original nor edited processing
-/// type is `update`. Otherwise it is rejected at `updateProperties`, since the
-/// actual task kind is unexposed. Nondefault kinds fail at the nested field path.
+/// Rendered only for update modules. An absent ADT task kind renders as
+/// startImmediately. Omitting the block on an update edit selects this default.
+/// Non-update edits accept only absent or default blocks. Unrelated edits preserve
+/// dormant values, while changing to a non-update mode clears the attribute.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, Validate)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[garde(allow_unvalidated)]
@@ -960,16 +1092,16 @@ pub struct UpdateProperties {
     pub update_task_kind: UpdateTaskKind,
 }
 
-/// Update-task vocabulary, without an ADT mapping.
+/// Update-task vocabulary with explicit ADT spelling conversions.
 ///
 /// ```text
-/// AFF updateProperties.updateTaskKind  Mapping policy
-/// -----------------------------------  --------------
-/// startImmediately                     Default, subject to inactive-block policy
-/// startDelayed                         Rejected
-/// startImmediatelyNoRestart            Rejected
-/// collectiveRun                        Rejected
-/// unsupportedKind                      Rejected
+/// AFF updateProperties.updateTaskKind  ADT update_task_kind
+/// -----------------------------------  --------------------
+/// startImmediately                     startImmediate
+/// startDelayed                         startDelayed
+/// startImmediatelyNoRestart            immediateStartNoRestart
+/// collectiveRun                        collectiveRun
+/// unsupportedKind                      unsupportedKind
 /// ```
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -984,6 +1116,34 @@ pub enum UpdateTaskKind {
     CollectiveRun,
 
     UnsupportedKind,
+}
+
+impl UpdateTaskKind {
+    fn from_adt(value: Option<&zadt::UpdateTaskKind>) -> Result<Self, ProjectionError> {
+        match value {
+            None | Some(zadt::UpdateTaskKind::StartImmediate) => Ok(Self::StartImmediately),
+            Some(zadt::UpdateTaskKind::StartDelayed) => Ok(Self::StartDelayed),
+            Some(zadt::UpdateTaskKind::ImmediateStartNoRestart) => {
+                Ok(Self::StartImmediatelyNoRestart)
+            }
+            Some(zadt::UpdateTaskKind::CollectiveRun) => Ok(Self::CollectiveRun),
+            Some(zadt::UpdateTaskKind::UnsupportedKind) => Ok(Self::UnsupportedKind),
+            Some(zadt::UpdateTaskKind::Other(value)) => Err(ProjectionError::InvalidAffField {
+                field: "updateProperties.updateTaskKind",
+                message: format!("unsupported ADT update task kind `{value}`"),
+            }),
+        }
+    }
+
+    const fn adt_value(self) -> zadt::UpdateTaskKind {
+        match self {
+            Self::StartImmediately => zadt::UpdateTaskKind::StartImmediate,
+            Self::StartDelayed => zadt::UpdateTaskKind::StartDelayed,
+            Self::StartImmediatelyNoRestart => zadt::UpdateTaskKind::ImmediateStartNoRestart,
+            Self::CollectiveRun => zadt::UpdateTaskKind::CollectiveRun,
+            Self::UnsupportedKind => zadt::UpdateTaskKind::UnsupportedKind,
+        }
+    }
 }
 
 /// Parameter or exception description with no implemented ADT backing.
@@ -1023,12 +1183,12 @@ mod tests {
         include_bytes!("../../../zadt/tests/fixtures/function-module-zzzzfunc.xml");
     const MODULE_URI: &str = "/sap/bc/adt/functions/groups/z_test_group/fmodules/zzzzfunc";
     const PROCESSING_TYPES: &[&str] = &["normal", "rfc", "update"];
-    const RELEASE_STATES: &[&str] = &[
-        "notReleased",
-        "released",
-        "releasedSapInternal",
-        "obsolete",
-        "releasePlanned",
+    const RELEASE_STATES: &[(&str, &str)] = &[
+        ("notReleased", "notReleased"),
+        ("external", "released"),
+        ("internal", "releasedSapInternal"),
+        ("obsolete", "obsolete"),
+        ("markedForRelease", "releasePlanned"),
     ];
 
     fn module_snapshot(xml: &[u8]) -> ObjectSnapshot<FunctionModule> {
@@ -1128,8 +1288,7 @@ mod tests {
             json!({
                 "formatVersion": "1",
                 "header": {"description": "ftfrtat"},
-                "processingType": "normal",
-                "includeNumber": "00"
+                "processingType": "normal"
             })
         );
         assert_eq!(merge_function_module(&snapshot, &content).unwrap(), None);
@@ -1154,6 +1313,266 @@ mod tests {
             &original
         );
         assert_eq!(render_function_module(&snapshot).unwrap(), content);
+    }
+
+    #[test]
+    fn projects_released_bapi_and_preserves_its_baseline() {
+        let reference = crate::test_support::reference::<FunctionModule>(
+            "BAPI_TRANSACTION_COMMIT",
+            "/sap/bc/adt/functions/groups/bapt/fmodules/bapi_transaction_commit",
+        );
+        let obj = crate::test_support::properties(
+            &reference,
+            FunctionModule::MEDIA_TYPES[0],
+            "etag",
+            include_bytes!(
+                "../../../zadt/tests/fixtures/function-module-bapi-transaction-commit.xml"
+            ),
+        )
+        .into_erased();
+        let content = render_function_module(&obj).unwrap();
+        let mut edited: Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(edited["releaseDate"], "1998-01-15");
+        assert_eq!(edited["releaseState"], "released");
+        assert_eq!(
+            edited["rfcProperties"],
+            json!({
+                "basxmlEnabled": false, "rfcScope": "notClassified", "rfcVersion": "any"
+            })
+        );
+        assert_eq!(merge_function_module(&obj, &content).unwrap(), None);
+        edited["header"]["description"] = json!("Changed");
+        let mut expected = obj.typed_properties::<FunctionModule>().unwrap().clone();
+        expected.description = "Changed".into();
+        assert_eq!(
+            merge_function_module(&obj, &edited.to_string()).unwrap(),
+            Some(serde_json::to_value(&expected).unwrap())
+        );
+        edited.as_object_mut().unwrap().remove("releaseDate");
+        expected.release_date = None;
+        assert_eq!(
+            merge_function_module(&obj, &edited.to_string()).unwrap(),
+            Some(serde_json::to_value(expected).unwrap())
+        );
+    }
+
+    #[test]
+    fn rfc_and_update_attributes_map_all_values_and_preserve_sparse_fields() {
+        let mut original = module_snapshot(MODULE_XML).properties().clone();
+        original.processing_type = Some(zadt::FunctionModuleProcessingType::Rfc);
+        original.basxml_enabled = Some(false);
+        original.rfc_scope = Some(zadt::RfcScope::FromAnySystem);
+        // This matches the supplied RFC response: rfcVersion is absent.
+        let baseline = snapshot(&original);
+        let content = render_function_module(&baseline).unwrap();
+        assert_eq!(merge_function_module(&baseline, &content).unwrap(), None);
+        let document: Value = serde_json::from_str(&content).unwrap();
+        for (field, wire) in [
+            ("basxmlEnabled", "@fmodule:basXMLEnabled"),
+            ("abapFromJava", "@fmodule:abapFromJava"),
+            ("javaFromAbap", "@fmodule:javaFromAbap"),
+            ("javaRemote", "@fmodule:javaRemote"),
+        ] {
+            let mut edited = document.clone();
+            edited["rfcProperties"][field] = json!(true);
+            let mut expected = serde_json::to_value(&original).unwrap();
+            expected[wire] = json!(true);
+            let payload = merge_function_module(&baseline, &edited.to_string())
+                .unwrap()
+                .unwrap();
+            assert_eq!(payload, expected);
+            let changed: FunctionModuleProperties = serde_json::from_value(payload).unwrap();
+            let obj = snapshot(&changed);
+            assert_eq!(
+                merge_function_module(&obj, &edited.to_string()).unwrap(),
+                None
+            );
+            edited["rfcProperties"][field] = json!(false);
+            let payload = merge_function_module(&obj, &edited.to_string())
+                .unwrap()
+                .unwrap();
+            assert_eq!(payload[wire], false);
+        }
+        for (field, values) in [
+            (
+                "rfcScope",
+                &[
+                    "notClassified",
+                    "fromSameClientAndUser",
+                    "fromSameSystem",
+                    "fromAnySystem",
+                ][..],
+            ),
+            ("rfcVersion", &["any", "fastSerializationRequired"][..]),
+        ] {
+            for &value in values {
+                let mut edited = document.clone();
+                edited["rfcProperties"][field] = json!(value);
+                let payload = merge_function_module(&baseline, &edited.to_string()).unwrap();
+                let changed: FunctionModuleProperties = serde_json::from_value(
+                    payload.unwrap_or_else(|| serde_json::to_value(&original).unwrap()),
+                )
+                .unwrap();
+                let content = render_function_module(&snapshot(&changed)).unwrap();
+                let rendered: Value = serde_json::from_str(&content).unwrap();
+                assert_eq!(rendered["rfcProperties"][field], value);
+                assert_eq!(
+                    merge_function_module(&snapshot(&changed), &content).unwrap(),
+                    None
+                );
+            }
+        }
+        let mut edited = document.clone();
+        edited["global"] = json!(true);
+        let payload = merge_function_module(&baseline, &edited.to_string())
+            .unwrap()
+            .unwrap();
+        assert_eq!(payload["@fmodule:global"], true);
+        assert!(payload.get("@fmodule:rfcVersion").is_none());
+        let changed: FunctionModuleProperties = serde_json::from_value(payload).unwrap();
+        edited["global"] = json!(false);
+        let payload = merge_function_module(&snapshot(&changed), &edited.to_string())
+            .unwrap()
+            .unwrap();
+        assert_eq!(payload["@fmodule:global"], false);
+
+        original.processing_type = Some(zadt::FunctionModuleProcessingType::Update);
+        let baseline = snapshot(&original);
+        for (wire, aff) in [
+            ("startImmediate", "startImmediately"),
+            ("startDelayed", "startDelayed"),
+            ("immediateStartNoRestart", "startImmediatelyNoRestart"),
+            ("collectiveRun", "collectiveRun"),
+            ("unsupportedKind", "unsupportedKind"),
+        ] {
+            let mut edited: Value =
+                serde_json::from_str(&render_function_module(&baseline).unwrap()).unwrap();
+            edited["updateProperties"]["updateTaskKind"] = json!(aff);
+            let payload = merge_function_module(&baseline, &edited.to_string()).unwrap();
+            let mut expected = original.clone();
+            if wire != "startImmediate" {
+                expected.update_task_kind = Some(wire.into());
+            }
+            assert_eq!(
+                payload,
+                (expected != original).then(|| serde_json::to_value(&expected).unwrap())
+            );
+            expected.update_task_kind = Some(wire.into());
+            let obj = snapshot(&expected);
+            assert_eq!(
+                merge_function_module(&obj, &edited.to_string()).unwrap(),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn mode_transitions_clear_stale_settings_and_block_omission_resets_defaults() {
+        let mut original = module_snapshot(MODULE_XML).properties().clone();
+        original.processing_type = Some(zadt::FunctionModuleProcessingType::Rfc);
+        original.basxml_enabled = Some(true);
+        original.abap_from_java = Some(true);
+        original.java_from_abap = Some(true);
+        original.java_remote = Some(true);
+        original.rfc_scope = Some(zadt::RfcScope::FromAnySystem);
+        original.rfc_version = Some(zadt::RfcVersion::FastSerializationRequired);
+        original.update_task_kind = Some(zadt::UpdateTaskKind::Other("dormant".into()));
+        let baseline = snapshot(&original);
+        let mut edited: Value =
+            serde_json::from_str(&render_function_module(&baseline).unwrap()).unwrap();
+        assert!(edited.get("updateProperties").is_none());
+        assert_eq!(
+            merge_function_module(&baseline, &edited.to_string()).unwrap(),
+            None
+        );
+        edited.as_object_mut().unwrap().remove("rfcProperties");
+        let payload = merge_function_module(&baseline, &edited.to_string())
+            .unwrap()
+            .unwrap();
+        let reset: FunctionModuleProperties = serde_json::from_value(payload).unwrap();
+        assert_eq!(reset.rfc_scope, Some(zadt::RfcScope::NotClassified));
+        assert_eq!(reset.rfc_version, Some(zadt::RfcVersion::Any));
+        assert_eq!(reset.basxml_enabled, Some(false));
+        assert_eq!(reset.abap_from_java, Some(false));
+        assert_eq!(reset.java_from_abap, Some(false));
+        assert_eq!(reset.java_remote, Some(false));
+        assert_eq!(reset.update_task_kind, original.update_task_kind);
+        edited["processingType"] = json!("update");
+        edited["updateProperties"] = json!({"updateTaskKind": "startDelayed"});
+        let payload = merge_function_module(&baseline, &edited.to_string())
+            .unwrap()
+            .unwrap();
+        for key in [
+            "basXMLEnabled",
+            "abapFromJava",
+            "javaFromAbap",
+            "javaRemote",
+            "rfcScope",
+            "rfcVersion",
+        ] {
+            assert!(payload.get(format!("@fmodule:{key}")).is_none());
+        }
+        assert_eq!(payload["@fmodule:updateTaskKind"], "startDelayed");
+        let updated: FunctionModuleProperties = serde_json::from_value(payload).unwrap();
+        edited.as_object_mut().unwrap().remove("updateProperties");
+        let payload = merge_function_module(&snapshot(&updated), &edited.to_string())
+            .unwrap()
+            .unwrap();
+        assert_eq!(payload["@fmodule:updateTaskKind"], "startImmediate");
+        edited["processingType"] = json!("normal");
+        let payload = merge_function_module(&snapshot(&updated), &edited.to_string())
+            .unwrap()
+            .unwrap();
+        assert!(payload.get("@fmodule:updateTaskKind").is_none());
+        edited["processingType"] = json!("rfc");
+        let payload = merge_function_module(&snapshot(&updated), &edited.to_string())
+            .unwrap()
+            .unwrap();
+        assert!(payload.get("@fmodule:updateTaskKind").is_none());
+        assert_eq!(payload["@fmodule:rfcVersion"], "any");
+    }
+
+    #[test]
+    fn absent_discriminators_are_preserved_and_unknown_active_settings_fail() {
+        let mut original = module_snapshot(MODULE_XML).properties().clone();
+        original.processing_type = None;
+        original.release_state = None;
+        original.release_date = Some(String::new());
+        original.global = Some(false);
+        let obj = snapshot(&original);
+        let content = render_function_module(&obj).unwrap();
+        assert_eq!(merge_function_module(&obj, &content).unwrap(), None);
+        let mut edited: Value = serde_json::from_str(&content).unwrap();
+        edited["header"]["description"] = json!("New description");
+        let mut expected = original.clone();
+        expected.description = "New description".into();
+        assert_eq!(
+            merge_function_module(&obj, &edited.to_string()).unwrap(),
+            Some(serde_json::to_value(expected).unwrap())
+        );
+        for (mode, field, path) in [
+            ("rfc", "rfcScope", "rfcProperties.rfcScope"),
+            ("rfc", "rfcVersion", "rfcProperties.rfcVersion"),
+            (
+                "update",
+                "updateTaskKind",
+                "updateProperties.updateTaskKind",
+            ),
+        ] {
+            let mut wire = serde_json::to_value(&original).unwrap();
+            wire["@fmodule:processingType"] = json!(mode);
+            wire[format!("@fmodule:{field}")] = json!("futureValue");
+            let props: FunctionModuleProperties = serde_json::from_value(wire).unwrap();
+            let obj = snapshot(&props);
+            for result in [
+                render_function_module(&obj).map(|_| ()),
+                merge_function_module(&obj, &content).map(|_| ()),
+            ] {
+                assert!(
+                    matches!(result, Err(ProjectionError::InvalidAffField { field, .. }) if field == path)
+                );
+            }
+        }
     }
 
     #[test]
@@ -1199,10 +1618,10 @@ mod tests {
     fn processing_and_release_enums_render_and_all_transitions_preserve_other_fields() {
         let fixture = module_snapshot(MODULE_XML).properties().clone();
         for &previous_type in PROCESSING_TYPES {
-            for &previous_release in RELEASE_STATES {
+            for &(previous_wire, previous_release) in RELEASE_STATES {
                 let mut original = fixture.clone();
-                original.processing_type = previous_type.to_owned();
-                original.release_state = previous_release.to_owned();
+                original.processing_type = Some(previous_type.into());
+                original.release_state = Some(previous_wire.into());
                 let baseline = snapshot(&original);
                 let content = render_function_module(&baseline).unwrap();
                 let document: Value = serde_json::from_str(&content).unwrap();
@@ -1212,18 +1631,37 @@ mod tests {
                 } else {
                     assert_eq!(document["releaseState"], previous_release);
                 }
-                assert!(document.get("rfcProperties").is_none());
-                assert!(document.get("updateProperties").is_none());
+                assert_eq!(
+                    document.get("rfcProperties").is_some(),
+                    previous_type == "rfc"
+                );
+                assert_eq!(
+                    document.get("updateProperties").is_some(),
+                    previous_type == "update"
+                );
                 assert_eq!(merge_function_module(&baseline, &content).unwrap(), None);
 
                 for &processing_type in PROCESSING_TYPES {
-                    for &release_state in RELEASE_STATES {
+                    for &(release_wire, release_state) in RELEASE_STATES {
                         let mut edited = document.clone();
                         edited["processingType"] = json!(processing_type);
                         edited["releaseState"] = json!(release_state);
                         let mut expected = original.clone();
-                        expected.processing_type = processing_type.to_owned();
-                        expected.release_state = release_state.to_owned();
+                        expected.processing_type = Some(processing_type.into());
+                        expected.release_state = Some(release_wire.into());
+                        if processing_type != previous_type {
+                            if processing_type == "rfc" {
+                                expected.basxml_enabled = Some(false);
+                                expected.abap_from_java = Some(false);
+                                expected.java_from_abap = Some(false);
+                                expected.java_remote = Some(false);
+                                expected.rfc_scope = Some(zadt::RfcScope::NotClassified);
+                                expected.rfc_version = Some(zadt::RfcVersion::Any);
+                            } else if processing_type == "update" {
+                                expected.update_task_kind =
+                                    Some(zadt::UpdateTaskKind::StartImmediate);
+                            }
+                        }
                         let payload =
                             merge_function_module(&baseline, &edited.to_string()).unwrap();
                         assert_eq!(
@@ -1240,14 +1678,23 @@ mod tests {
                             &render_function_module(&snapshot(&merged)).unwrap(),
                         )
                         .unwrap();
-                        assert_eq!(rendered, serde_json::from_value(edited).unwrap());
+                        assert_eq!(
+                            rendered.processing_type.adt_value().as_str(),
+                            processing_type
+                        );
+                        assert_eq!(rendered.release_state.adt_value().as_str(), release_wire);
+                        assert_eq!(rendered.rfc_properties.is_some(), processing_type == "rfc");
+                        assert_eq!(
+                            rendered.update_properties.is_some(),
+                            processing_type == "update"
+                        );
                     }
                 }
 
                 let mut omitted = document;
                 omitted.as_object_mut().unwrap().remove("releaseState");
                 let mut expected = original.clone();
-                expected.release_state = "notReleased".to_owned();
+                expected.release_state = Some(zadt::FunctionModuleReleaseState::NotReleased);
                 assert_eq!(
                     merge_function_module(&baseline, &omitted.to_string()).unwrap(),
                     (expected != original).then(|| serde_json::to_value(expected).unwrap())
@@ -1264,9 +1711,9 @@ mod tests {
             for value in ["", " ", "NORMAL", "unknown", "0"] {
                 let mut original = fixture.clone();
                 if field == "processingType" {
-                    original.processing_type = value.to_owned();
+                    original.processing_type = Some(value.into());
                 } else {
-                    original.release_state = value.to_owned();
+                    original.release_state = Some(value.into());
                 }
                 let baseline = snapshot(&original);
                 for result in [
@@ -1281,11 +1728,11 @@ mod tests {
     }
 
     #[test]
-    fn optional_defaults_are_noops_but_active_unbacked_blocks_are_rejected() {
+    fn optional_defaults_are_noops_in_every_mode() {
         let fixture = module_snapshot(MODULE_XML).properties().clone();
         for &previous_type in PROCESSING_TYPES {
             let mut original = fixture.clone();
-            original.processing_type = previous_type.to_owned();
+            original.processing_type = Some(previous_type.into());
             let baseline = snapshot(&original);
             let mut defaults: Value =
                 serde_json::from_str(&render_function_module(&baseline).unwrap()).unwrap();
@@ -1308,10 +1755,9 @@ mod tests {
                 None
             );
 
-            for (field, active_type, block) in [
+            for (field, block) in [
                 (
                     "rfcProperties",
-                    "rfc",
                     json!({
                         "basxmlEnabled": false, "rfcScope": "notClassified", "rfcVersion": "any",
                         "abapFromJava": false, "javaFromAbap": false, "javaRemote": false
@@ -1319,27 +1765,15 @@ mod tests {
                 ),
                 (
                     "updateProperties",
-                    "update",
                     json!({"updateTaskKind": "startImmediately"}),
                 ),
             ] {
-                for &target_type in PROCESSING_TYPES {
-                    let mut edited = defaults.clone();
-                    edited["processingType"] = json!(target_type);
-                    edited[field] = block.clone();
-                    let result = merge_function_module(&baseline, &edited.to_string());
-                    if previous_type == active_type || target_type == active_type {
-                        assert!(matches!(result,
-                            Err(ProjectionError::UnsupportedAffProperty { object_type: "FUNC", field: actual }) if actual == field));
-                    } else {
-                        let mut expected = original.clone();
-                        expected.processing_type = target_type.to_owned();
-                        assert_eq!(
-                            result.unwrap(),
-                            (expected != original).then(|| serde_json::to_value(expected).unwrap())
-                        );
-                    }
-                }
+                let mut edited = defaults.clone();
+                edited[field] = block;
+                assert_eq!(
+                    merge_function_module(&baseline, &edited.to_string()).unwrap(),
+                    None
+                );
             }
         }
     }
@@ -1350,7 +1784,6 @@ mod tests {
         let document: Value =
             serde_json::from_str(&render_function_module(&baseline).unwrap()).unwrap();
         for (field, value) in [
-            ("global", json!(true)),
             ("exceptionClasses", json!(true)),
             ("application", json!("A")),
             ("client", json!("100")),
@@ -1437,10 +1870,7 @@ mod tests {
         document["parameters"] = json!([{"name": "P", "description": "Parameter"}]);
         document["exceptions"] = json!([{"name": "E", "description": "Exception"}]);
         for (block, fields) in [
-            (
-                "",
-                &["formatVersion", "header", "processingType", "includeNumber"][..],
-            ),
+            ("", &["formatVersion", "header", "processingType"][..]),
             ("/header", &["description"][..]),
             (
                 "/rfcProperties",
@@ -1600,7 +2030,7 @@ mod tests {
     }
 
     #[test]
-    fn include_number_is_required_numeric_and_only_the_temp_placeholder_merges() {
+    fn include_number_is_omitted_and_supplied_assignments_are_rejected() {
         let baseline = module_snapshot(MODULE_XML).into_erased();
         let document: Value =
             serde_json::from_str(&render_function_module(&baseline).unwrap()).unwrap();
@@ -1617,7 +2047,8 @@ mod tests {
                 "{value:?}"
             );
         }
-        for value in ["0", "1", "01", "10", "99"] {
+        assert!(document.get("includeNumber").is_none());
+        for value in ["00", "0", "1", "01", "10", "99"] {
             let mut edited = document.clone();
             edited["includeNumber"] = json!(value);
             assert!(matches!(
@@ -1641,7 +2072,7 @@ mod tests {
     }
 
     #[test]
-    fn release_dates_are_validated_before_rejecting_the_unmapped_property() {
+    fn release_dates_are_validated_and_mapped() {
         let baseline = module_snapshot(MODULE_XML).into_erased();
         let document: Value =
             serde_json::from_str(&render_function_module(&baseline).unwrap()).unwrap();
@@ -1680,16 +2111,10 @@ mod tests {
         ] {
             let mut edited = document.clone();
             edited["releaseDate"] = json!(value);
-            assert!(
-                matches!(
-                    merge_function_module(&baseline, &edited.to_string()),
-                    Err(ProjectionError::UnsupportedAffProperty {
-                        object_type: "FUNC",
-                        field: "releaseDate"
-                    })
-                ),
-                "{value}"
-            );
+            let payload = merge_function_module(&baseline, &edited.to_string())
+                .unwrap()
+                .unwrap();
+            assert_eq!(payload["@fmodule:releaseDate"], value);
         }
     }
 }

@@ -117,6 +117,8 @@ fn merge(
 /// ```
 ///
 /// Both families expose description and original language through [`ProgramHeader`].
+/// An absent Include description renders as an empty string. Unchanged edits
+/// preserve absence, while adding or clearing a description writes an explicit string.
 /// The supported general fields differ between them, as documented on
 /// [`ProgramGeneralInformation`]. [`LogicalDatabase`] maps the Program database
 /// assignment and selection screen.
@@ -527,11 +529,12 @@ pub(crate) fn merge_include_properties(
         return Err(unsupported("generalInformation.editLocked"));
     }
 
-    ProjectedProgramProperties::from_include(original)?;
+    let previous = ProjectedProgramProperties::from_include(original)?;
     let mut merged = original.clone();
-    // AFF header.description      -> ADT description
-    // AFF header.originalLanguage -> ADT master_language, with language-code conversion
-    merged.description = edited.header.description;
+    // Preserve absent versus explicitly empty include descriptions on a no-op.
+    if edited.header.description != previous.header.description {
+        merged.description = Some(edited.header.description);
+    }
     merged.master_language =
         language_to_adt(&edited.header.original_language, "header.originalLanguage")?;
     // AFF generalInformation.fixPointArithmetic -> ADT fix_point_arithmetic.
@@ -590,7 +593,7 @@ impl ProjectedProgramProperties {
         let document = Self {
             format_version: PROGRAM_FORMAT.version().to_owned(),
             header: ProgramHeader {
-                description: properties.description.clone(),
+                description: properties.description.clone().unwrap_or_default(),
                 original_language: language_from_adt(
                     &properties.master_language,
                     "header.originalLanguage",
@@ -675,6 +678,50 @@ mod tests {
             INCLUDE_XML,
         )
         .into_erased()
+    }
+
+    #[test]
+    fn optional_include_descriptions_preserve_noops_and_support_edits() {
+        use zadt::ToXml;
+
+        let baseline = include();
+        let reference = crate::test_support::reference::<Include>(
+            "ZTEST",
+            "/sap/bc/adt/programs/includes/ztest",
+        );
+        for description in [None, Some(""), Some("Existing description")] {
+            let mut original = baseline.typed_properties::<Include>().unwrap().clone();
+            original.description = description.map(str::to_owned);
+            let obj = crate::test_support::properties(
+                &reference,
+                Include::MEDIA_TYPES[0],
+                "etag",
+                &original.to_xml().unwrap(),
+            )
+            .into_erased();
+            let content = render(&obj).unwrap();
+            let mut edited: Value = serde_json::from_str(&content).unwrap();
+            assert_eq!(
+                edited["header"]["description"],
+                description.unwrap_or_default()
+            );
+            assert_eq!(merge(&obj, &content).unwrap(), None);
+            edited["header"]["originalLanguage"] = "de".into();
+            let payload = merge(&obj, &edited.to_string()).unwrap().unwrap();
+            let mut expected = original.clone();
+            expected.master_language = "DE".into();
+            assert_eq!(payload, serde_json::to_value(&expected).unwrap());
+            for new_description in ["New description", ""] {
+                edited["header"]["description"] = new_description.into();
+                let payload = merge(&obj, &edited.to_string()).unwrap().unwrap();
+                expected.description = if new_description == description.unwrap_or_default() {
+                    original.description.clone()
+                } else {
+                    Some(new_description.into())
+                };
+                assert_eq!(payload, serde_json::to_value(&expected).unwrap());
+            }
+        }
     }
 
     #[test]
@@ -816,7 +863,7 @@ mod tests {
                 .unwrap(),
         )
         .unwrap();
-        assert_eq!(merged.description, "Updated include");
+        assert_eq!(merged.description.as_deref(), Some("Updated include"));
         assert_eq!(merged.master_language, "ZF");
         assert!(merged.fix_point_arithmetic);
         assert_eq!(

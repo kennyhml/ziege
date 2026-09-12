@@ -119,6 +119,4 @@ Unsupported metadata edits are rejected.
 | [SRVD — Service Definition](src/formats/srvd.rs) | Maps the header, origin, and definition or extension source type. |
 | [FUGR — Function Group](src/formats/fugr.rs) | Children are projected separately. Group and main-program metadata share the description field. |
 | [REPS — Function Group Include](src/formats/fugr.rs) | Requires the parent group name. Child discovery and folder assembly belong to the caller. |
-| [FUNC — Function Module](src/formats/fugr.rs) | `includeNumber` is temporarily fixed to `"00"`. Source is passed through without AFF pseudo-syntax conversion. |
-
-
+| [FUNC — Function Module](src/formats/fugr.rs) | Maps processing mode, RFC/update settings, release state/date, and global parameters. **AFF deviation:** required `includeNumber` is omitted until its ADT backing is available, so generated FUNC JSON does not fully conform to the schema. Supplied assignments are rejected. Source is passed through without AFF pseudo-syntax conversion. |

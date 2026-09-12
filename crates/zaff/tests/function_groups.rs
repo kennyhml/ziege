@@ -394,7 +394,7 @@ fn typed_and_runtime_inventory_names_sources_and_metadata_match_exactly() {
                             let expected = if file.name().ends_with(".fugr.json") {
                                 json!({"formatVersion": "1", "header": {"description": "Test", "originalLanguage": "en"}, "fixPointArithmetic": true})
                             } else if file.name().ends_with(".func.json") {
-                                json!({"formatVersion": "1", "header": {"description": "ftfrtat"}, "processingType": "normal", "includeNumber": "00"})
+                                json!({"formatVersion": "1", "header": {"description": "ftfrtat"}, "processingType": "normal"})
                             } else {
                                 json!({"formatVersion": "1", "header": {"description": if fixture.kind == "FUGR/F" { "Test" } else { "" }}, "includeType": if fixture.kind == "FUGR/F" { "functionGroup" } else { "include" }})
                             };
@@ -601,7 +601,13 @@ fn metadata_edits_return_complete_owner_payloads_without_mutating_baselines() {
             edited["processingType"] = json!("rfc");
             edited["releaseState"] = json!("released");
             expected["@fmodule:processingType"] = json!("rfc");
-            expected["@fmodule:releaseState"] = json!("released");
+            expected["@fmodule:releaseState"] = json!("external");
+            expected["@fmodule:basXMLEnabled"] = json!(false);
+            expected["@fmodule:abapFromJava"] = json!(false);
+            expected["@fmodule:javaFromAbap"] = json!(false);
+            expected["@fmodule:javaRemote"] = json!(false);
+            expected["@fmodule:rfcScope"] = json!("notClassified");
+            expected["@fmodule:rfcVersion"] = json!("any");
         }
         assert_eq!(
             properties.merge(&edited.to_string()).unwrap(),
@@ -826,7 +832,7 @@ fn headers_required_fields_types_and_description_limits_are_strict() {
         (
             MODULE,
             MODULE_JSON,
-            &["formatVersion", "header", "processingType", "includeNumber"][..],
+            &["formatVersion", "header", "processingType"][..],
             &["description"][..],
             74,
         ),
@@ -1063,8 +1069,8 @@ fn include_sparse_noops_editor_locks_and_module_placeholder_are_not_invented() {
     let projection = project(MODULE.baseline()).unwrap();
     let properties = metadata(&projection, MODULE_JSON);
     let doc = document(properties);
-    assert_eq!(doc["includeNumber"], "00");
-    for value in ["0", "01", "99"] {
+    assert!(doc.get("includeNumber").is_none());
+    for value in ["00", "0", "01", "99"] {
         let mut edited = doc.clone();
         edited["includeNumber"] = json!(value);
         assert!(matches!(

@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use zadt_macros::object_type;
 
 use super::super::{AbapLanguageVersion, GlobalWorkbenchType, ObjectKey, ToXml, WorkbenchVersion};
-use crate::{AdvertisedLink, AdvertisedObjectReference, MediaTypes, ResourceView, SourceObjectStatus};
+use crate::{
+    AdvertisedLink, AdvertisedObjectReference, MediaTypes, ResourceView, SourceObjectStatus,
+};
 
 #[object_type(
     properties = ProgramProperties,
@@ -266,9 +268,12 @@ pub struct IncludeProperties {
     #[serde(rename = "@adtcore:changedBy")]
     pub changed_by: String,
 
-    /// The include description.
-    #[serde(rename = "@adtcore:description")]
-    pub description: String,
+    /// The include description, when supplied by ADT.
+    #[serde(
+        rename = "@adtcore:description",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub description: Option<String>,
 
     /// The maximum length of the include description.
     #[serde(rename = "@adtcore:descriptionTextLimit")]
@@ -345,6 +350,26 @@ mod tests {
 
     fn parse_include(body: &str) -> Result<IncludeProperties, serde_xml_rs::Error> {
         serde_xml_rs::from_str(body)
+    }
+
+    #[test]
+    fn include_description_preserves_absent_empty_and_populated_values() {
+        let mut include = parse_include(INCLUDE_XML).unwrap();
+        for description in [None, Some(""), Some("Include description")] {
+            include.description = description.map(str::to_owned);
+            let xml = String::from_utf8(include.to_xml().unwrap()).unwrap();
+            assert_eq!(xml.contains("adtcore:description="), description.is_some());
+            assert_eq!(parse_include(&xml).unwrap(), include);
+            let json = serde_json::to_value(&include).unwrap();
+            assert_eq!(
+                json.get("@adtcore:description").and_then(|v| v.as_str()),
+                description
+            );
+            assert_eq!(
+                serde_json::from_value::<IncludeProperties>(json).unwrap(),
+                include
+            );
+        }
     }
 
     #[test]

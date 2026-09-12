@@ -151,6 +151,268 @@ fn function_group_resources(properties: &FunctionGroupProperties) -> ResourceVie
         .with_main(&properties.source_uri)
 }
 
+/// Function-module processing mode in ADT.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum FunctionModuleProcessingType {
+    Normal,
+    Rfc,
+    Update,
+    Other(String),
+}
+
+impl FunctionModuleProcessingType {
+    /// Returns the exact ADT wire value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Normal => "normal",
+            Self::Rfc => "rfc",
+            Self::Update => "update",
+            Self::Other(value) => value,
+        }
+    }
+}
+
+impl From<String> for FunctionModuleProcessingType {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "normal" => Self::Normal,
+            "rfc" => Self::Rfc,
+            "update" => Self::Update,
+            _ => Self::Other(value),
+        }
+    }
+}
+
+impl From<&str> for FunctionModuleProcessingType {
+    fn from(value: &str) -> Self {
+        value.to_owned().into()
+    }
+}
+
+impl Serialize for FunctionModuleProcessingType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for FunctionModuleProcessingType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(Self::from)
+    }
+}
+
+/// Function-module release state in ADT, distinct from AFF enum spellings.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum FunctionModuleReleaseState {
+    NotReleased,
+    External,
+    Internal,
+    Obsolete,
+    MarkedForRelease,
+    Other(String),
+}
+
+impl FunctionModuleReleaseState {
+    /// Returns the exact ADT wire value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::NotReleased => "notReleased",
+            Self::External => "external",
+            Self::Internal => "internal",
+            Self::Obsolete => "obsolete",
+            Self::MarkedForRelease => "markedForRelease",
+            Self::Other(value) => value,
+        }
+    }
+}
+
+impl From<String> for FunctionModuleReleaseState {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "notReleased" => Self::NotReleased,
+            "external" => Self::External,
+            "internal" => Self::Internal,
+            "obsolete" => Self::Obsolete,
+            "markedForRelease" => Self::MarkedForRelease,
+            _ => Self::Other(value),
+        }
+    }
+}
+
+impl From<&str> for FunctionModuleReleaseState {
+    fn from(value: &str) -> Self {
+        value.to_owned().into()
+    }
+}
+
+impl Serialize for FunctionModuleReleaseState {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for FunctionModuleReleaseState {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(Self::from)
+    }
+}
+
+/// Permitted RFC caller scope.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum RfcScope {
+    NotClassified,
+    FromSameClientAndUser,
+    FromSameSystem,
+    FromAnySystem,
+    Other(String),
+}
+
+impl RfcScope {
+    /// Returns the exact ADT wire value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::NotClassified => "notClassified",
+            Self::FromSameClientAndUser => "fromSameClientAndUser",
+            Self::FromSameSystem => "fromSameSystem",
+            Self::FromAnySystem => "fromAnySystem",
+            Self::Other(value) => value,
+        }
+    }
+}
+
+impl From<String> for RfcScope {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "notClassified" => Self::NotClassified,
+            "fromSameClientAndUser" => Self::FromSameClientAndUser,
+            "fromSameSystem" => Self::FromSameSystem,
+            "fromAnySystem" => Self::FromAnySystem,
+            _ => Self::Other(value),
+        }
+    }
+}
+
+impl From<&str> for RfcScope {
+    fn from(value: &str) -> Self {
+        value.to_owned().into()
+    }
+}
+
+impl Serialize for RfcScope {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for RfcScope {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(Self::from)
+    }
+}
+
+/// Permitted RFC serialization, displayed as the interface contract.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum RfcVersion {
+    Any,
+    FastSerializationRequired,
+    Other(String),
+}
+
+impl RfcVersion {
+    /// Returns the exact ADT wire value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Any => "any",
+            Self::FastSerializationRequired => "fastSerializationRequired",
+            Self::Other(value) => value,
+        }
+    }
+}
+
+impl From<String> for RfcVersion {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "any" => Self::Any,
+            "fastSerializationRequired" => Self::FastSerializationRequired,
+            _ => Self::Other(value),
+        }
+    }
+}
+
+impl From<&str> for RfcVersion {
+    fn from(value: &str) -> Self {
+        value.to_owned().into()
+    }
+}
+
+impl Serialize for RfcVersion {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for RfcVersion {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(Self::from)
+    }
+}
+
+/// Update-task execution mode in ADT.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum UpdateTaskKind {
+    StartImmediate,
+    StartDelayed,
+    ImmediateStartNoRestart,
+    CollectiveRun,
+    UnsupportedKind,
+    Other(String),
+}
+
+impl UpdateTaskKind {
+    /// Returns the exact ADT wire value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::StartImmediate => "startImmediate",
+            Self::StartDelayed => "startDelayed",
+            Self::ImmediateStartNoRestart => "immediateStartNoRestart",
+            Self::CollectiveRun => "collectiveRun",
+            Self::UnsupportedKind => "unsupportedKind",
+            Self::Other(value) => value,
+        }
+    }
+}
+
+impl From<String> for UpdateTaskKind {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "startImmediate" => Self::StartImmediate,
+            "startDelayed" => Self::StartDelayed,
+            "immediateStartNoRestart" => Self::ImmediateStartNoRestart,
+            "collectiveRun" => Self::CollectiveRun,
+            "unsupportedKind" => Self::UnsupportedKind,
+            _ => Self::Other(value),
+        }
+    }
+}
+
+impl From<&str> for UpdateTaskKind {
+    fn from(value: &str) -> Self {
+        value.to_owned().into()
+    }
+}
+
+impl Serialize for UpdateTaskKind {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for UpdateTaskKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(Self::from)
+    }
+}
+
 /// The complete function-module properties payload.
 #[derive(Clone, CreateProperties, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[create_properties(
@@ -159,10 +421,69 @@ fn function_group_resources(properties: &FunctionGroupProperties) -> ResourceVie
 )]
 #[serde(rename = "fmodule:abapFunctionModule", deny_unknown_fields)]
 pub struct FunctionModuleProperties {
-    #[serde(rename = "@fmodule:releaseState")]
-    pub release_state: String,
-    #[serde(rename = "@fmodule:processingType")]
-    pub processing_type: String,
+    #[serde(
+        rename = "@fmodule:releaseState",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub release_state: Option<FunctionModuleReleaseState>,
+
+    #[serde(
+        rename = "@fmodule:processingType",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub processing_type: Option<FunctionModuleProcessingType>,
+
+    /// Whether parameters are globally visible within the function group.
+    #[serde(rename = "@fmodule:global", skip_serializing_if = "Option::is_none")]
+    pub global: Option<bool>,
+
+    /// Whether classic RFC and basXML have equivalent semantics.
+    #[serde(
+        rename = "@fmodule:basXMLEnabled",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub basxml_enabled: Option<bool>,
+
+    #[serde(
+        rename = "@fmodule:abapFromJava",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub abap_from_java: Option<bool>,
+
+    #[serde(
+        rename = "@fmodule:javaFromAbap",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub java_from_abap: Option<bool>,
+
+    #[serde(
+        rename = "@fmodule:javaRemote",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub java_remote: Option<bool>,
+
+    /// Release date in the advertised YYYY-MM-DD representation.
+    #[serde(
+        rename = "@fmodule:releaseDate",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub release_date: Option<String>,
+
+    #[serde(
+        rename = "@fmodule:updateTaskKind",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub update_task_kind: Option<UpdateTaskKind>,
+
+    #[serde(rename = "@fmodule:rfcScope", skip_serializing_if = "Option::is_none")]
+    pub rfc_scope: Option<RfcScope>,
+
+    #[serde(
+        rename = "@fmodule:rfcVersion",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub rfc_version: Option<RfcVersion>,
+
     #[serde(rename = "@abapsource:sourceUri")]
     pub source_uri: String,
     #[for_create(identity, default, doc = "The function-module name.")]
@@ -208,6 +529,9 @@ impl ToXml for FunctionModuleProperties {
 
 /// The complete function-group include properties payload.
 #[derive(Clone, CreateProperties, Debug, Deserialize, Eq, PartialEq, Serialize)]
+// TODO: Add creation-template support for createIncludeStatement (defaults to true).
+// Generalize ClassTemplate/ClassTemplateProperty for reuse and confirm whether
+// property-only templates can omit the template name.
 #[create_properties(
     name = FunctionGroupIncludeCreateProperties,
     doc = "The sparse payload used to create an ABAP function-group include."
@@ -325,7 +649,10 @@ mod tests {
         let properties: FunctionModuleProperties = serde_xml_rs::from_str(MODULE_XML).unwrap();
 
         assert_eq!(properties.name, "ZZZZFUNC");
-        assert_eq!(properties.release_state, "notReleased");
+        assert_eq!(
+            properties.release_state,
+            Some(FunctionModuleReleaseState::NotReleased)
+        );
         assert_eq!(properties.container.name.as_deref(), Some("Z_TEST_GROUP"));
         assert_eq!(properties.links.len(), 8);
     }
@@ -338,6 +665,102 @@ mod tests {
         assert_eq!(properties.name, "LZ_TEST_GROUPTOP");
         assert_eq!(properties.container.name.as_deref(), Some("Z_TEST_GROUP"));
         assert_eq!(properties.links.len(), 6);
+    }
+
+    #[test]
+    fn module_attributes_preserve_wire_values_and_omissions() {
+        let xml =
+            include_str!("../../../tests/fixtures/function-module-bapi-transaction-commit.xml");
+        let properties: FunctionModuleProperties = serde_xml_rs::from_str(xml).unwrap();
+        assert_eq!(
+            properties.release_state,
+            Some(FunctionModuleReleaseState::External)
+        );
+        assert_eq!(properties.release_date.as_deref(), Some("1998-01-15"));
+        assert_eq!(
+            properties.processing_type,
+            Some(FunctionModuleProcessingType::Rfc)
+        );
+        assert_eq!(properties.rfc_scope, Some(RfcScope::NotClassified));
+        assert_eq!(properties.rfc_version, Some(RfcVersion::Any));
+        let baseline = serde_json::to_value(properties).unwrap();
+        for (attribute, values) in [
+            ("processingType", &["normal", "rfc", "update"][..]),
+            (
+                "releaseState",
+                &[
+                    "notReleased",
+                    "external",
+                    "internal",
+                    "obsolete",
+                    "markedForRelease",
+                ][..],
+            ),
+            (
+                "rfcScope",
+                &[
+                    "notClassified",
+                    "fromSameClientAndUser",
+                    "fromSameSystem",
+                    "fromAnySystem",
+                ][..],
+            ),
+            ("rfcVersion", &["any", "fastSerializationRequired"][..]),
+            (
+                "updateTaskKind",
+                &[
+                    "startImmediate",
+                    "startDelayed",
+                    "immediateStartNoRestart",
+                    "collectiveRun",
+                    "unsupportedKind",
+                ][..],
+            ),
+        ] {
+            let key = format!("@fmodule:{attribute}");
+            for value in values.iter().copied().chain(["", "futureValue"]) {
+                let mut wire = baseline.clone();
+                wire[&key] = serde_json::json!(value);
+                let loaded: FunctionModuleProperties =
+                    serde_json::from_value(wire.clone()).unwrap();
+                let xml = String::from_utf8(loaded.to_xml().unwrap()).unwrap();
+                assert!(xml.contains(&format!("fmodule:{attribute}=\"{value}\"")));
+                let reparsed: FunctionModuleProperties = serde_xml_rs::from_str(&xml).unwrap();
+                assert_eq!(reparsed, loaded);
+                assert_eq!(serde_json::to_value(reparsed).unwrap(), wire);
+            }
+            let mut wire = baseline.clone();
+            wire.as_object_mut().unwrap().remove(&key);
+            let loaded: FunctionModuleProperties = serde_json::from_value(wire.clone()).unwrap();
+            assert_eq!(serde_json::to_value(&loaded).unwrap(), wire);
+            assert!(
+                !String::from_utf8(loaded.to_xml().unwrap())
+                    .unwrap()
+                    .contains(&format!("fmodule:{attribute}="))
+            );
+        }
+        for attribute in [
+            "global",
+            "basXMLEnabled",
+            "abapFromJava",
+            "javaFromAbap",
+            "javaRemote",
+        ] {
+            let key = format!("@fmodule:{attribute}");
+            assert!(baseline.get(&key).is_none());
+            for value in [false, true] {
+                let mut wire = baseline.clone();
+                wire[&key] = serde_json::json!(value);
+                let loaded: FunctionModuleProperties =
+                    serde_json::from_value(wire.clone()).unwrap();
+                let xml = String::from_utf8(loaded.to_xml().unwrap()).unwrap();
+                assert!(xml.contains(&format!("fmodule:{attribute}=\"{value}\"")));
+                assert_eq!(
+                    serde_xml_rs::from_str::<FunctionModuleProperties>(&xml).unwrap(),
+                    loaded
+                );
+            }
+        }
     }
 
     #[test]
