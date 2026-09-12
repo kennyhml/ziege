@@ -14,7 +14,7 @@ mod srvd;
 pub use clas::{
     Class, ClassCategory, ClassCreateProperties, ClassCreatePropertiesBuilder,
     ClassCreatePropertiesBuilderError, ClassProperties, ClassSourceComponent,
-    ClassSourceProperties, ClassTemplate, ClassTemplateProperty,
+    ClassSourceProperties,
 };
 pub use dcls::{
     AccessControl, AccessControlCreateProperties, AccessControlCreatePropertiesBuilder,
@@ -34,13 +34,14 @@ pub use ddlx::{
     MetadataExtensionCreatePropertiesBuilderError, MetadataExtensionProperties,
 };
 pub use devc::{
-    Package, PackageAssignment, PackageAttributes, PackageProperties, PackageTransport,
-    PackageUseAccess, PackageUseAccesses,
+    Package, PackageAssignment, PackageAttributes, PackageExtensionAlias, PackageProperties,
+    PackageTranslation, PackageTransport, PackageUseAccess, PackageUseAccesses,
 };
 pub use doma::{
-    Domain, DomainContent, DomainCreateProperties, DomainCreatePropertiesBuilder,
-    DomainCreatePropertiesBuilderError, DomainFixedValue, DomainFixedValues,
-    DomainOutputInformation, DomainProperties, DomainTypeInformation, DomainValueInformation,
+    Domain, DomainAppendInformation, DomainContent, DomainCreateProperties,
+    DomainCreatePropertiesBuilder, DomainCreatePropertiesBuilderError, DomainFixedValue,
+    DomainFixedValues, DomainOutputInformation, DomainProperties, DomainTypeInformation,
+    DomainValueInformation,
 };
 pub use dtel::{DataElement, DataElementDefinition, DataElementProperties};
 pub use fugr::{

@@ -6,17 +6,25 @@
 //! format                      content.type_information
 //! outputCharacteristics       content.output_information
 //! valueTable                  content.value_information.value_table.name
-//! fixedValues                 fixed_values entries with an empty high value
-//! fixedValueIntervals         fixed_values entries with a nonempty high value
-//! fixedValueAppends           No name list exposed by ZADT
+//! fixedValues                 Own fixed_values entries with an empty high value
+//! fixedValueIntervals         Own fixed_values entries with a nonempty high value
+//! fixedValueAppends           Distinct contributing_append.name references
 //! ```
 //!
 //! Unchanged dimensions retain zero padding. Unchanged fixed-value lists retain
-//! their original positions and interleaving; edits replace entries in their
+//! their original positions and interleaving. Edits replace entries in their
 //! existing single/interval slots and append new entries after the last position.
-//! Value-table references retain metadata until their names change. The append
-//! flag is preserved, but nonempty AFF append lists cannot be merged.
+//! Value-table references retain metadata until their names change. Contributed
+//! values retain their original data and references when own values are edited.
+//! Append names are available only when an append contributes returned values.
+//! Changing the append-name list has no direct ADT backing and is rejected.
+//! SBD_DOMAIN represents ownership with `doma:contributingAppendRef`. An append
+//! object identifies its base through `doma:appendInformation/doma:appendedDomainRef`.
+//! Switch references on both structures are preserved. An append without returned
+//! values cannot be discovered from the base-domain payload alone.
 //! Optional `.doma.docu.json` documentation is declared but has no implemented backing.
+//! The observed domain documentation link opens SAP GUI. Raw ITF lines were not
+//! identified in the inspected property resources or discovery entries.
 //! Schema: <https://github.com/SAP/abap-file-formats/blob/main/file-formats/doma/doma-v1.json>.
 
 use crate::{
@@ -227,7 +235,7 @@ impl ProjectedDomainProperties {
         let mut document = Self {
             format_version: DOMAIN_FORMAT.version().to_owned(),
             header: CdsHeader::from_adt(
-                &properties.description,
+                properties.description.as_deref().unwrap_or_default(),
                 &properties.master_language,
                 &properties.abap_language_version,
             )?,
@@ -252,6 +260,20 @@ impl ProjectedDomainProperties {
         if let Some(values) = &properties.content.value_information {
             document.value_table.name = values.value_table.name.clone().unwrap_or_default();
             for value in &values.fixed_values.values {
+                if let Some(append) = &value.contributing_append {
+                    if let Some(name) = &append.name
+                        && !name.is_empty()
+                        && !document
+                            .fixed_value_appends
+                            .iter()
+                            .any(|entry| &entry.name == name)
+                    {
+                        document
+                            .fixed_value_appends
+                            .push(DomainNamedObject { name: name.clone() });
+                    }
+                    continue;
+                }
                 if value.high.is_empty() {
                     document.fixed_values.push(DomainSingleValue {
                         fixed_value: value.low.clone(),
@@ -286,7 +308,8 @@ fn merge(
     let original = obj.typed_properties::<Domain>()?;
     let edited: ProjectedDomainProperties = parse_object(edited)?;
     edited.validate()?;
-    if !edited.fixed_value_appends.is_empty() {
+    let previous = ProjectedDomainProperties::from_adt(original)?;
+    if edited.fixed_value_appends != previous.fixed_value_appends {
         return Err(ProjectionError::UnsupportedAffProperty {
             object_type: "DOMA",
             field: "fixedValueAppends",
@@ -302,9 +325,10 @@ fn merge(
             message: "ADT represents an empty high value as a single value".to_owned(),
         });
     }
-    let previous = ProjectedDomainProperties::from_adt(original)?;
     let mut merged = original.clone();
-    merged.description = edited.header.description;
+    if edited.header.description != original.description.as_deref().unwrap_or_default() {
+        merged.description = Some(edited.header.description);
+    }
     merged.master_language =
         language_to_adt(&edited.header.original_language, "header.originalLanguage")?;
     if edited.header.abap_language_version != previous.header.abap_language_version {
@@ -382,18 +406,21 @@ fn merge_values(
     let mut position = 0;
     for old in original {
         position = position.max(number(&old.position, "fixedValues.position")?);
+        if old.contributing_append.is_some() {
+            result.push(old.clone());
+            continue;
+        }
         let next = if old.high.is_empty() {
             singles.next()
         } else {
             intervals.next()
         };
         if let Some((low, high, text)) = next {
-            result.push(DomainFixedValue {
-                position: old.position.clone(),
-                low,
-                high,
-                text,
-            });
+            let mut value = old.clone();
+            value.low = low;
+            value.high = high;
+            value.text = text;
+            result.push(value);
         }
     }
     for (low, high, text) in singles.chain(intervals) {
@@ -402,6 +429,8 @@ fn merge_values(
             .filter(|p| *p <= 9999)
             .ok_or_else(|| invalid("fixedValues.position", "position overflow"))?;
         result.push(DomainFixedValue {
+            contributing_append: None,
+            switch: None,
             position: format!("{position:04}"),
             low,
             high,
@@ -453,7 +482,7 @@ mod tests {
                 serde_json::from_value(mapping.merge(&edited.to_string()).unwrap().unwrap())
                     .unwrap();
             let mut expected = original;
-            expected.description = "Changed domain".to_owned();
+            expected.description = Some("Changed domain".to_owned());
             assert_eq!(merged, expected);
             edited["format"]["length"] = json!(23);
             edited["valueTable"] = json!({"name":"Z_NEW"});
@@ -480,6 +509,71 @@ mod tests {
     }
 
     #[test]
+    fn appended_values_remain_owned_by_their_append() {
+        let original = snapshot(
+            "TEST_SBD_DOMA_AIE_WITH_APPENDS",
+            include_bytes!("../../../zadt/tests/fixtures/domain-with-appends.xml"),
+        );
+        let properties = original.properties().clone();
+        let obj = original.into_erased();
+        let content = render(&obj).unwrap();
+        let mut edited: Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(
+            edited["fixedValueAppends"],
+            json!([{"name":"TEST_SBD_DOMA_AIE_APPEND"}])
+        );
+        assert_eq!(edited["fixedValues"].as_array().unwrap().len(), 2);
+        assert_eq!(edited["fixedValueIntervals"].as_array().unwrap().len(), 1);
+        assert_eq!(merge(&obj, &content).unwrap(), None);
+        edited["fixedValues"][0]["description"] = json!("Changed base value");
+        let merged: DomainProperties =
+            serde_json::from_value(merge(&obj, &edited.to_string()).unwrap().unwrap()).unwrap();
+        let old = &properties
+            .content
+            .value_information
+            .as_ref()
+            .unwrap()
+            .fixed_values
+            .values;
+        let new = &merged
+            .content
+            .value_information
+            .as_ref()
+            .unwrap()
+            .fixed_values
+            .values;
+        assert_eq!(new.last(), old.last());
+        assert_eq!(new[0].text, "Changed base value");
+        let reparsed = snapshot("TEST_SBD_DOMA_AIE_WITH_APPENDS", &merged.to_xml().unwrap());
+        assert_eq!(reparsed.properties(), &merged);
+        assert_eq!(
+            merge(&reparsed.into_erased(), &edited.to_string()).unwrap(),
+            None
+        );
+
+        let append = snapshot(
+            "TEST_SBD_DOMA_AIE_APPEND",
+            include_bytes!("../../../zadt/tests/fixtures/domain-append.xml"),
+        );
+        assert_eq!(
+            append
+                .properties()
+                .content
+                .append_information
+                .as_ref()
+                .unwrap()
+                .appended_domain
+                .as_ref()
+                .unwrap()
+                .name
+                .as_deref(),
+            Some("TEST_SBD_DOMA_AIE_WITH_APPENDS")
+        );
+        let obj = append.into_erased();
+        assert_eq!(merge(&obj, &render(&obj).unwrap()).unwrap(), None);
+    }
+
+    #[test]
     fn fixed_value_edits_preserve_interleaving_and_roundtrip() {
         let mut original = snapshot(
             "XFELD",
@@ -492,6 +586,8 @@ mod tests {
         values.fixed_values.values.insert(
             1,
             DomainFixedValue {
+                contributing_append: None,
+                switch: None,
                 position: "0010".to_owned(),
                 low: "A".to_owned(),
                 high: "Z".to_owned(),

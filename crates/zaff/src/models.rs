@@ -106,16 +106,16 @@ pub enum AbapLanguageVersion {
 }
 
 impl AbapLanguageVersion {
-    /// Converts from ADT using the family's Standard spelling, such as `"X"` or `"0"`.
-    /// Absent and blank values also mean Standard; errors return the unsupported wire value.
+    /// Converts named ADT values and legacy codes using the family Standard code.
+    /// Absent and blank values also mean Standard. Errors return the unsupported wire value.
     pub fn from_adt<'a>(
         value: Option<&'a AdtAbapLanguageVersion>,
         standard: &str,
     ) -> Result<Self, &'a str> {
         match value.map(AdtAbapLanguageVersion::as_str) {
-            None | Some("" | " ") => Ok(Self::Standard),
-            Some("2") => Ok(Self::KeyUser),
-            Some("5") => Ok(Self::CloudDevelopment),
+            None | Some("" | " " | "standard") => Ok(Self::Standard),
+            Some("2" | "keyUser") => Ok(Self::KeyUser),
+            Some("5" | "cloudDevelopment") => Ok(Self::CloudDevelopment),
             Some(value) if value == standard => Ok(Self::Standard),
             Some(value) => Err(value),
         }
@@ -288,6 +288,24 @@ mod tests {
         for &(bcp47, sap) in LANGUAGES {
             assert_eq!(language_from_adt(sap, "language").unwrap(), bcp47);
             assert_eq!(language_to_adt(bcp47, "language").unwrap(), sap);
+        }
+    }
+
+    #[test]
+    fn accepts_named_language_versions_from_live_adt_properties() {
+        for standard in ["X", "0"] {
+            for (wire, expected) in [
+                ("standard", AbapLanguageVersion::Standard),
+                ("keyUser", AbapLanguageVersion::KeyUser),
+                ("cloudDevelopment", AbapLanguageVersion::CloudDevelopment),
+            ] {
+                let value = AdtAbapLanguageVersion::from(wire);
+                assert_eq!(
+                    AbapLanguageVersion::from_adt(Some(&value), standard),
+                    Ok(expected)
+                );
+                assert_eq!(value.as_str(), wire);
+            }
         }
     }
 

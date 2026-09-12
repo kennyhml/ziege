@@ -8,16 +8,25 @@
 //! softwareComponent            transport.software_component.name
 //! transportLayer               transport.transport_layer.name
 //! supportsRecordChanges        attributes.record_changes
-//! isAddingObjectsNotAllowed    !attributes.adding_objects_allowed
+//! isAddingObjectsNotAllowed    attributes.adding_objects_not_allowed (misnamed ADT wire attribute)
 //! isEncapsulated               attributes.encapsulated
 //! defaultAbapLanguageVersion    attributes.language_version
-//! switch                       No implemented backing
+//! switch                       switch.name
 //! ```
 //!
 //! Header description and original language map to ADT description/master_language.
 //! Use accesses map interface names and severities. Unchanged names retain their
-//! complete references, including when reordered; new names get name-only references.
+//! complete references, including when reordered. New names get name-only references.
 //! Assignment changes clear stale descriptions while preserving capability flags.
+//!
+//! SPAK_ST_PACKAGES serializes IS_ADDING_OBJECTS_NOT_ALLOWED under the misleading
+//! XML name `pak:isAddingObjectsAllowed`, without negation. The AFF mapping uses
+//! the underlying negative meaning directly. `pak:languageVersion` contains raw
+//! package-kind codes, so changing its AFF value to Standard writes an empty string.
+//!
+//! Switch names map through `pak:switch`. Unchanged assignments retain the switch
+//! state, URI, and description. Self package references, extension aliases,
+//! translation settings, and software-component type metadata remain on the baseline.
 //! Schema: <https://github.com/SAP/abap-file-formats/blob/main/file-formats/devc/devc-v1.json>.
 
 use crate::{
@@ -194,7 +203,7 @@ impl ProjectedPackageProperties {
         let document = Self {
             format_version: PACKAGE_FORMAT.version().to_owned(),
             header: PackageHeader {
-                description: p.description.clone(),
+                description: p.description.clone().unwrap_or_default(),
                 original_language: language_from_adt(
                     &p.master_language,
                     "header.originalLanguage",
@@ -207,12 +216,16 @@ impl ProjectedPackageProperties {
                     .as_ref()
                     .and_then(|v| v.name.clone())
                     .unwrap_or_default(),
-                switch: String::new(),
+                switch: p
+                    .switch
+                    .as_ref()
+                    .and_then(|v| v.name.clone())
+                    .unwrap_or_default(),
                 application_component: p.application_component.name.clone(),
                 software_component: p.transport.software_component.name.clone(),
                 transport_layer: p.transport.transport_layer.name.clone(),
                 supports_record_changes: p.attributes.record_changes,
-                is_adding_objects_not_allowed: !p.attributes.adding_objects_allowed,
+                is_adding_objects_not_allowed: p.attributes.adding_objects_not_allowed,
                 is_encapsulated: p.attributes.encapsulated,
                 default_abap_language_version: AbapLanguageVersion::from_adt(
                     Some(&p.attributes.language_version),
@@ -249,6 +262,8 @@ fn assignment(value: &mut PackageAssignment, name: String) {
     if value.name != name {
         value.name = name;
         value.description.clear();
+        value.assignment_type = None;
+        value.type_description = None;
     }
 }
 
@@ -259,29 +274,34 @@ fn merge(
     let original = obj.typed_properties::<Package>()?;
     let edited: ProjectedPackageProperties = parse_object(edited)?;
     edited.validate()?;
-    if !edited.general_information.switch.is_empty() {
-        return Err(ProjectionError::UnsupportedAffProperty {
-            object_type: "DEVC",
-            field: "generalInformation.switch",
-        });
-    }
     let previous = ProjectedPackageProperties::from_adt(original)?;
     let mut merged = original.clone();
-    merged.description = edited.header.description;
+    if edited.header.description != original.description.as_deref().unwrap_or_default() {
+        merged.description = Some(edited.header.description);
+    }
     merged.master_language =
         language_to_adt(&edited.header.original_language, "header.originalLanguage")?;
     let e = edited.general_information;
     let p = previous.general_information;
     merged.attributes.package_type = e.package_type.adt_value().to_owned();
     merged.attributes.record_changes = e.supports_record_changes;
-    merged.attributes.adding_objects_allowed = !e.is_adding_objects_not_allowed;
+    merged.attributes.adding_objects_not_allowed = e.is_adding_objects_not_allowed;
     merged.attributes.encapsulated = e.is_encapsulated;
     if e.default_abap_language_version != p.default_abap_language_version {
-        merged.attributes.language_version = e.default_abap_language_version.to_adt_reps();
+        // SPAK_ST_PACKAGES writes the raw package-kind value, whose Standard is blank.
+        merged.attributes.language_version = e
+            .default_abap_language_version
+            .to_adt(zadt::AbapLanguageVersion::Other(String::new()));
     }
     if e.super_package != p.super_package {
         merged.super_package = (!e.super_package.is_empty()).then_some(AdvertisedObjectReference {
             name: Some(e.super_package),
+            ..Default::default()
+        });
+    }
+    if e.switch != p.switch {
+        merged.switch = (!e.switch.is_empty()).then_some(zadt::AdvertisedSwitchReference {
+            name: Some(e.switch),
             ..Default::default()
         });
     }
@@ -336,6 +356,71 @@ mod tests {
     use serde_json::{Value, json};
 
     #[test]
+    fn switch_edits_preserve_reference_metadata_and_package_flags_match_wire_semantics() {
+        use zadt::{AdvertisedSwitchReference, ToXml};
+        let reference = test_support::reference::<Package>(
+            "SADT_TOOLS_CORE",
+            "/sap/bc/adt/packages/sadt_tools_core",
+        );
+        let loaded = test_support::properties(
+            &reference,
+            Package::MEDIA_TYPES[0],
+            "etag",
+            include_bytes!("../../../zadt/tests/fixtures/package-sadt-tools-core.xml"),
+        );
+        let mut original = loaded.properties().clone();
+        original.switch = Some(AdvertisedSwitchReference {
+            name: Some("DTINF_FW".into()),
+            uri: Some("/sap/bc/adt/vit/wb/object_type/sfsw6s/object_name/DTINF_FW".into()),
+            state: Some("off".into()),
+            description: Some("Information Framework Switch".into()),
+            ..Default::default()
+        });
+        original.attributes.adding_objects_not_allowed = false;
+        original.attributes.language_version = zadt::AbapLanguageVersion::CloudDevelopment;
+        let obj = test_support::properties(
+            &reference,
+            Package::MEDIA_TYPES[0],
+            "etag",
+            &original.to_xml().unwrap(),
+        )
+        .into_erased();
+        let content = render(&obj).unwrap();
+        assert_eq!(merge(&obj, &content).unwrap(), None);
+        let mut edited: Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(edited["generalInformation"]["switch"], "DTINF_FW");
+        assert!(
+            edited["generalInformation"]
+                .get("isAddingObjectsNotAllowed")
+                .is_none()
+        );
+        edited["header"]["description"] = json!("Changed");
+        let payload = merge(&obj, &edited.to_string()).unwrap().unwrap();
+        assert_eq!(
+            payload["pak:switch"],
+            serde_json::to_value(&original).unwrap()["pak:switch"]
+        );
+        edited["generalInformation"]["switch"] = json!("Z_SWITCH");
+        edited["generalInformation"]["isAddingObjectsNotAllowed"] = json!(true);
+        edited["generalInformation"]["defaultAbapLanguageVersion"] = json!("standard");
+        let payload = merge(&obj, &edited.to_string()).unwrap().unwrap();
+        assert_eq!(payload["pak:switch"], json!({"@adtcore:name":"Z_SWITCH"}));
+        assert_eq!(
+            payload["pak:attributes"]["@pak:isAddingObjectsAllowed"],
+            true
+        );
+        assert_eq!(payload["pak:attributes"]["@pak:languageVersion"], "");
+        edited["generalInformation"]["switch"] = json!("");
+        assert!(
+            merge(&obj, &edited.to_string())
+                .unwrap()
+                .unwrap()
+                .get("pak:switch")
+                .is_none()
+        );
+    }
+
+    #[test]
     fn package_noops_and_edits_preserve_capabilities_and_reference_metadata() {
         let reference = test_support::reference::<Package>(
             "SADT_TOOLS_CORE",
@@ -363,7 +448,7 @@ mod tests {
         edited["header"]["description"] = json!("Changed package");
         let merged = mapping.merge(&edited.to_string()).unwrap().unwrap();
         let mut expected = original.clone();
-        expected.description = "Changed package".to_owned();
+        expected.description = Some("Changed package".to_owned());
         assert_eq!(merged, serde_json::to_value(&expected).unwrap());
         edited["generalInformation"]["isAddingObjectsNotAllowed"] = json!(true);
         edited["generalInformation"]["superPackage"] = json!("Z_PARENT");
@@ -371,7 +456,7 @@ mod tests {
         edited["useAccesses"][0]["severity"] = json!("warning");
         let merged: PackageProperties =
             serde_json::from_value(mapping.merge(&edited.to_string()).unwrap().unwrap()).unwrap();
-        assert!(!merged.attributes.adding_objects_allowed);
+        assert!(merged.attributes.adding_objects_not_allowed);
         assert_eq!(
             merged.attributes.adding_objects_allowed_editable,
             original.attributes.adding_objects_allowed_editable
@@ -401,13 +486,9 @@ mod tests {
         assert!(access.package_interface.uri.is_none());
         assert!(access.package_ref.is_none());
         edited["generalInformation"]["switch"] = json!("Z_SWITCH");
-        assert!(matches!(
-            mapping.merge(&edited.to_string()),
-            Err(ProjectionError::UnsupportedAffProperty {
-                field: "generalInformation.switch",
-                ..
-            })
-        ));
+        let merged: PackageProperties =
+            serde_json::from_value(mapping.merge(&edited.to_string()).unwrap().unwrap()).unwrap();
+        assert_eq!(merged.switch.unwrap().name.as_deref(), Some("Z_SWITCH"));
         edited["generalInformation"] = json!({});
         assert!(mapping.merge(&edited.to_string()).is_err());
     }

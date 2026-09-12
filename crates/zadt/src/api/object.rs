@@ -584,9 +584,9 @@ mod tests {
     use crate::{
         AbapLanguageVersion, AccessMode, AdtRequest, AdtResponse, AdtUri,
         AdvertisedObjectReference, Class, ClassCategory, ClassCreateProperties, ClassProperties,
-        ClassTemplate, Client, CompatibilityError, Discovery, FunctionGroup, FunctionGroupInclude,
+        Client, CompatibilityError, Discovery, FunctionGroup, FunctionGroupInclude,
         FunctionGroupIncludeCreateProperties, FunctionModule, FunctionModuleCreateProperties,
-        ObjectType, Package, Stateful, Transport,
+        ObjectType, Package, SourceTemplate, Stateful, Transport,
     };
 
     const DISCOVERY_XML: &[u8] = include_bytes!("../../tests/fixtures/discovery.xml");
@@ -1043,7 +1043,7 @@ mod tests {
             .description("Created class")
             .abap_language_version(AbapLanguageVersion::CloudDevelopment)
             .category(ClassCategory::ExceptionClass)
-            .template(ClassTemplate::new("ZOTHERCLASS"))
+            .template(SourceTemplate::new("ZOTHERCLASS"))
             .package("$TMP")
             .build()
             .unwrap();
@@ -1068,7 +1068,7 @@ mod tests {
         let properties = ClassCreateProperties::builder()
             .description("Generated class")
             .template(
-                ClassTemplate::new("IF_FOR_AUTO_CLASS_GENERATION")
+                SourceTemplate::new("IF_FOR_AUTO_CLASS_GENERATION")
                     .property("CCAU_CONTENT", "<cds:cdstobetested/>")
                     .property(
                         "Content-Type",

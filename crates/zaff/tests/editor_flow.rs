@@ -339,7 +339,7 @@ async fn open_program(script: &Script, etag: Option<&str>) -> (Client<Discovery>
 
 fn expect_metadata_save(script: &Script, result: AdtResponse) -> Value {
     let mut expected = program();
-    expected.description = "Edited in the LSP".to_owned();
+    expected.description = Some("Edited in the LSP".to_owned());
     script.expect(
         request(
             Method::PUT,
@@ -375,7 +375,7 @@ async fn metadata_save_reprojects_returned_or_explicitly_refetched_representatio
 
         // Server normalization must win over the submitted editor buffer.
         let mut saved = program();
-        saved.description = "Server-confirmed description".to_owned();
+        saved.description = Some("Server-confirmed description".to_owned());
         saved.changed_by = "OTHER_EDITOR".into();
         let result = if returns_representation {
             response(

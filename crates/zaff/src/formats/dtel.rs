@@ -91,7 +91,9 @@ fn merge(
     //   AFF header.originalLanguage  -> ADT master_language
     //
     // The language was converted above, for example from AFF "en" to ADT "EN".
-    merged.description = Some(edited.header.description);
+    if edited.header.description != original.description.as_deref().unwrap_or_default() {
+        merged.description = Some(edited.header.description);
+    }
     merged.master_language = Some(language);
 
     // AFF header.abapLanguageVersion maps to ADT abap_language_version.
@@ -663,7 +665,7 @@ impl ProjectedDataElementProperties {
             // Read the header from the top-level ADT properties. Unlike the
             // optional ADT fields, AFF requires a description and language.
             header: DataElementHeader {
-                description: required(properties.description.clone(), "header.description")?,
+                description: properties.description.clone().unwrap_or_default(),
                 original_language: language_from_adt(
                     required(
                         properties.master_language.as_deref(),

@@ -35,11 +35,14 @@ pub struct DataDefinitionProperties {
     pub source_origin: String,
 
     /// The semantic DDL source type, such as `view`.
-    #[serde(rename = "@ddl:source_type")]
+    #[serde(rename = "@ddl:source_type", skip_serializing_if = "Option::is_none")]
     pub source_type: Option<String>,
 
     /// The server-provided description of the semantic source type.
-    #[serde(rename = "@ddl:source_type_description")]
+    #[serde(
+        rename = "@ddl:source_type_description",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub source_type_description: Option<String>,
 
     /// The server-provided description of the source origin.
@@ -114,8 +117,11 @@ pub struct DataDefinitionProperties {
 
     /// The Data Definition description.
     #[for_create(doc = "The description, limited by SAP to 60 characters.")]
-    #[serde(rename = "@adtcore:description")]
-    pub description: String,
+    #[serde(
+        rename = "@adtcore:description",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub description: Option<String>,
 
     /// The language in which language-dependent values are represented.
     #[serde(rename = "@adtcore:language")]

@@ -98,12 +98,14 @@ fn merge(
     // AFF header.description       -> ADT description
     // AFF header.originalLanguage  -> ADT master_language, converted from BCP47
     // AFF fixPointArithmetic       -> ADT fix_point_arithmetic
-    merged.description = edited.header.description;
+    if edited.header.description != original.description.as_deref().unwrap_or_default() {
+        merged.description = Some(edited.header.description);
+    }
     merged.master_language =
         language_to_adt(&edited.header.original_language, "header.originalLanguage")?;
     merged.fix_point_arithmetic = edited.fix_point_arithmetic;
     if edited.status != previous.status {
-        merged.source_object_status = Some(edited.status.adt_value());
+        merged.source_object_status = edited.status.adt_value();
     }
 
     // AFF Standard can represent absent, blank, or "X" ADT values.
@@ -208,15 +210,19 @@ pub struct FunctionGroupHeader {
 /// ```text
 /// AFF value        ADT source_object_status
 /// ---------        ------------------------
-/// notClassified    unknown
+/// notClassified    Attribute omitted when clearing
 /// sapProgram       SAPStandardProduction
 /// customerProgram  customerProduction
 /// systemProgram    system
 /// testProgram      test
 /// ```
 ///
-/// Absent or empty ADT values also render as `notClassified`, omitted from JSON.
+/// Absent, empty, or literal `unknown` ADT values render as `notClassified`,
+/// omitted from JSON.
 /// Unchanged values preserve their original spelling. Other ADT strings are rejected.
+/// SADT_ABAP_SOURCE_MAIN_OBJECT maps only the four classified values. Clearing
+/// status omits the attribute. Sending the literal `unknown` was observed to store
+/// the truncated value `u` in the backend one-character field.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FunctionGroupStatus {
@@ -232,8 +238,10 @@ impl FunctionGroupStatus {
     fn from_adt(value: Option<&zadt::SourceObjectStatus>) -> Result<Self, ProjectionError> {
         use zadt::SourceObjectStatus;
         match value {
-            None | Some(SourceObjectStatus::Unknown) => Ok(Self::NotClassified),
-            Some(SourceObjectStatus::Other(value)) if value.is_empty() => Ok(Self::NotClassified),
+            None => Ok(Self::NotClassified),
+            Some(SourceObjectStatus::Other(value)) if value.is_empty() || value == "unknown" => {
+                Ok(Self::NotClassified)
+            }
             Some(SourceObjectStatus::SapStandardProduction) => Ok(Self::SapProgram),
             Some(SourceObjectStatus::CustomerProduction) => Ok(Self::CustomerProgram),
             Some(SourceObjectStatus::System) => Ok(Self::SystemProgram),
@@ -245,14 +253,14 @@ impl FunctionGroupStatus {
         }
     }
 
-    const fn adt_value(self) -> zadt::SourceObjectStatus {
-        match self {
-            Self::NotClassified => zadt::SourceObjectStatus::Unknown,
+    const fn adt_value(self) -> Option<zadt::SourceObjectStatus> {
+        Some(match self {
+            Self::NotClassified => return None,
             Self::SapProgram => zadt::SourceObjectStatus::SapStandardProduction,
             Self::CustomerProgram => zadt::SourceObjectStatus::CustomerProduction,
             Self::SystemProgram => zadt::SourceObjectStatus::System,
             Self::TestProgram => zadt::SourceObjectStatus::Test,
-        }
+        })
     }
 
     const fn is_default(&self) -> bool {
@@ -265,7 +273,7 @@ impl ProjectedFunctionGroupProperties {
         let document = Self {
             format_version: FUNCTION_GROUP_FORMAT.version().to_owned(),
             header: FunctionGroupHeader {
-                description: properties.description.clone(),
+                description: properties.description.clone().unwrap_or_default(),
                 original_language: language_from_adt(
                     &properties.master_language,
                     "header.originalLanguage",
@@ -353,7 +361,9 @@ fn merge_include(
             });
         }
         let mut merged = original.clone();
-        merged.description = edited.header.description;
+        if edited.header.description != original.description.as_deref().unwrap_or_default() {
+            merged.description = Some(edited.header.description);
+        }
         merged.locked_by_editor = edited.edit_locked;
         if merged == *original {
             return Ok(None);
@@ -441,7 +451,7 @@ impl ProjectedFunctionGroupIncludeProperties {
             if obj.key().workbench_type() == &FunctionGroup::WORKBENCH_TYPE {
                 let properties = obj.typed_properties::<FunctionGroup>()?;
                 (
-                    properties.description.clone(),
+                    properties.description.clone().unwrap_or_default(),
                     properties.locked_by_editor,
                     FunctionGroupIncludeType::FunctionGroup,
                 )
@@ -505,7 +515,7 @@ impl ProjectedFunctionModuleProperties {
         let document = Self {
             format_version: FUNCTION_MODULE_FORMAT.version().to_owned(),
             header: FunctionModuleHeader {
-                description: properties.description.clone(),
+                description: properties.description.clone().unwrap_or_default(),
             },
             processing_type,
             rfc_properties: if processing_type == FunctionModuleProcessingType::Rfc {
@@ -611,7 +621,9 @@ fn merge_function_module(
     }
 
     let mut merged = original.clone();
-    merged.description = edited.header.description;
+    if edited.header.description != original.description.as_deref().unwrap_or_default() {
+        merged.description = Some(edited.header.description);
+    }
     if type_changed {
         merged.processing_type = Some(edited.processing_type.adt_value());
     }
@@ -703,6 +715,20 @@ fn merge_function_module(
 /// and accepts its absence on merge. Generated FUNC JSON therefore does not fully
 /// conform to the upstream schema. Any supplied number, including `"00"`, is
 /// rejected with `UnsupportedAffProperty` after validating its shape.
+/// The assignment is stored in `TFDIR-INCLUDE`. A read-only SQL-console request
+/// through `/sap/bc/adt/datapreview/freestyle` can retrieve it, but the function-module
+/// properties do not expose it. Such a lookup would require explicit enrichment
+/// outside this pure projection.
+///
+/// # Backend Behavior
+///
+/// The remaining unbacked fields are absent from the inspected FUNC properties
+/// structure and ST_FB_ADT_FUNC transformation. For represented fields, a complete
+/// update payload does not guarantee that every edit is applied. The inspected
+/// CL_FB_ADT_RES_FUNC_PROPS handler returns release/global metadata without applying
+/// edits to those fields and returns only headers after saving. Refetch properties
+/// before reprojecting the stored state. Description updates can also adjust an
+/// existing synchronized ABAP Doc short text in source.
 ///
 /// Optional false flags, empty strings, empty arrays, and `notReleased` are
 /// omitted on render. Their explicit defaults are accepted on merge. Omitted
@@ -1266,7 +1292,13 @@ mod tests {
                         .source_object_status
                         .as_ref()
                         .map(zadt::SourceObjectStatus::as_str),
-                    if status == aff { wire } else { Some(expected) }
+                    if status == aff {
+                        wire
+                    } else if status == "notClassified" {
+                        None
+                    } else {
+                        Some(expected)
+                    }
                 );
             }
         }
@@ -1302,7 +1334,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let mut expected = original.clone();
-        expected.description = "Updated function module".to_owned();
+        expected.description = Some("Updated function module".to_owned());
         assert_eq!(payload, serde_json::to_value(&expected).unwrap());
         assert_eq!(
             serde_json::from_value::<FunctionModuleProperties>(payload).unwrap(),
@@ -1343,7 +1375,7 @@ mod tests {
         assert_eq!(merge_function_module(&obj, &content).unwrap(), None);
         edited["header"]["description"] = json!("Changed");
         let mut expected = obj.typed_properties::<FunctionModule>().unwrap().clone();
-        expected.description = "Changed".into();
+        expected.description = Some("Changed".into());
         assert_eq!(
             merge_function_module(&obj, &edited.to_string()).unwrap(),
             Some(serde_json::to_value(&expected).unwrap())
@@ -1545,7 +1577,7 @@ mod tests {
         let mut edited: Value = serde_json::from_str(&content).unwrap();
         edited["header"]["description"] = json!("New description");
         let mut expected = original.clone();
-        expected.description = "New description".into();
+        expected.description = Some("New description".into());
         assert_eq!(
             merge_function_module(&obj, &edited.to_string()).unwrap(),
             Some(serde_json::to_value(expected).unwrap())
@@ -2015,9 +2047,9 @@ mod tests {
             .typed_properties::<FunctionModule>()
             .unwrap()
             .clone();
-        properties.description = "\u{00e9}".repeat(74);
+        properties.description = Some("\u{00e9}".repeat(74));
         render_function_module(&snapshot(&properties)).unwrap();
-        properties.description.push('x');
+        properties.description.as_mut().unwrap().push('x');
         assert!(matches!(
             render_function_module(&snapshot(&properties)),
             Err(ProjectionError::Validation(_))

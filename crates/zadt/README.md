@@ -22,6 +22,9 @@ Object identity, location, and loaded state are separate:
   Workbench version, media type, and optional ETag, with a borrowed scoped-resource
   view available on demand.
 
+Descriptions may be absent in loaded properties even when the corresponding
+creation model requires a description. Empty and absent values remain distinct.
+
 Both a logical key and a located reference construct the same operation type:
 
 ```rust
@@ -106,6 +109,13 @@ let creation = module.create(
 # Ok(())
 # }
 ```
+
+`SourceTemplate` supports class and interface copying or source-generation
+parameters through `abapsource:template`. `ObjectTemplate` uses the distinct
+`adtcore:adtTemplate` format and permits property-only templates. For example,
+function-group include creation accepts
+`ObjectTemplate::default().property("createIncludeStatement", "false")` through
+the creation builder `adt_template` field to suppress automatic INCLUDE insertion.
 
 Creation is key-only, for both primary objects and subobjects. It discovers the
 collection to which the creation payload is posted; it is not a write to an

@@ -137,8 +137,11 @@ pub struct ProgramProperties {
     pub changed_by: String,
 
     /// The program description.
-    #[serde(rename = "@adtcore:description")]
-    pub description: String,
+    #[serde(
+        rename = "@adtcore:description",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub description: Option<String>,
 
     /// The maximum length of the program description.
     #[serde(rename = "@adtcore:descriptionTextLimit")]
@@ -244,6 +247,13 @@ fn program_resources(properties: &ProgramProperties) -> ResourceView<'_> {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename = "include:abapInclude", deny_unknown_fields)]
 pub struct IncludeProperties {
+    /// The source status when advertised for this include.
+    #[serde(
+        rename = "@abapsource:sourceObjectStatus",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub source_object_status: Option<SourceObjectStatus>,
+
     /// The include name supplied by ADT.
     #[serde(rename = "@adtcore:name")]
     pub(crate) name: String,

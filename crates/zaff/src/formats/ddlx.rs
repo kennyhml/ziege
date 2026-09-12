@@ -49,7 +49,7 @@ fn render(obj: &ObjectSnapshot<()>) -> Result<String, ProjectionError> {
     let document = ProjectedMetadataExtensionProperties {
         format_version: METADATA_EXTENSION_FORMAT.version().to_owned(),
         header: CdsHeader::from_adt(
-            &properties.description,
+            properties.description.as_deref().unwrap_or_default(),
             &properties.master_language,
             &properties.abap_language_version,
         )?,
@@ -66,12 +66,14 @@ fn merge(
     let edited: ProjectedMetadataExtensionProperties = parse_object(edited)?;
     edited.validate()?;
     let previous = CdsHeader::from_adt(
-        &original.description,
+        original.description.as_deref().unwrap_or_default(),
         &original.master_language,
         &original.abap_language_version,
     )?;
     let mut merged = original.clone();
-    merged.description = edited.header.description;
+    if edited.header.description != original.description.as_deref().unwrap_or_default() {
+        merged.description = Some(edited.header.description);
+    }
     merged.master_language =
         language_to_adt(&edited.header.original_language, "header.originalLanguage")?;
     if edited.header.abap_language_version != previous.abap_language_version {
@@ -130,7 +132,7 @@ mod tests {
         let merged: MetadataExtensionProperties =
             serde_json::from_value(mapping.merge(&edited.to_string()).unwrap().unwrap()).unwrap();
         let mut expected = original;
-        expected.description = "Changed metadata extension".to_owned();
+        expected.description = Some("Changed metadata extension".to_owned());
         expected.master_language = "DE".to_owned();
         expected.abap_language_version = zadt::AbapLanguageVersion::CloudDevelopment;
         assert_eq!(merged, expected);

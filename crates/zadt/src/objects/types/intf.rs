@@ -3,7 +3,8 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTypes, ResourceView, SyntaxConfiguration, ToXml, WorkbenchVersion,
+    MediaTypes, ResourceView, SourceObjectStatus, SourceTemplate, SyntaxConfiguration, ToXml,
+    WorkbenchVersion,
 };
 
 #[object_type(
@@ -25,6 +26,10 @@ use crate::{
     )
 )]
 /// A global ABAP interface.
+///
+/// CL_OO_ADT_RES_INTF accepts included-interface references and source templates
+/// during creation. A template name without parameters selects an existing
+/// interface to copy, using the same SourceTemplate wire shape as classes.
 pub struct Interface;
 
 /// The complete interface properties payload.
@@ -35,6 +40,13 @@ pub struct Interface;
 )]
 #[serde(rename = "intf:abapInterface", deny_unknown_fields)]
 pub struct InterfaceProperties {
+    /// Optional source status from the shared source-object transformation.
+    #[serde(
+        rename = "@abapsource:sourceObjectStatus",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub source_object_status: Option<SourceObjectStatus>,
+
     /// Whether this interface is maintained through a higher-level model.
     #[serde(rename = "@abapoo:modeled")]
     pub modeled: bool,
@@ -107,8 +119,11 @@ pub struct InterfaceProperties {
 
     /// The interface description.
     #[for_create(doc = "The description, limited by SAP to 60 characters.")]
-    #[serde(rename = "@adtcore:description")]
-    pub description: String,
+    #[serde(
+        rename = "@adtcore:description",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub description: Option<String>,
 
     /// The maximum interface-description length.
     #[serde(rename = "@adtcore:descriptionTextLimit")]
@@ -130,6 +145,27 @@ pub struct InterfaceProperties {
     /// The source syntax configuration embedded in the payload.
     #[serde(rename = "abapsource:syntaxConfiguration")]
     pub syntax_configuration: SyntaxConfiguration,
+
+    /// A copy source or template implementation for interface creation.
+    #[for_create(
+        optional,
+        doc = "An existing interface to copy or a source-generation template."
+    )]
+    #[serde(rename = "abapsource:template")]
+    pub template: Option<SourceTemplate>,
+
+    /// Included interfaces represented by the shared OO transformation.
+    #[for_create(
+        each = "interface",
+        default,
+        doc = "Interfaces included by the new interface."
+    )]
+    #[serde(
+        rename = "abapoo:interfaceRef",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub interfaces: Vec<AdvertisedObjectReference>,
 }
 
 impl ToXml for InterfaceProperties {
@@ -195,6 +231,31 @@ mod tests {
         assert!(!body.contains("abapoo:modeled="));
         assert!(!body.contains("abapsource:sourceUri="));
         assert!(!body.contains("atom:link"));
+    }
+
+    #[test]
+    fn interface_creation_supports_copy_templates_and_included_interfaces() {
+        let mut properties = InterfaceCreateProperties::builder()
+            .description("Copied interface")
+            .package("$TMP")
+            .template(SourceTemplate::new("IF_MESSAGE"))
+            .interface(AdvertisedObjectReference {
+                name: Some("IF_SERIALIZABLE_OBJECT".into()),
+                ..Default::default()
+            })
+            .build()
+            .unwrap();
+        let reference = ObjectRef::new(
+            ObjectKey::<Interface>::new("ZIF_COPY"),
+            AdtUri::parse("/sap/bc/adt/oo/interfaces/zif_copy").unwrap(),
+        );
+        Interface::prepare_payload(&mut properties, &reference);
+        let xml = String::from_utf8(properties.to_xml().unwrap()).unwrap();
+        assert!(xml.contains("<abapsource:template abapsource:name=\"IF_MESSAGE\""));
+        assert!(xml.contains("<abapoo:interfaceRef adtcore:name=\"IF_SERIALIZABLE_OBJECT\""));
+        let parsed: InterfaceCreateProperties = serde_xml_rs::from_str(&xml).unwrap();
+        assert_eq!(parsed.template, properties.template);
+        assert_eq!(parsed.interfaces, properties.interfaces);
     }
 
     #[test]

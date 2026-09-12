@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<include:abapInclude include:contextRefCount="0" abapsource:sourceUri="source/main" abapsource:sourceObjectStatus="SAPStandardProduction" abapsource:fixPointArithmetic="false" abapsource:activeUnicodeCheck="false" adtcore:responsible="SAP" adtcore:masterLanguage="EN" adtcore:masterSystem="SAP" adtcore:name="/LIME/COLLECTION_DELETE_I01" adtcore:type="PROG/I" adtcore:changedAt="2025-08-01T12:36:47Z" adtcore:version="active" adtcore:createdAt="2017-05-20T00:00:00Z" adtcore:changedBy="SAP" adtcore:descriptionTextLimit="70" adtcore:language="EN" xmlns:include="http://www.sap.com/adt/programs/includes" xmlns:abapsource="http://www.sap.com/adt/abapsource" xmlns:adtcore="http://www.sap.com/adt/core" xmlns:atom="http://www.w3.org/2005/Atom">
+  <atom:link href="source/main/versions" rel="http://www.sap.com/adt/relations/versions"/>
+  <atom:link href="source/main" rel="http://www.sap.com/adt/relations/source" type="text/plain" etag="202508011236470011"/>
+  <atom:link href="source/main" rel="http://www.sap.com/adt/relations/source" type="text/html" etag="202508011236470011"/>
+  <atom:link href="/sap/bc/adt/textelements/programs/%2flime%2fcollection_delete_i01" rel="http://www.sap.com/adt/relations/sources/textelements" title="Text Elements"/>
+  <atom:link href="/sap/bc/adt/programs/includes/%2flime%2fcollection_delete_i01/enhancements/implementations" rel="http://www.sap.com/adt/relations/enhancementImplementations" type="application/vnd.sap.adt.enhancementimplementations.v1+xml" title="Enhancement Implementations"/>
+  <atom:link href="/sap/bc/adt/programs/includes/%2flime%2fcollection_delete_i01/enhancements/options" rel="http://www.sap.com/adt/relations/enhancementOptionsOfMainObject" type="application/vnd.sap.adt.enhancementoptions.v2+xml" title="Enhancement Options of Main Object"/>
+  <atom:link href="/sap/bc/adt/programs/includes/%2flime%2fcollection_delete_i01/source/main/enhancements/options" rel="http://www.sap.com/adt/relations/enhancementOptions" type="application/vnd.sap.adt.enhancementoptions.v2+xml" title="Enhancement Options"/>
+  <adtcore:packageRef adtcore:uri="/sap/bc/adt/packages/%2flime%2frfc_core" adtcore:type="DEVC/K" adtcore:name="/LIME/RFC_CORE"/>
+</include:abapInclude>

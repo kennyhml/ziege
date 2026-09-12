@@ -1,12 +1,12 @@
 //! CDS data definition metadata and advertised `.ddls.acds` source.
 //!
 //! Header fields map to ADT description, master language, and language version.
-//! `sourceOrigin` maps the SAP origin codes 0 through 9. ADT's semantic
-//! `source_type` labels are not the AFF source-type discriminator: `view` alone
-//! cannot establish DDIC-based versus view-entity syntax. Without fetching and
-//! parsing source, this projection reports AFF `unknown` and preserves the ADT
-//! type and its description. Non-unknown type edits and nonempty `parentName`
-//! have no implemented backing and are rejected.
+//! `sourceOrigin` maps the SAP origin codes 0 through 9. `sourceType` uses the
+//! exact mappings in SDDIC_ST_ADT_DDLS, including distinct `view` and `view entity`
+//! labels. Display descriptions are not used for classification. Nonempty
+//! `parentName` is not serialized by the inspected DDLS transformation and has no
+//! implemented backing. Nonempty edits are rejected. Source type is determined by
+//! DDIC during activation, so callers refetch after updates to obtain its stored value.
 //! Schema: <https://github.com/SAP/abap-file-formats/blob/main/file-formats/ddls/ddls-v1.json>.
 
 use crate::{
@@ -57,7 +57,7 @@ pub struct ProjectedDataDefinitionProperties {
     pub parent_name: String,
 }
 
-/// AFF source syntax categories; currently only `unknown` can be merged.
+/// AFF source syntax categories mapped from ADT source-type labels.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DataDefinitionSourceType {
@@ -75,17 +75,57 @@ pub enum DataDefinitionSourceType {
     Unknown,
 }
 
+impl DataDefinitionSourceType {
+    fn from_adt(value: Option<&str>) -> Result<Self, ProjectionError> {
+        match value {
+            None | Some("") => Ok(Self::Unknown),
+            Some("view") => Ok(Self::DdicBasedView),
+            Some("view entity") => Ok(Self::ViewEntity),
+            Some("extend") => Ok(Self::ViewExtend),
+            Some("view entity extend") => Ok(Self::ViewEntityExtend),
+            Some("table function") => Ok(Self::TableFunction),
+            Some("table entity") => Ok(Self::TableEntity),
+            Some("abstract entity") => Ok(Self::AbstractEntity),
+            Some("custom entity") => Ok(Self::CustomEntity),
+            Some("hierarchy") => Ok(Self::Hierarchy),
+            Some("projection view") => Ok(Self::ProjectionView),
+            Some("external entity") => Ok(Self::ExternalEntity),
+            Some(value) => Err(ProjectionError::InvalidAffField {
+                field: "sourceType",
+                message: format!("unsupported ADT source type `{value}`"),
+            }),
+        }
+    }
+
+    const fn adt_value(self) -> Option<&'static str> {
+        match self {
+            Self::Unknown => None,
+            Self::DdicBasedView => Some("view"),
+            Self::ViewEntity => Some("view entity"),
+            Self::ViewExtend => Some("extend"),
+            Self::ViewEntityExtend => Some("view entity extend"),
+            Self::TableFunction => Some("table function"),
+            Self::TableEntity => Some("table entity"),
+            Self::AbstractEntity => Some("abstract entity"),
+            Self::CustomEntity => Some("custom entity"),
+            Self::Hierarchy => Some("hierarchy"),
+            Self::ProjectionView => Some("projection view"),
+            Self::ExternalEntity => Some("external entity"),
+        }
+    }
+}
+
 fn render(obj: &ObjectSnapshot<()>) -> Result<String, ProjectionError> {
     let properties = obj.typed_properties::<DataDefinition>()?;
     let document = ProjectedDataDefinitionProperties {
         format_version: DATA_DEFINITION_FORMAT.version().to_owned(),
         header: CdsHeader::from_adt(
-            &properties.description,
+            properties.description.as_deref().unwrap_or_default(),
             &properties.master_language,
             &properties.abap_language_version,
         )?,
         source_origin: CdsSourceOrigin::from_adt(&properties.source_origin, "sourceOrigin")?,
-        source_type: DataDefinitionSourceType::Unknown,
+        source_type: DataDefinitionSourceType::from_adt(properties.source_type.as_deref())?,
         parent_name: String::new(),
     };
     document.validate()?;
@@ -99,28 +139,26 @@ fn merge(
     let original = obj.typed_properties::<DataDefinition>()?;
     let edited: ProjectedDataDefinitionProperties = parse_object(edited)?;
     edited.validate()?;
-    for (unsupported, field) in [
-        (
-            edited.source_type != DataDefinitionSourceType::Unknown,
-            "sourceType",
-        ),
-        (!edited.parent_name.is_empty(), "parentName"),
-    ] {
-        if unsupported {
-            return Err(ProjectionError::UnsupportedAffProperty {
-                object_type: "DDLS",
-                field,
-            });
-        }
+    if !edited.parent_name.is_empty() {
+        return Err(ProjectionError::UnsupportedAffProperty {
+            object_type: "DDLS",
+            field: "parentName",
+        });
     }
     let previous = CdsHeader::from_adt(
-        &original.description,
+        original.description.as_deref().unwrap_or_default(),
         &original.master_language,
         &original.abap_language_version,
     )?;
     let origin = CdsSourceOrigin::from_adt(&original.source_origin, "sourceOrigin")?;
     let mut merged = original.clone();
-    merged.description = edited.header.description;
+    if edited.source_type != DataDefinitionSourceType::from_adt(original.source_type.as_deref())? {
+        merged.source_type = edited.source_type.adt_value().map(str::to_owned);
+        merged.source_type_description = None;
+    }
+    if edited.header.description != original.description.as_deref().unwrap_or_default() {
+        merged.description = Some(edited.header.description);
+    }
     merged.master_language =
         language_to_adt(&edited.header.original_language, "header.originalLanguage")?;
     if edited.header.abap_language_version != previous.abap_language_version {
@@ -176,24 +214,46 @@ mod tests {
         let content = mapping.render().unwrap();
         assert!(mapping.merge(&content).unwrap().is_none());
         let mut edited: Value = serde_json::from_str(&content).unwrap();
-        assert_eq!(edited["sourceType"], "unknown");
+        assert_eq!(edited["sourceType"], "ddicBasedView");
         assert_eq!(edited["sourceOrigin"], "abapDevelopmentTools");
         edited["header"]["description"] = json!("Changed data definition");
         let merged: DataDefinitionProperties =
             serde_json::from_value(mapping.merge(&edited.to_string()).unwrap().unwrap()).unwrap();
         let mut expected = original;
-        expected.description = "Changed data definition".to_owned();
+        expected.description = Some("Changed data definition".to_owned());
         assert_eq!(merged, expected);
-        for (field, value) in [
-            ("sourceType", json!("viewEntity")),
-            ("parentName", json!("I_PARENT")),
+        let mut invalid = edited.clone();
+        invalid["parentName"] = json!("I_PARENT");
+        assert!(matches!(
+            mapping.merge(&invalid.to_string()),
+            Err(ProjectionError::UnsupportedAffProperty { .. })
+        ));
+        for (aff, adt) in [
+            ("ddicBasedView", Some("view")),
+            ("viewEntity", Some("view entity")),
+            ("viewExtend", Some("extend")),
+            ("viewEntityExtend", Some("view entity extend")),
+            ("tableFunction", Some("table function")),
+            ("tableEntity", Some("table entity")),
+            ("abstractEntity", Some("abstract entity")),
+            ("customEntity", Some("custom entity")),
+            ("hierarchy", Some("hierarchy")),
+            ("projectionView", Some("projection view")),
+            ("externalEntity", Some("external entity")),
+            ("unknown", None),
         ] {
-            let mut invalid = edited.clone();
-            invalid[field] = value;
-            assert!(matches!(
-                mapping.merge(&invalid.to_string()),
-                Err(ProjectionError::UnsupportedAffProperty { .. })
-            ));
+            let mut edit = edited.clone();
+            edit["sourceType"] = json!(aff);
+            let merged: DataDefinitionProperties =
+                serde_json::from_value(mapping.merge(&edit.to_string()).unwrap().unwrap()).unwrap();
+            assert_eq!(merged.source_type.as_deref(), adt);
+            if aff != "ddicBasedView" {
+                assert!(merged.source_type_description.is_none());
+            }
+            assert_eq!(
+                serde_json::to_value(DataDefinitionSourceType::from_adt(adt).unwrap()).unwrap(),
+                aff
+            );
         }
         edited["sourceOrigin"] = json!("customCdsViews");
         let merged: DataDefinitionProperties =

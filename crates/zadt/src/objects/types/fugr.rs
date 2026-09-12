@@ -3,7 +3,8 @@ use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
     AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTypes, ResourceView, SourceObjectStatus, SyntaxConfiguration, ToXml, WorkbenchVersion,
+    MediaTypes, ObjectTemplate, ResourceView, SourceObjectStatus, SyntaxConfiguration, ToXml,
+    WorkbenchVersion,
 };
 
 /// An ABAP function group.
@@ -52,6 +53,11 @@ pub struct FunctionGroup;
 pub struct FunctionModule;
 
 /// A source include owned by an ABAP function group.
+///
+/// Creation uses the generic `adtcore:adtTemplate` from SADT_OBJECT. Its
+/// `createIncludeStatement` property defaults to true. The literal string `false`
+/// creates the include without inserting an INCLUDE statement into the group
+/// program. Property-only templates may omit the name.
 #[object_type(
     properties = FunctionGroupIncludeProperties,
     media_types = MediaTypes::new(&["application/vnd.sap.adt.functions.fincludes.v2+xml"]),
@@ -121,8 +127,11 @@ pub struct FunctionGroupProperties {
     #[serde(rename = "@adtcore:createdBy")]
     pub created_by: String,
     #[for_create(doc = "The description, limited by SAP to 40 characters.")]
-    #[serde(rename = "@adtcore:description")]
-    pub description: String,
+    #[serde(
+        rename = "@adtcore:description",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub description: Option<String>,
     #[serde(rename = "@adtcore:descriptionTextLimit")]
     pub description_text_limit: u32,
     #[serde(rename = "@adtcore:language")]
@@ -505,8 +514,11 @@ pub struct FunctionModuleProperties {
     #[serde(rename = "@adtcore:changedBy")]
     pub changed_by: String,
     #[for_create(doc = "The function-module description.")]
-    #[serde(rename = "@adtcore:description")]
-    pub description: String,
+    #[serde(
+        rename = "@adtcore:description",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub description: Option<String>,
     #[serde(rename = "@adtcore:descriptionTextLimit")]
     pub description_text_limit: u32,
     #[serde(rename = "@adtcore:language")]
@@ -529,9 +541,6 @@ impl ToXml for FunctionModuleProperties {
 
 /// The complete function-group include properties payload.
 #[derive(Clone, CreateProperties, Debug, Deserialize, Eq, PartialEq, Serialize)]
-// TODO: Add creation-template support for createIncludeStatement (defaults to true).
-// Generalize ClassTemplate/ClassTemplateProperty for reuse and confirm whether
-// property-only templates can omit the template name.
 #[create_properties(
     name = FunctionGroupIncludeCreateProperties,
     doc = "The sparse payload used to create an ABAP function-group include."
@@ -568,6 +577,14 @@ pub struct FunctionGroupIncludeProperties {
     #[for_create(parent, doc = "The function group containing this include.")]
     #[serde(rename = "adtcore:containerRef")]
     pub container: AdvertisedObjectReference,
+    /// Object-creation options supplied through the shared ADT template.
+    #[for_create(
+        optional,
+        doc = "Creation options. Set createIncludeStatement to the string false to suppress automatic insertion of the INCLUDE statement. The backend default is true."
+    )]
+    #[serde(rename = "adtcore:adtTemplate")]
+    pub adt_template: Option<ObjectTemplate>,
+
     #[serde(rename = "atom:link", default)]
     pub links: Vec<AdvertisedLink>,
 }
@@ -793,6 +810,28 @@ mod tests {
         assert!(body.contains("adtcore:type=\"FUGR/F\""));
         assert!(body.contains("adtcore:uri=\"/sap/bc/adt/functions/groups/zgroup123\""));
         assert!(!body.contains("adtcore:packageRef"));
+    }
+
+    #[test]
+    fn include_creation_template_uses_generic_adt_namespace_without_a_name() {
+        let mut properties = FunctionGroupIncludeCreateProperties::builder()
+            .description("Audit include")
+            .adt_template(ObjectTemplate::default().property("createIncludeStatement", "false"))
+            .build()
+            .unwrap();
+        let group = ObjectKey::<FunctionGroup>::new("ZGROUP");
+        let reference = ObjectRef::new(
+            group.subobject::<FunctionGroupInclude>("LZGROUPF01"),
+            AdtUri::parse("/sap/bc/adt/functions/groups/zgroup/includes/lzgroupf01").unwrap(),
+        );
+        FunctionGroupInclude::prepare_payload(&mut properties, &reference);
+        let xml = String::from_utf8(properties.to_xml().unwrap()).unwrap();
+        assert!(xml.contains("<adtcore:adtTemplate>"));
+        assert!(xml.contains("<adtcore:adtProperty adtcore:key=\"createIncludeStatement\">false</adtcore:adtProperty>"));
+        assert!(!xml.contains("abapsource:template"));
+        let parsed: FunctionGroupIncludeCreateProperties = serde_xml_rs::from_str(&xml).unwrap();
+        assert_eq!(parsed.adt_template, properties.adt_template);
+        assert_eq!(parsed.adt_template.unwrap().name, None);
     }
 
     #[test]

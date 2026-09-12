@@ -1,6 +1,6 @@
 use super::super::{
     AbapLanguageVersion, AdvertisedObjectReference, GlobalWorkbenchType, ObjectKey, ObjectType,
-    SourceObjectStatus, ToXml, WorkbenchVersion,
+    SourceObjectStatus, SourceTemplate, ToXml, WorkbenchVersion,
 };
 use crate::{MediaTypes, ResourceView, resource::AdvertisedLink};
 use serde::{Deserialize, Serialize};
@@ -81,8 +81,11 @@ pub struct ClassProperties {
     pub created_by: String,
     /// The class description.
     #[for_create]
-    #[serde(rename = "@adtcore:description")]
-    pub description: String,
+    #[serde(
+        rename = "@adtcore:description",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub description: Option<String>,
     /// The maximum class-description length.
     #[serde(rename = "@adtcore:descriptionTextLimit")]
     pub description_text_limit: u32,
@@ -163,7 +166,7 @@ pub struct ClassProperties {
         doc = "The source template used to create or populate the class."
     )]
     #[serde(rename = "abapsource:template")]
-    pub template: Option<ClassTemplate>,
+    pub template: Option<SourceTemplate>,
     /// Interfaces implemented by the class.
     #[serde(rename = "abapoo:interfaceRef", default)]
     pub interfaces: Vec<AdvertisedObjectReference>,
@@ -267,57 +270,6 @@ impl<'de> Deserialize<'de> for ClassCategory {
         D: serde::Deserializer<'de>,
     {
         String::deserialize(deserializer).map(Self::from)
-    }
-}
-
-/// A source template associated with an ABAP class.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ClassTemplate {
-    /// The existing class name or ADT template implementation name.
-    #[serde(rename = "@abapsource:name")]
-    pub name: String,
-    /// Parameters passed to an ADT template implementation.
-    #[serde(
-        rename = "abapsource:property",
-        default,
-        skip_serializing_if = "Vec::is_empty"
-    )]
-    pub properties: Vec<ClassTemplateProperty>,
-}
-
-impl ClassTemplate {
-    pub fn new(name: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            properties: Vec::new(),
-        }
-    }
-
-    pub fn property(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.properties.push(ClassTemplateProperty::new(key, value));
-        self
-    }
-}
-
-/// One parameter passed to an ADT source template.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ClassTemplateProperty {
-    /// The template-defined parameter key.
-    #[serde(rename = "@abapsource:key")]
-    pub key: String,
-    /// The parameter value stored as element text.
-    #[serde(rename = "#text", default)]
-    pub value: String,
-}
-
-impl ClassTemplateProperty {
-    pub fn new(key: impl Into<String>, value: impl Into<String>) -> Self {
-        Self {
-            key: key.into(),
-            value: value.into(),
-        }
     }
 }
 
@@ -587,9 +539,15 @@ mod tests {
 
     #[test]
     fn builds_sparse_class_creation_properties() {
+        assert!(
+            ClassCreateProperties::builder()
+                .package("$TMP")
+                .build()
+                .is_err()
+        );
         let properties = ClassCreatePropertiesBuilder::default()
             .description("Created class")
-            .template(ClassTemplate::new("ZOTHERCLASS"))
+            .template(SourceTemplate::new("ZOTHERCLASS"))
             .package(AdvertisedObjectReference {
                 name: Some("$TMP".to_owned()),
                 ..Default::default()
@@ -607,7 +565,10 @@ mod tests {
         );
         assert_eq!(properties.name, "");
         assert_eq!(properties.workbench_type, Class::WORKBENCH_TYPE);
-        assert_eq!(properties.template, Some(ClassTemplate::new("ZOTHERCLASS")));
+        assert_eq!(
+            properties.template,
+            Some(SourceTemplate::new("ZOTHERCLASS"))
+        );
         assert_eq!(properties.sources[0].source_uri, "");
         assert!(properties.is_final);
         assert_eq!(properties.visibility, "public");

@@ -60,7 +60,7 @@ fn render(obj: &ObjectSnapshot<()>) -> Result<String, ProjectionError> {
     let document = ProjectedAnnotationDefinitionProperties {
         format_version: ANNOTATION_DEFINITION_FORMAT.version().to_owned(),
         header: AnnotationDefinitionHeader {
-            description: properties.description.clone(),
+            description: properties.description.clone().unwrap_or_default(),
             original_language: language_from_adt(
                 &properties.master_language,
                 "header.originalLanguage",
@@ -79,7 +79,9 @@ fn merge(
     let edited: ProjectedAnnotationDefinitionProperties = parse_object(edited)?;
     edited.validate()?;
     let mut merged = original.clone();
-    merged.description = edited.header.description;
+    if edited.header.description != original.description.as_deref().unwrap_or_default() {
+        merged.description = Some(edited.header.description);
+    }
     merged.master_language =
         language_to_adt(&edited.header.original_language, "header.originalLanguage")?;
     if merged == *original {
@@ -126,7 +128,7 @@ mod tests {
         let merged: AnnotationDefinitionProperties =
             serde_json::from_value(mapping.merge(&edited.to_string()).unwrap().unwrap()).unwrap();
         let mut expected = original;
-        expected.description = "Changed annotations".to_owned();
+        expected.description = Some("Changed annotations".to_owned());
         expected.master_language = "DE".to_owned();
         assert_eq!(merged, expected);
         edited["header"]["abapLanguageVersion"] = json!("standard");

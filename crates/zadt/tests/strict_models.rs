@@ -81,7 +81,7 @@ fn generated_creation_models_and_custom_sources_reject_unknown_fields() {
     let properties = ClassCreateProperties::builder()
         .description("Created class")
         .package("$TMP")
-        .template(ClassTemplate::new("Z_TEMPLATE").property("key", "value"))
+        .template(SourceTemplate::new("Z_TEMPLATE").property("key", "value"))
         .build()
         .unwrap();
     let json = serde_json::to_value(&properties).unwrap();

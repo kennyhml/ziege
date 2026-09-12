@@ -1,10 +1,13 @@
 # zaff
 
-ABAP File Formats (AFF) specifications and projection of loaded ADT objects
-for editor files and property schemas.
+ABAP File Formats (AFF) specifications in Rust.
 
 See [abap-file-formats](https://github.com/SAP/abap-file-formats) to understand the background and benefits
 of using the ABAP file formats.
+
+Currently, this crate serves the projection of loaded ADT objects for editor files and property schemas. In
+the future, it should be possible to hide the ADT projection behind a feature flag and make it a general
+purpose library for typed AFF specifications.
 
 ## Projection
 
@@ -104,15 +107,18 @@ Source files are projected when advertised by the loaded object. Language-depend
 text files and other file specifications without an implemented mapping are omitted.
 Unsupported metadata edits are rejected.
 
+Missing ADT descriptions render as empty strings and retain their absence on
+unchanged merges. Named and legacy ABAP language-version spellings are accepted.
+
 | Format | Implementation notes |
 | --- | --- |
 | [CLAS — Class](src/formats/clas.rs) | Component descriptions have no implemented backing. |
 | [INTF — Interface](src/formats/intf.rs) | Category, proxy status, and component descriptions accept only default or empty values. |
 | [PROG — Program / standalone Include](src/formats/prog.rs) | Standalone includes use PROG rather than the function-group REPS format. |
 | [DTEL — Data Element](src/formats/dtel.rs) | Maps type definitions, labels, and search-help settings. |
-| [DOMA — Domain](src/formats/doma.rs) | Fixed-value append names are unavailable. Optional documentation is declared but unsupported. |
-| [DEVC — Package](src/formats/devc.rs) | Switch assignments have no implemented backing. |
-| [DDLS — CDS Data Definition](src/formats/ddls.rs) | `sourceType` currently unsupported. |
+| [DOMA — Domain](src/formats/doma.rs) | Separates own fixed values from append contributions. Append names come from contributing-value references, and assignment edits remain unsupported. Optional documentation is declared but unsupported. |
+| [DEVC — Package](src/formats/devc.rs) | Maps switch assignments and preserves reference and editor metadata. |
+| [DDLS — CDS Data Definition](src/formats/ddls.rs) | Maps source origin and all 11 advertised source types. `parentName` has no implemented backing. |
 | [DDLX — CDS Metadata Extension](src/formats/ddlx.rs) | Metadata maps the header. |
 | [DDLA — CDS Annotation Definition](src/formats/ddla.rs) | Header has no ABAP language version. |
 | [DCLS — CDS Access Control](src/formats/dcls.rs) | Metadata maps the header. |

@@ -236,6 +236,8 @@ impl fmt::Display for AbapLanguageVersion {
 }
 
 /// Source status classification advertised for repository objects.
+/// Unclassified objects omit the attribute. The literal `unknown` is not an
+/// ADT status constant and is preserved only as an unrecognized value.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum SourceObjectStatus {
     /// SAP standard production source.
@@ -246,8 +248,6 @@ pub enum SourceObjectStatus {
     System,
     /// Test source.
     Test,
-    /// Source without a classification.
-    Unknown,
     /// An unrecognized backend value, including an explicitly empty string.
     Other(String),
 }
@@ -260,7 +260,6 @@ impl SourceObjectStatus {
             Self::CustomerProduction => "customerProduction",
             Self::System => "system",
             Self::Test => "test",
-            Self::Unknown => "unknown",
             Self::Other(value) => value,
         }
     }
@@ -273,7 +272,6 @@ impl From<String> for SourceObjectStatus {
             "customerProduction" => Self::CustomerProduction,
             "system" => Self::System,
             "test" => Self::Test,
-            "unknown" => Self::Unknown,
             _ => Self::Other(value),
         }
     }
@@ -324,7 +322,7 @@ mod tests {
             ("customerProduction", SourceObjectStatus::CustomerProduction),
             ("system", SourceObjectStatus::System),
             ("test", SourceObjectStatus::Test),
-            ("unknown", SourceObjectStatus::Unknown),
+            ("unknown", SourceObjectStatus::Other("unknown".into())),
             ("", SourceObjectStatus::Other(String::new())),
             (
                 "futureStatus",

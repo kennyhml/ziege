@@ -1,8 +1,11 @@
 //! Interface metadata and its advertised main source.
 //!
 //! Header fields map to ADT description, master language, and language version.
-//! Category, proxy status, and SE80 descriptions have no ZADT backing; only their
+//! Category, proxy status, and SE80 descriptions have no ZADT backing. Only their
 //! empty/default values are accepted. Unrepresented ADT fields remain on the baseline.
+//! The inspected CL_OO_ADT_RES_INTF handler and INTF_TRANSFORMATION do not expose
+//! category or proxy fields. Imported ABAP Doc is source text, not a structured
+//! backing for the SE80 description collection.
 //! Schema: <https://github.com/SAP/abap-file-formats/blob/main/file-formats/intf/intf-v1.json>.
 
 use garde::Validate;
@@ -64,7 +67,9 @@ fn merge(
     }
     let previous = ProjectedInterfaceProperties::from_adt(original)?;
     let mut merged = original.clone();
-    merged.description = edited.header.description;
+    if edited.header.description != original.description.as_deref().unwrap_or_default() {
+        merged.description = Some(edited.header.description);
+    }
     merged.master_language =
         language_to_adt(&edited.header.original_language, "header.originalLanguage")?;
     if edited.header.abap_language_version != previous.header.abap_language_version {
@@ -146,7 +151,7 @@ impl ProjectedInterfaceProperties {
         let document = Self {
             format_version: INTERFACE_FORMAT.version().to_owned(),
             header: InterfaceHeader {
-                description: properties.description.clone(),
+                description: properties.description.clone().unwrap_or_default(),
                 original_language: language_from_adt(
                     &properties.master_language,
                     "header.originalLanguage",
@@ -211,7 +216,7 @@ mod tests {
         let merged: InterfaceProperties =
             serde_json::from_value(mapping.merge(&edited.to_string()).unwrap().unwrap()).unwrap();
         let mut expected = original;
-        expected.description = "Changed interface".to_owned();
+        expected.description = Some("Changed interface".to_owned());
         assert_eq!(merged, expected);
         for (field, value) in [
             ("proxy", json!(true)),

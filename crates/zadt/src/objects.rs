@@ -8,6 +8,7 @@ mod key;
 mod name;
 mod reference;
 mod snapshot;
+mod template;
 mod types;
 mod workbench;
 
@@ -16,9 +17,14 @@ pub(crate) use capabilities::{ImmediateRun, RunCapability};
 pub use descriptors::SubObjectDescriptor;
 pub use key::ObjectKey;
 pub use name::{InvalidObjectName, ObjectName};
-pub use reference::{AdvertisedObjectReference, ObjectRef, ObjectReferences};
+pub use reference::{
+    AdvertisedObjectReference, AdvertisedSwitchReference, ObjectRef, ObjectReferences,
+};
 pub(crate) use snapshot::ErasedProperties;
 pub use snapshot::ObjectSnapshot;
+pub use template::{
+    ObjectTemplate, ObjectTemplateProperty, SourceTemplate, SourceTemplateProperty,
+};
 pub use types::*;
 pub use workbench::{
     AbapLanguageVersion, GlobalWorkbenchType, InvalidWorkbenchType, SourceObjectStatus,

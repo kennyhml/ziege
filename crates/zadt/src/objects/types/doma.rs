@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use zadt_macros::{CreateProperties, object_type};
 
 use crate::{
-    AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTypes, ToXml, WorkbenchVersion,
+    AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, AdvertisedSwitchReference,
+    GlobalWorkbenchType, MediaTypes, ToXml, WorkbenchVersion,
 };
 
 #[object_type(
@@ -83,8 +83,11 @@ pub struct DomainProperties {
 
     /// The Domain description.
     #[for_create(doc = "The description, limited by SAP to 60 characters.")]
-    #[serde(rename = "@adtcore:description")]
-    pub description: String,
+    #[serde(
+        rename = "@adtcore:description",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub description: Option<String>,
 
     /// The language in which language-dependent values are represented.
     #[serde(rename = "@adtcore:language")]
@@ -127,6 +130,27 @@ pub struct DomainContent {
     /// The Domain's value table and fixed values, when advertised.
     #[serde(rename = "doma:valueInformation")]
     pub value_information: Option<DomainValueInformation>,
+
+    /// Base-domain and switch references when this object is a fixed-value append.
+    #[serde(
+        rename = "doma:appendInformation",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub append_information: Option<DomainAppendInformation>,
+}
+
+/// References identifying the base domain and switch of a fixed-value append.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DomainAppendInformation {
+    #[serde(
+        rename = "doma:appendedDomainRef",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub appended_domain: Option<AdvertisedObjectReference>,
+
+    #[serde(rename = "doma:switchRef", skip_serializing_if = "Option::is_none")]
+    pub switch: Option<AdvertisedSwitchReference>,
 }
 
 /// The storage type and dimensions of a Domain.
@@ -220,6 +244,16 @@ pub struct DomainFixedValue {
     /// The language-dependent fixed-value description.
     #[serde(rename = "doma:text")]
     pub text: String,
+
+    /// The append supplying this value, rather than the base domain itself.
+    #[serde(
+        rename = "doma:contributingAppendRef",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub contributing_append: Option<AdvertisedObjectReference>,
+
+    #[serde(rename = "doma:switchRef", skip_serializing_if = "Option::is_none")]
+    pub switch: Option<AdvertisedSwitchReference>,
 }
 
 #[cfg(test)]

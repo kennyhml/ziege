@@ -6,6 +6,39 @@ use stduritemplate::Value;
 use super::{GlobalWorkbenchType, Identity, ObjectKey, ObjectType, descriptors};
 use crate::{Discovery, ResolveError, error::ObjectError, resource::AdtUriTemplate, uri::AdtUri};
 
+/// A switch reference serialized by SADT_OBJECT_REFERENCE, including its state.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdvertisedSwitchReference {
+    #[serde(rename = "@adtcore:name", skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
+    #[serde(rename = "@adtcore:uri", skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+
+    #[serde(rename = "@adtcore:type", skip_serializing_if = "Option::is_none")]
+    pub workbench_type: Option<GlobalWorkbenchType>,
+
+    #[serde(
+        rename = "@adtcore:description",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub description: Option<String>,
+
+    #[serde(rename = "@adtcore:parentUri", skip_serializing_if = "Option::is_none")]
+    pub parent_uri: Option<String>,
+
+    #[serde(
+        rename = "@adtcore:packageName",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub package_name: Option<String>,
+
+    /// The exact state label, such as on, off, standby, or undefined.
+    #[serde(rename = "@adtcore:state", skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+}
+
 /// An ADT object at a concrete, validated resource URI.
 ///
 /// The logical key retains any known parent identity; `parent_uri` independently

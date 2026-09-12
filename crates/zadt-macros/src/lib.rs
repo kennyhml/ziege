@@ -667,6 +667,8 @@ fn duplicate_capability(capability: &Ident) -> Error {
 
 #[proc_macro_derive(CreateProperties, attributes(create_properties, for_create))]
 /// Generates a sparse creation model from marked fields in a complete properties model.
+/// A marked `Option<T>` becomes required `T` unless `optional` or a default is
+/// specified, allowing sparse read payloads to retain required creation fields.
 pub fn derive_create_properties(input: TokenStream) -> TokenStream {
     expand_create_properties(syn::parse_macro_input!(input as DeriveInput))
         .unwrap_or_else(Error::into_compile_error)
@@ -781,6 +783,27 @@ fn expand_create_properties(input: DeriveInput) -> Result<TokenStream2> {
         let field_type = if options.optional.is_some() && !is_container_type(&source_type, "Option")
         {
             quote!(Option<#source_type>)
+        } else if options.optional.is_none()
+            && options.default.is_none()
+            && options.parent.is_none()
+            && options.identity.is_none()
+            && is_container_type(&source_type, "Option")
+        {
+            // A field can be absent in loaded properties but required for creation.
+            let Type::Path(path) = &source_type else {
+                unreachable!()
+            };
+            let syn::PathArguments::AngleBracketed(arguments) =
+                &path.path.segments.last().unwrap().arguments
+            else {
+                unreachable!()
+            };
+            let Some(syn::GenericArgument::Type(inner)) = arguments.args.first() else {
+                return Err(Error::new_spanned(&source_type, "expected Option<T>"));
+            };
+            attrs = without_serde_option(attrs, "skip_serializing_if")?;
+            attrs = without_serde_option(attrs, "default")?;
+            quote!(#inner)
         } else {
             quote!(#source_type)
         };
@@ -1543,7 +1566,8 @@ mod tests {
                 #[serde(rename = "@adtcore:type")]
                 pub(crate) workbench_type: GlobalWorkbenchType,
                 #[for_create]
-                pub description: String,
+                #[serde(rename = "@adtcore:description", skip_serializing_if = "Option::is_none")]
+                pub description: Option<String>,
                 #[for_create(optional, doc = "Creation language.")]
                 pub language: Language,
                 #[for_create(optional)]
@@ -1560,6 +1584,8 @@ mod tests {
         .unwrap();
 
         assert!(expanded.contains("pub struct ClassCreateProperties"));
+        assert!(expanded.contains("pub description : String"));
+        assert!(!expanded.contains("pub description : Option"));
         assert!(expanded.contains("deny_unknown_fields"));
         assert!(expanded.contains("doc = \"Creation properties.\""));
         assert!(expanded.contains("doc = \"Creation language.\""));

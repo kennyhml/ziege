@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use zadt_macros::object_type;
 
 use crate::{
-    AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, GlobalWorkbenchType,
-    MediaTypes, ToXml, WorkbenchVersion,
+    AbapLanguageVersion, AdvertisedLink, AdvertisedObjectReference, AdvertisedSwitchReference,
+    GlobalWorkbenchType, MediaTypes, ToXml, WorkbenchVersion,
 };
 
 #[object_type(
@@ -45,8 +45,11 @@ pub struct PackageProperties {
     #[serde(rename = "@adtcore:createdBy")]
     pub created_by: String,
     /// The package description.
-    #[serde(rename = "@adtcore:description")]
-    pub description: String,
+    #[serde(
+        rename = "@adtcore:description",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub description: Option<String>,
     /// The maximum package-description length.
     #[serde(rename = "@adtcore:descriptionTextLimit")]
     pub description_text_limit: u32,
@@ -65,18 +68,31 @@ pub struct PackageProperties {
     /// Atom links exactly as advertised by the package representation.
     #[serde(rename = "atom:link", default)]
     pub links: Vec<AdvertisedLink>,
+    /// The self package reference supplied by the shared main-object serializer.
+    #[serde(rename = "adtcore:packageRef", skip_serializing_if = "Option::is_none")]
+    pub package: Option<AdvertisedObjectReference>,
+
     /// Package behavior and editor capability flags.
     #[serde(rename = "pak:attributes")]
     pub attributes: PackageAttributes,
     /// The parent package, when this is not a root package.
     #[serde(rename = "pak:superPackage")]
     pub super_package: Option<AdvertisedObjectReference>,
+    #[serde(rename = "pak:extensionAlias", skip_serializing_if = "Option::is_none")]
+    pub extension_alias: Option<PackageExtensionAlias>,
+
+    #[serde(rename = "pak:switch", skip_serializing_if = "Option::is_none")]
+    pub switch: Option<AdvertisedSwitchReference>,
+
     /// The assigned application component.
     #[serde(rename = "pak:applicationComponent")]
     pub application_component: PackageAssignment,
     /// Software-component and transport-layer assignments.
     #[serde(rename = "pak:transport")]
     pub transport: PackageTransport,
+    #[serde(rename = "pak:translation", skip_serializing_if = "Option::is_none")]
+    pub translation: Option<PackageTranslation>,
+
     /// Package-interface use accesses.
     #[serde(rename = "pak:useAccesses")]
     pub use_accesses: Option<PackageUseAccesses>,
@@ -106,9 +122,11 @@ pub struct PackageAttributes {
     /// Whether the package type is editable.
     #[serde(rename = "@pak:isPackageTypeEditable")]
     pub package_type_editable: bool,
-    /// Whether repository objects can be assigned to the package.
+    /// Whether assigning repository objects to the package is prohibited.
+    /// The ADT attribute is misleadingly named: SPAK_ST_PACKAGES serializes
+    /// IS_ADDING_OBJECTS_NOT_ALLOWED without negating it.
     #[serde(rename = "@pak:isAddingObjectsAllowed")]
-    pub adding_objects_allowed: bool,
+    pub adding_objects_not_allowed: bool,
     /// Whether object-assignment behavior is editable.
     #[serde(rename = "@pak:isAddingObjectsAllowedEditable")]
     pub adding_objects_allowed_editable: bool,
@@ -149,6 +167,16 @@ fn empty_language_version() -> AbapLanguageVersion {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PackageAssignment {
+    /// Software-component type when this assignment describes a software component.
+    #[serde(rename = "@pak:type", skip_serializing_if = "Option::is_none")]
+    pub assignment_type: Option<String>,
+
+    #[serde(
+        rename = "@pak:typeDescription",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub type_description: Option<String>,
+
     /// The assigned value.
     #[serde(rename = "@pak:name", default)]
     pub name: String,
@@ -161,6 +189,34 @@ pub struct PackageAssignment {
     /// Whether this assignment is editable.
     #[serde(rename = "@pak:isEditable")]
     pub editable: bool,
+}
+
+/// Package extension alias and editor capabilities.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PackageExtensionAlias {
+    #[serde(rename = "@pak:name")]
+    pub name: String,
+
+    #[serde(rename = "@pak:isVisible")]
+    pub visible: bool,
+
+    #[serde(rename = "@pak:isEditable")]
+    pub editable: bool,
+}
+
+/// Translation settings advertised for a package.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PackageTranslation {
+    #[serde(rename = "@pak:relevance")]
+    pub relevance: String,
+
+    #[serde(rename = "@pak:relevanceDescription")]
+    pub relevance_description: String,
+
+    #[serde(rename = "@pak:isVisible")]
+    pub visible: bool,
 }
 
 /// Software-component and transport-layer assignments.
@@ -222,6 +278,23 @@ mod property_tests {
 
     const PACKAGE_XML: &[u8] =
         include_bytes!("../../../tests/fixtures/package-sadt-tools-core.xml");
+
+    #[test]
+    fn retains_switch_translation_alias_and_software_metadata() {
+        let original: PackageProperties = serde_xml_rs::from_reader(PACKAGE_XML).unwrap();
+        let mut wire = serde_json::to_value(original).unwrap();
+        wire["adtcore:packageRef"] = serde_json::json!({"@adtcore:name":"SADT_TOOLS_CORE"});
+        wire["pak:switch"] = serde_json::json!({"@adtcore:name":"DTINF_FW", "@adtcore:type":"SFSW/6S", "@adtcore:state":"off"});
+        wire["pak:extensionAlias"] = serde_json::json!({"@pak:name":"Z_ALIAS", "@pak:isVisible":true, "@pak:isEditable":false});
+        wire["pak:translation"] = serde_json::json!({"@pak:relevance":"TRANSL_NONE", "@pak:relevanceDescription":"No translation", "@pak:isVisible":true});
+        wire["pak:transport"]["pak:softwareComponent"]["@pak:type"] = serde_json::json!("S");
+        wire["pak:transport"]["pak:softwareComponent"]["@pak:typeDescription"] =
+            serde_json::json!("Netweaver Basis Component");
+        let properties: PackageProperties = serde_json::from_value(wire.clone()).unwrap();
+        let xml = String::from_utf8(properties.to_xml().unwrap()).unwrap();
+        let loaded: PackageProperties = serde_xml_rs::from_str(&xml).unwrap();
+        assert_eq!(serde_json::to_value(loaded).unwrap(), wire);
+    }
 
     #[test]
     fn complete_wire_payload_has_canonical_wire_round_trip_json() {

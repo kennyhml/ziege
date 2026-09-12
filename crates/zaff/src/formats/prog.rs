@@ -189,7 +189,7 @@ pub struct ProgramHeader {
 /// programType         program_type                         No field, fixed to "include"
 /// fixPointArithmetic  fix_point_arithmetic                 fix_point_arithmetic
 /// editLocked          locked_by_editor                     No implemented backing
-/// programStatus       source_object_status                 No implemented backing
+/// programStatus       source_object_status                 source_object_status
 /// startsUsingVariant  start_using_variant                  No implemented backing
 /// authorizationGroup  authorization_group.reference.name  No implemented backing
 /// application         authorization_group.application     No implemented backing
@@ -339,12 +339,15 @@ impl ProgramType {
 /// customerProductionProgram  customerProduction
 /// systemProgram              system
 /// testProgram                test
-/// unknown                    unknown
+/// unknown                    Attribute omitted when clearing
 /// ```
 ///
-/// Absent or empty ADT values also render as `unknown`. Unchanged values retain
-/// their original representation. Other ADT strings are rejected. Standalone
-/// Includes accept only `unknown`, with no corresponding ADT field.
+/// Absent, empty, or literal `unknown` ADT values render as `unknown`. Unchanged
+/// values retain their original representation. Other ADT strings are rejected. Standalone
+/// Includes use the same source status mapping.
+/// SADT_ABAP_SOURCE_MAIN_OBJECT has no mapping for the literal `unknown`. Clearing
+/// status must omit the attribute rather than sending a word to the internal
+/// one-character status field.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ProgramStatus {
     #[serde(rename = "sapProductionProgram")]
@@ -368,8 +371,10 @@ impl ProgramStatus {
             Some(SourceObjectStatus::CustomerProduction) => Ok(Self::CustomerProductionProgram),
             Some(SourceObjectStatus::System) => Ok(Self::SystemProgram),
             Some(SourceObjectStatus::Test) => Ok(Self::TestProgram),
-            None | Some(SourceObjectStatus::Unknown) => Ok(Self::Unknown),
-            Some(SourceObjectStatus::Other(value)) if value.is_empty() => Ok(Self::Unknown),
+            None => Ok(Self::Unknown),
+            Some(SourceObjectStatus::Other(value)) if value.is_empty() || value == "unknown" => {
+                Ok(Self::Unknown)
+            }
             Some(SourceObjectStatus::Other(value)) => Err(ProjectionError::InvalidAffField {
                 field: "generalInformation.programStatus",
                 message: format!("unsupported ADT source object status `{value}`"),
@@ -377,14 +382,14 @@ impl ProgramStatus {
         }
     }
 
-    const fn adt_value(self) -> zadt::SourceObjectStatus {
-        match self {
+    const fn adt_value(self) -> Option<zadt::SourceObjectStatus> {
+        Some(match self {
             Self::SapProductionProgram => zadt::SourceObjectStatus::SapStandardProduction,
             Self::CustomerProductionProgram => zadt::SourceObjectStatus::CustomerProduction,
             Self::SystemProgram => zadt::SourceObjectStatus::System,
             Self::TestProgram => zadt::SourceObjectStatus::Test,
-            Self::Unknown => zadt::SourceObjectStatus::Unknown,
-        }
+            Self::Unknown => return None,
+        })
     }
 
     const fn is_default(&self) -> bool {
@@ -446,7 +451,9 @@ pub(crate) fn merge_program_properties(
     let mut merged = original.clone();
     // AFF header.description      -> ADT description
     // AFF header.originalLanguage -> ADT master_language, with language-code conversion
-    merged.description = edited.header.description;
+    if edited.header.description != original.description.as_deref().unwrap_or_default() {
+        merged.description = Some(edited.header.description);
+    }
     merged.master_language =
         language_to_adt(&edited.header.original_language, "header.originalLanguage")?;
     // Within AFF generalInformation:
@@ -458,7 +465,7 @@ pub(crate) fn merge_program_properties(
     merged.fix_point_arithmetic = edited_general.fix_point_arithmetic;
     merged.locked_by_editor = edited_general.edit_locked;
     if edited_general.program_status != baseline_general.program_status {
-        merged.source_object_status = Some(edited_general.program_status.adt_value());
+        merged.source_object_status = edited_general.program_status.adt_value();
     }
     if edited_general.starts_using_variant != baseline_general.starts_using_variant {
         merged.start_using_variant = Some(edited_general.starts_using_variant);
@@ -531,6 +538,14 @@ pub(crate) fn merge_include_properties(
 
     let previous = ProjectedProgramProperties::from_include(original)?;
     let mut merged = original.clone();
+    if edited_general.program_status
+        != previous
+            .general_information
+            .unwrap_or_default()
+            .program_status
+    {
+        merged.source_object_status = edited_general.program_status.adt_value();
+    }
     // Preserve absent versus explicitly empty include descriptions on a no-op.
     if edited.header.description != previous.header.description {
         merged.description = Some(edited.header.description);
@@ -562,7 +577,7 @@ impl ProjectedProgramProperties {
         let document = Self {
             format_version: PROGRAM_FORMAT.version().to_owned(),
             header: ProgramHeader {
-                description: properties.description.clone(),
+                description: properties.description.clone().unwrap_or_default(),
                 original_language: language_from_adt(
                     &properties.master_language,
                     "header.originalLanguage",
@@ -588,6 +603,7 @@ impl ProjectedProgramProperties {
         let general = ProgramGeneralInformation {
             program_type: ProgramType::Include,
             fix_point_arithmetic: properties.fix_point_arithmetic,
+            program_status: ProgramStatus::from_adt(properties.source_object_status.as_ref())?,
             ..Default::default()
         };
         let document = Self {
@@ -617,9 +633,6 @@ fn validate_include_fields(
     general: &ProgramGeneralInformation,
     database: Option<&LogicalDatabase>,
 ) -> Result<(), ProjectionError> {
-    if !general.program_status.is_default() {
-        return Err(unsupported("generalInformation.programStatus"));
-    }
     if general.starts_using_variant {
         return Err(unsupported("generalInformation.startsUsingVariant"));
     }
@@ -678,6 +691,36 @@ mod tests {
             INCLUDE_XML,
         )
         .into_erased()
+    }
+
+    #[test]
+    fn live_include_status_and_missing_description_project_and_merge() {
+        let reference = crate::test_support::reference::<Include>(
+            "/LIME/COLLECTION_DELETE_I01",
+            "/sap/bc/adt/programs/includes/%2flime%2fcollection_delete_i01",
+        );
+        let obj = crate::test_support::properties(
+            &reference,
+            Include::MEDIA_TYPES[0],
+            "etag",
+            include_bytes!("../../../zadt/tests/fixtures/include-lime-collection-delete.xml"),
+        )
+        .into_erased();
+        let content = render(&obj).unwrap();
+        let mut edited: Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(edited["header"]["description"], "");
+        assert_eq!(
+            edited["generalInformation"]["programStatus"],
+            "sapProductionProgram"
+        );
+        assert_eq!(merge(&obj, &content).unwrap(), None);
+        edited["generalInformation"]["programStatus"] = "testProgram".into();
+        let payload = merge(&obj, &edited.to_string()).unwrap().unwrap();
+        assert_eq!(payload["@abapsource:sourceObjectStatus"], "test");
+        assert!(payload.get("@adtcore:description").is_none());
+        edited["generalInformation"]["programStatus"] = "unknown".into();
+        let payload = merge(&obj, &edited.to_string()).unwrap().unwrap();
+        assert!(payload.get("@abapsource:sourceObjectStatus").is_none());
     }
 
     #[test]
@@ -787,7 +830,7 @@ mod tests {
         .unwrap();
         let original = original.typed_properties::<Program>().unwrap();
 
-        assert_eq!(merged.description, "Updated program");
+        assert_eq!(merged.description.as_deref(), Some("Updated program"));
         assert_eq!(merged.master_language, "4G");
         assert_eq!(merged.program_type, "modulePool");
         assert!(!merged.fix_point_arithmetic);
@@ -840,7 +883,7 @@ mod tests {
         )
         .unwrap();
         let mut expected = original.typed_properties::<Program>().unwrap().clone();
-        expected.description = edited.header.description;
+        expected.description = Some(edited.header.description);
         assert_eq!(merged, expected);
     }
 
@@ -886,10 +929,6 @@ mod tests {
         let original = include();
         let document: Value = serde_json::from_str(&render(&original).unwrap()).unwrap();
         for (field, value) in [
-            (
-                "programStatus",
-                serde_json::json!("customerProductionProgram"),
-            ),
             ("startsUsingVariant", serde_json::json!(true)),
             ("authorizationGroup", serde_json::json!("ZGROUP")),
             ("application", serde_json::json!("*")),
@@ -974,10 +1013,7 @@ mod tests {
                 .remove(field);
         }
         let cleared = merge_program_properties(&merged, &cleared.to_string()).unwrap();
-        assert_eq!(
-            cleared.source_object_status,
-            Some(zadt::SourceObjectStatus::Unknown)
-        );
+        assert_eq!(cleared.source_object_status, None);
         assert_eq!(cleared.start_using_variant, Some(false));
         assert_eq!(cleared.logical_database, None);
         let group = cleared.authorization_group.unwrap();
@@ -1086,13 +1122,11 @@ mod tests {
                     .unwrap();
             assert_eq!(
                 merged.source_object_status,
-                Some(
-                    changed
-                        .general_information
-                        .unwrap()
-                        .program_status
-                        .adt_value()
-                )
+                changed
+                    .general_information
+                    .unwrap()
+                    .program_status
+                    .adt_value()
             );
         }
         original.source_object_status = Some("futureStatus".into());

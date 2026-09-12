@@ -199,7 +199,7 @@ async fn package_properties_update_returns_none_for_an_empty_response() {
     let package = reference.query().execute(&client).await.unwrap();
     let original_description = package.properties().description.clone();
     let mut updated_properties = package.properties().clone();
-    updated_properties.description = "Updated package description".to_owned();
+    updated_properties.description = Some("Updated package description".to_owned());
     let session = client.create_user_session();
     let object_lock = reference
         .lock(AccessMode::Modify)

@@ -125,7 +125,9 @@ fn merge(
     //   AFF header.description       -> ADT description
     //   AFF fixPointArithmetic       -> ADT fix_point_arithmetic
     //   AFF header.originalLanguage  -> ADT master_language (converted above)
-    merged.description = edited.header.description;
+    if edited.header.description != original.description.as_deref().unwrap_or_default() {
+        merged.description = Some(edited.header.description);
+    }
     merged.fix_point_arithmetic = edited.fix_point_arithmetic;
     merged.master_language = language;
 
@@ -203,6 +205,9 @@ fn merge(
 /// The `descriptions` block has no implemented ADT mapping. It is omitted from
 /// generated documents. Missing or empty blocks are accepted, but nonempty
 /// entries are rejected. See [`ClassDescriptions`] for the AFF field layout.
+/// The inspected class properties and object-structure responses do not contain
+/// these texts. `withAbapDocFromShortTexts` imports them into source comments,
+/// rather than supplying a structured description collection for this mapping.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, Validate)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[garde(allow_unvalidated)]
@@ -240,7 +245,12 @@ pub struct ProjectedClassProperties {
 /// header.abapLanguageVersion  abap_language_version
 /// ```
 ///
-/// Description text is copied directly. Original language is converted between
+/// `SADT_OBJECT` can omit an empty description, including for existing SAP classes.
+/// It renders as an empty AFF string and retains its absence on unchanged merges.
+/// `SADT_MAIN_OBJECT` emits named language versions such as `standard`. The mapping
+/// also accepts legacy codes and preserves the original spelling on a no-op.
+///
+/// Original language is converted between
 /// SAP codes in ADT and BCP47 tags in AFF, for example `EN` and `en`.
 /// Unsupported language codes or tags are rejected.
 ///
@@ -551,7 +561,7 @@ impl ProjectedClassProperties {
         let document = Self {
             format_version: CLASS_FORMAT.version().to_owned(),
             header: ClassHeader {
-                description: properties.description.clone(),
+                description: properties.description.clone().unwrap_or_default(),
                 original_language: language_from_adt(
                     &properties.master_language,
                     "header.originalLanguage",
@@ -781,7 +791,7 @@ mod tests {
                 edited.header.description = "Updated class".to_owned();
                 edited.header.abap_language_version = aff;
                 let mut expected = original.clone();
-                expected.description = edited.header.description.clone();
+                expected.description = Some(edited.header.description.clone());
                 if aff != baseline.header.abap_language_version {
                     expected.abap_language_version = Some(adt);
                 }
@@ -868,7 +878,7 @@ mod tests {
             .unwrap();
         let merged: ClassProperties = serde_json::from_value(merged).unwrap();
 
-        assert_eq!(merged.description, "Updated class");
+        assert_eq!(merged.description.as_deref(), Some("Updated class"));
         assert_eq!(merged.master_language, "6N");
         assert_eq!(
             merged.abap_language_version,
